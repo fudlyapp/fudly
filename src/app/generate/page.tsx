@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { createSupabaseBrowser } from "@/lib/supabase/client";
 
 type PlanJSON = {
   summary: {
@@ -31,6 +32,11 @@ type ApiResponse =
   | { error: any };
 
 export default function GeneratorPage() {
+  const supabase = useMemo(() => createSupabaseBrowser(), []);
+
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
   const [people, setPeople] = useState("");
   const [budget, setBudget] = useState("");
 
@@ -47,6 +53,28 @@ export default function GeneratorPage() {
   const [textResult, setTextResult] = useState<string>("");
   const [plan, setPlan] = useState<PlanJSON | null>(null);
 
+  const [saveLoading, setSaveLoading] = useState(false);
+  const [saveMsg, setSaveMsg] = useState<string>("");
+
+  // uložíme si posledné vstupy, aby sa presne toto uložilo do DB
+  const [lastInput, setLastInput] = useState<any | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      setAuthLoading(true);
+      const { data } = await supabase.auth.getUser();
+      setUserEmail(data.user?.email ?? null);
+      setAuthLoading(false);
+    })();
+
+    const { data: sub } = supabase.auth.onAuthStateChange(async () => {
+      const { data } = await supabase.auth.getUser();
+      setUserEmail(data.user?.email ?? null);
+    });
+
+    return () => sub.subscription.unsubscribe();
+  }, [supabase]);
+
   const isValid = useMemo(() => {
     const p = Number(people);
     const b = Number(budget);
@@ -60,22 +88,27 @@ export default function GeneratorPage() {
     setLoading(true);
     setTextResult("");
     setPlan(null);
+    setSaveMsg("");
+
+    const inputPayload = {
+      people,
+      budget,
+      intolerances,
+      avoid,
+      have,
+      favorites,
+      style,
+      shoppingTrips,
+      repeatDays,
+    };
+
+    setLastInput(inputPayload);
 
     try {
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          people,
-          budget,
-          intolerances,
-          avoid,
-          have,
-          favorites,
-          style,
-          shoppingTrips,
-          repeatDays,
-        }),
+        body: JSON.stringify(inputPayload),
       });
 
       const data: ApiResponse = await res.json();
@@ -99,15 +132,83 @@ export default function GeneratorPage() {
     }
   }
 
+  async function logout() {
+    await supabase.auth.signOut();
+    window.location.href = "/login";
+  }
+
+  async function savePlan() {
+    setSaveMsg("");
+
+    const { data: u } = await supabase.auth.getUser();
+    const user = u.user;
+
+    if (!user) {
+      setSaveMsg("Najprv sa prihlás (inak nemám kam uložiť plán).");
+      window.location.href = "/login";
+      return;
+    }
+    if (!plan || !lastInput) {
+      setSaveMsg("Najprv vygeneruj jedálniček.");
+      return;
+    }
+
+    setSaveLoading(true);
+    try {
+      const { error } = await supabase.from("meal_plans").insert({
+        user_id: user.id,
+        input: lastInput,
+        plan: plan,
+      });
+
+      if (error) {
+        setSaveMsg("Chyba pri ukladaní: " + error.message);
+      } else {
+        setSaveMsg("✅ Uložené do profilu!");
+      }
+    } catch (e: any) {
+      setSaveMsg("Chyba pri ukladaní: " + (e?.message ?? "unknown"));
+    } finally {
+      setSaveLoading(false);
+    }
+  }
+
   return (
     <main className="min-h-screen bg-black text-white p-6">
       <div className="mx-auto w-full max-w-5xl">
-        <header className="mb-8">
-          <div className="text-sm text-gray-400">Fudly</div>
-          <h1 className="mt-2 text-3xl font-bold">Týždenný jedálniček + nákupy</h1>
-          <p className="mt-2 text-gray-300">
-            Šetri čas (batch cooking) a peniaze (menej nákupov, menej odpadu).
-          </p>
+        <header className="mb-8 flex items-start justify-between gap-4">
+          <div>
+            <div className="text-sm text-gray-400">Fudly</div>
+            <h1 className="mt-2 text-3xl font-bold">Týždenný jedálniček + nákupy</h1>
+            <p className="mt-2 text-gray-300">
+              Šetri čas (batch cooking) a peniaze (menej nákupov, menej odpadu).
+            </p>
+          </div>
+
+          <div className="text-right">
+            {authLoading ? (
+              <div className="text-sm text-gray-400">Kontrolujem prihlásenie…</div>
+            ) : userEmail ? (
+              <div className="space-y-2">
+                <div className="text-sm text-gray-300">
+                  Prihlásený ako <span className="text-white font-semibold">{userEmail}</span>
+                </div>
+                <button
+                  onClick={logout}
+                  className="rounded-xl border border-gray-700 bg-black px-4 py-2 text-sm hover:bg-zinc-900"
+                >
+                  Odhlásiť sa
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => (window.location.href = "/login")}
+                className="rounded-xl bg-white px-4 py-2 text-sm text-black font-semibold hover:bg-gray-200"
+              >
+                Prihlásiť sa
+              </button>
+            )}
+          </div>
         </header>
 
         <form
@@ -213,18 +314,34 @@ export default function GeneratorPage() {
             </Field>
           </div>
 
-          <div className="mt-6 flex items-center justify-between gap-4">
+          <div className="mt-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div className="text-sm text-gray-400">
               {isValid ? "✅ pripravené" : "Skontroluj: počet ľudí 1–12, budget 10–500"}
             </div>
 
-            <button
-              disabled={loading || !isValid}
-              className="rounded-xl bg-white px-5 py-3 text-black font-semibold hover:bg-gray-200 transition disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {loading ? "Generujem..." : "Vygenerovať"}
-            </button>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={savePlan}
+                disabled={saveLoading || !plan}
+                className="rounded-xl border border-gray-700 bg-black px-5 py-3 font-semibold hover:bg-zinc-900 transition disabled:cursor-not-allowed disabled:opacity-40"
+                title={!plan ? "Najprv vygeneruj jedálniček" : "Uložiť do profilu"}
+              >
+                {saveLoading ? "Ukladám..." : "Uložiť do profilu"}
+              </button>
+
+              <button
+                disabled={loading || !isValid}
+                className="rounded-xl bg-white px-5 py-3 text-black font-semibold hover:bg-gray-200 transition disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {loading ? "Generujem..." : "Vygenerovať"}
+              </button>
+            </div>
           </div>
+
+          {saveMsg ? (
+            <div className="mt-4 text-sm text-gray-200">{saveMsg}</div>
+          ) : null}
         </form>
 
         {/* Výstup */}
