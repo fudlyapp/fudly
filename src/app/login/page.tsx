@@ -29,7 +29,7 @@ export default function LoginPage() {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
 
-        setMessage("Prihlásenie OK ✅ (teraz môžeme pridať presmerovanie / profil).");
+        window.location.href = "/generate";
       }
     } catch (err: any) {
       setMessage(err?.message ?? "Nastala chyba.");
