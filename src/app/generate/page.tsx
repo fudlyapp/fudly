@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { createSupabaseBrowser } from "@/lib/supabase/client";
+import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
 type PlanJSON = {
   summary: {
@@ -32,7 +32,7 @@ type ApiResponse =
   | { error: any };
 
 export default function GeneratorPage() {
-  const supabase = useMemo(() => createSupabaseBrowser(), []);
+  const supabase = useMemo(() => createSupabaseBrowserClient(), []);
 
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
