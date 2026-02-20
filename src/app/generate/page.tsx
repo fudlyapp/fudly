@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
 type PlanJSON = {
@@ -31,46 +31,14 @@ type ApiResponse =
   | { kind: "text"; text: string }
   | { error: unknown };
 
-function isoDate(d: Date) {
-  return d.toISOString().split("T")[0];
+function getMondayISO(d = new Date()) {
+  const date = new Date(d);
+  const day = date.getDay(); // 0=Ne, 1=Po...
+  const diff = day === 0 ? -6 : 1 - day; // posun na pondelok
+  date.setDate(date.getDate() + diff);
+  date.setHours(0, 0, 0, 0);
+  return date.toISOString().slice(0, 10); // YYYY-MM-DD
 }
-
-function getWeekStartEnd(today = new Date()) {
-  // PON = 1 ... NE = 0
-  const day = today.getDay();
-  const diffToMonday = (day === 0 ? -6 : 1) - day;
-
-  const monday = new Date(today);
-  monday.setHours(0, 0, 0, 0);
-  monday.setDate(today.getDate() + diffToMonday);
-
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-
-  return { weekStart: isoDate(monday), weekEnd: isoDate(sunday) };
-}
-
-type InputPayload = {
-  people: string;
-  budget: string;
-  intolerances: string;
-  avoid: string;
-  have: string;
-  favorites: string;
-  style: string;
-  shoppingTrips: string;
-  repeatDays: string;
-};
-
-type DbRow = {
-  id?: string;
-  user_id: string;
-  week_start: string;
-  week_end: string;
-  input: InputPayload;
-  plan: PlanJSON;
-  updated_at?: string;
-};
 
 export default function GeneratorPage() {
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
@@ -97,80 +65,47 @@ export default function GeneratorPage() {
   const [saveLoading, setSaveLoading] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string>("");
 
-  const [lastInput, setLastInput] = useState<InputPayload | null>(null);
+  const [lastInput, setLastInput] = useState<Record<string, unknown> | null>(null);
 
+  // AUTH: robustné (nezasekne sa)
   useEffect(() => {
+    let mounted = true;
+
     (async () => {
-      setAuthLoading(true);
-      const { data } = await supabase.auth.getUser();
-      setUserEmail(data.user?.email ?? null);
-      setAuthLoading(false);
+      try {
+        setAuthLoading(true);
+        const { data, error } = await supabase.auth.getSession();
+        if (error) throw error;
+        if (!mounted) return;
+
+        const email = data.session?.user?.email ?? null;
+        setUserEmail(email);
+      } catch {
+        if (!mounted) return;
+        setUserEmail(null);
+      } finally {
+        if (!mounted) return;
+        setAuthLoading(false);
+      }
     })();
 
-    const { data: sub } = supabase.auth.onAuthStateChange(async () => {
-      const { data } = await supabase.auth.getUser();
-      setUserEmail(data.user?.email ?? null);
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      const email = session?.user?.email ?? null;
+      setUserEmail(email);
+      setAuthLoading(false);
     });
 
-    return () => sub.subscription.unsubscribe();
+    return () => {
+      mounted = false;
+      sub.subscription.unsubscribe();
+    };
   }, [supabase]);
 
   const isValid = useMemo(() => {
     const p = Number(people);
     const b = Number(budget);
-    return (
-      Number.isFinite(p) &&
-      p >= 1 &&
-      p <= 12 &&
-      Number.isFinite(b) &&
-      b >= 10 &&
-      b <= 500
-    );
+    return Number.isFinite(p) && p >= 1 && p <= 12 && Number.isFinite(b) && b >= 10 && b <= 500;
   }, [people, budget]);
-
-  async function logout() {
-    await supabase.auth.signOut();
-    window.location.href = "/login";
-  }
-
-  async function savePlanUpsert(planData: PlanJSON, input: InputPayload) {
-    const { data: u } = await supabase.auth.getUser();
-    const user = u.user;
-
-    if (!user) {
-      setSaveMsg("Najprv sa prihlás (inak nemám kam uložiť plán).");
-      window.location.href = "/login";
-      return;
-    }
-
-    const { weekStart, weekEnd } = getWeekStartEnd();
-    const row: DbRow = {
-      user_id: user.id,
-      week_start: weekStart,
-      week_end: weekEnd,
-      input,
-      plan: planData,
-    };
-
-    setSaveLoading(true);
-    setSaveMsg("");
-
-    try {
-      const { error } = await supabase
-        .from("meal_plans")
-        .upsert(row, { onConflict: "user_id,week_start" });
-
-      if (error) {
-        setSaveMsg("Chyba pri ukladaní: " + error.message);
-      } else {
-        setSaveMsg("✅ Uložené (ak už existoval plán pre tento týždeň, bol prepísaný).");
-      }
-    } catch (e) {
-      setSaveMsg("Chyba pri ukladaní.");
-    } finally {
-      setSaveLoading(false);
-    }
-  }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -181,7 +116,12 @@ export default function GeneratorPage() {
     setPlan(null);
     setSaveMsg("");
 
-    const inputPayload: InputPayload = {
+    const weekStart = getMondayISO();
+
+    const inputPayload = {
+      language: "sk",
+      weekStart,
+
       people,
       budget,
       intolerances,
@@ -205,24 +145,63 @@ export default function GeneratorPage() {
       const data: ApiResponse = await res.json();
 
       if (!res.ok) {
-        setTextResult(
-          `Chyba: ${JSON.stringify((data as { error?: unknown })?.error ?? data, null, 2)}`
-        );
+        setTextResult(`Chyba: ${JSON.stringify((data as any).error ?? data, null, 2)}`);
         return;
       }
 
       if ("kind" in data && data.kind === "json") {
         setPlan(data.plan);
-        await savePlanUpsert(data.plan, inputPayload); // auto-save + upsert
       } else if ("kind" in data && data.kind === "text") {
         setTextResult(data.text);
       } else {
         setTextResult("Chyba: neočakávaná odpoveď zo servera.");
       }
-    } catch (err) {
-      setTextResult("Chyba: nepodarilo sa získať odpoveď.");
+    } catch (err: any) {
+      setTextResult(`Chyba: ${err?.message ?? "neznáma chyba"}`);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function logout() {
+    await supabase.auth.signOut();
+    window.location.href = "/login";
+  }
+
+  async function savePlan() {
+    setSaveMsg("");
+
+    const { data: sess } = await supabase.auth.getSession();
+    const user = sess.session?.user;
+
+    if (!user) {
+      setSaveMsg("Najprv sa prihlás (inak nemám kam uložiť plán).");
+      window.location.href = "/login";
+      return;
+    }
+
+    if (!plan || !lastInput) {
+      setSaveMsg("Najprv vygeneruj jedálniček.");
+      return;
+    }
+
+    setSaveLoading(true);
+    try {
+      const { error } = await supabase.from("meal_plans").insert({
+        user_id: user.id,
+        input: lastInput,
+        plan: plan,
+      });
+
+      if (error) {
+        setSaveMsg("Chyba pri ukladaní: " + error.message);
+      } else {
+        setSaveMsg("✅ Uložené do profilu!");
+      }
+    } catch (e: any) {
+      setSaveMsg("Chyba pri ukladaní: " + (e?.message ?? "unknown"));
+    } finally {
+      setSaveLoading(false);
     }
   }
 
@@ -244,8 +223,7 @@ export default function GeneratorPage() {
             ) : userEmail ? (
               <div className="space-y-2">
                 <div className="text-sm text-gray-300">
-                  Prihlásený ako{" "}
-                  <span className="text-white font-semibold">{userEmail}</span>
+                  Prihlásený ako <span className="text-white font-semibold">{userEmail}</span>
                 </div>
                 <button
                   onClick={logout}
@@ -265,10 +243,7 @@ export default function GeneratorPage() {
           </div>
         </header>
 
-        <form
-          onSubmit={onSubmit}
-          className="rounded-2xl border border-gray-800 bg-zinc-900 p-6 shadow-lg"
-        >
+        <form onSubmit={onSubmit} className="rounded-2xl border border-gray-800 bg-zinc-900 p-6 shadow-lg">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             <Field label="Počet ľudí">
               <input
@@ -373,24 +348,29 @@ export default function GeneratorPage() {
               {isValid ? "✅ pripravené" : "Skontroluj: počet ľudí 1–12, budget 10–500"}
             </div>
 
-            <button
-              disabled={loading || !isValid}
-              className="rounded-xl bg-white px-5 py-3 text-black font-semibold hover:bg-gray-200 transition disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {loading ? "Generujem..." : "Vygenerovať"}
-            </button>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={savePlan}
+                disabled={saveLoading || !plan}
+                className="rounded-xl border border-gray-700 bg-black px-5 py-3 font-semibold hover:bg-zinc-900 transition disabled:cursor-not-allowed disabled:opacity-40"
+                title={!plan ? "Najprv vygeneruj jedálniček" : "Uložiť do profilu"}
+              >
+                {saveLoading ? "Ukladám..." : "Uložiť do profilu"}
+              </button>
+
+              <button
+                disabled={loading || !isValid}
+                className="rounded-xl bg-white px-5 py-3 text-black font-semibold hover:bg-gray-200 transition disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {loading ? "Generujem..." : "Vygenerovať"}
+              </button>
+            </div>
           </div>
 
-          {saveLoading ? (
-            <div className="mt-4 text-sm text-gray-300">Ukladám do profilu…</div>
-          ) : null}
-
-          {saveMsg ? (
-            <div className="mt-2 text-sm text-gray-200">{saveMsg}</div>
-          ) : null}
+          {saveMsg ? <div className="mt-4 text-sm text-gray-200">{saveMsg}</div> : null}
         </form>
 
-        {/* Výstup */}
         {plan && (
           <div className="mt-8 grid grid-cols-1 gap-6">
             <section className="rounded-2xl border border-gray-800 bg-zinc-900 p-6">
