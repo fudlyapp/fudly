@@ -14,7 +14,7 @@ type PlanJSON = {
   };
   days: Array<{
     day: number;
-    day_name?: string; // Pondelok...
+    day_name?: string;
     date?: string; // YYYY-MM-DD
     breakfast: string;
     lunch: string;
@@ -53,6 +53,18 @@ function mondayOfCurrentWeekISO() {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+async function withTimeout<T>(p: Promise<T>, ms: number) {
+  let t: any;
+  const timeout = new Promise<T>((_, reject) => {
+    t = setTimeout(() => reject(new Error("AUTH_TIMEOUT")), ms);
+  });
+  try {
+    return await Promise.race([p, timeout]);
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 export default function GeneratorPage() {
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
 
@@ -80,21 +92,34 @@ export default function GeneratorPage() {
 
   const [lastInput, setLastInput] = useState<any | null>(null);
 
+  // ✅ Stabilný auth-check: getSession() + onAuthStateChange(session)
   useEffect(() => {
+    let unsub: (() => void) | null = null;
+
     (async () => {
       setAuthLoading(true);
-      const { data } = await supabase.auth.getUser();
-      setUserEmail(data.user?.email ?? null);
-      setAuthLoading(false);
+      try {
+        const { data } = await withTimeout(supabase.auth.getSession(), 5000);
+        const email = data.session?.user?.email ?? null;
+        setUserEmail(email);
+      } catch (e: any) {
+        // Timeout/niečo zlyhalo → nenecháme UI visieť
+        setUserEmail(null);
+      } finally {
+        setAuthLoading(false);
+      }
+
+      const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+        setUserEmail(session?.user?.email ?? null);
+        setAuthLoading(false);
+      });
+
+      unsub = () => sub.subscription.unsubscribe();
     })();
 
-    const { data: sub } = supabase.auth.onAuthStateChange(async () => {
-      const { data } = await supabase.auth.getUser();
-      setUserEmail(data.user?.email ?? null);
-      setAuthLoading(false);
-    });
-
-    return () => sub.subscription.unsubscribe();
+    return () => {
+      if (unsub) unsub();
+    };
   }, [supabase]);
 
   const isValid = useMemo(() => {
@@ -144,13 +169,9 @@ export default function GeneratorPage() {
         return;
       }
 
-      if ("kind" in data && data.kind === "json") {
-        setPlan(data.plan);
-      } else if ("kind" in data && data.kind === "text") {
-        setTextResult(data.text);
-      } else {
-        setTextResult("Chyba: neočakávaná odpoveď zo servera.");
-      }
+      if ("kind" in data && data.kind === "json") setPlan(data.plan);
+      else if ("kind" in data && data.kind === "text") setTextResult(data.text);
+      else setTextResult("Chyba: neočakávaná odpoveď zo servera.");
     } catch (err: any) {
       setTextResult(`Chyba: ${err?.message ?? "neznáma chyba"}`);
     } finally {
@@ -166,8 +187,8 @@ export default function GeneratorPage() {
   async function savePlan() {
     setSaveMsg("");
 
-    const { data: u } = await supabase.auth.getUser();
-    const user = u.user;
+    const { data: sess } = await supabase.auth.getSession();
+    const user = sess.session?.user;
 
     if (!user) {
       setSaveMsg("Najprv sa prihlás (inak nemám kam uložiť plán).");
@@ -181,7 +202,7 @@ export default function GeneratorPage() {
 
     const weekStart = lastInput?.weekStart;
     if (!weekStart) {
-      setSaveMsg("Chýba dátum týždňa (week_start). Skús vygenerovať ešte raz.");
+      setSaveMsg("Chýba týždeň (week_start). Skús vygenerovať ešte raz.");
       return;
     }
 
@@ -192,19 +213,16 @@ export default function GeneratorPage() {
           user_id: user.id,
           week_start: weekStart,
           input: lastInput,
-          plan: plan, // aktuálny
-          plan_generated: plan, // pôvodný (nákupy)
+          plan: plan,
+          plan_generated: plan,
           is_edited: false,
           edited_at: null,
         },
         { onConflict: "user_id,week_start" }
       );
 
-      if (error) {
-        setSaveMsg("Chyba pri ukladaní: " + error.message);
-      } else {
-        setSaveMsg("✅ Uložené do profilu!");
-      }
+      if (error) setSaveMsg("Chyba pri ukladaní: " + error.message);
+      else setSaveMsg("✅ Uložené do profilu!");
     } catch (e: any) {
       setSaveMsg("Chyba pri ukladaní: " + (e?.message ?? "unknown"));
     } finally {
@@ -386,38 +404,8 @@ export default function GeneratorPage() {
           {saveMsg ? <div className="mt-4 text-sm text-gray-200">{saveMsg}</div> : null}
         </form>
 
-        {/* Výstup */}
         {plan && (
           <div className="mt-8 grid grid-cols-1 gap-6">
-            <section className="rounded-2xl border border-gray-800 bg-zinc-900 p-6">
-              <h2 className="text-xl font-semibold">Prehľad</h2>
-              <div className="mt-3 grid gap-2 text-sm text-gray-200 md:grid-cols-3">
-                <div className="rounded-xl bg-black p-3">
-                  <div className="text-gray-400">Odhad ceny</div>
-                  <div className="text-lg font-semibold">{plan.summary.estimated_total_cost_eur} €</div>
-                </div>
-                <div className="rounded-xl bg-black p-3">
-                  <div className="text-gray-400">Nákupy / týždeň</div>
-                  <div className="text-lg font-semibold">{plan.summary.shopping_trips_per_week}×</div>
-                </div>
-                <div className="rounded-xl bg-black p-3">
-                  <div className="text-gray-400">Opakovanie jedál</div>
-                  <div className="text-lg font-semibold">{plan.summary.repeat_days_max} dni</div>
-                </div>
-              </div>
-
-              {plan.summary.savings_tips?.length ? (
-                <div className="mt-4">
-                  <div className="text-sm text-gray-400">Tipy na úsporu</div>
-                  <ul className="mt-2 list-disc pl-5 text-sm text-gray-200">
-                    {plan.summary.savings_tips.map((t, i) => (
-                      <li key={i}>{t}</li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
-            </section>
-
             <section className="rounded-2xl border border-gray-800 bg-zinc-900 p-6">
               <h2 className="text-xl font-semibold">Týždenný jedálniček</h2>
 
@@ -451,33 +439,6 @@ export default function GeneratorPage() {
                     })}
                   </tbody>
                 </table>
-              </div>
-            </section>
-
-            <section className="rounded-2xl border border-gray-800 bg-zinc-900 p-6">
-              <h2 className="text-xl font-semibold">Nákupy</h2>
-              <p className="mt-2 text-sm text-gray-400">
-                Poznámka: tento zoznam je z vygenerovaného plánu (ak neskôr jedlá ručne upravíš, nemusí sedieť).
-              </p>
-
-              <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
-                {plan.shopping.map((trip) => (
-                  <div key={trip.trip} className="rounded-2xl border border-gray-800 bg-black p-4">
-                    <div className="flex items-baseline justify-between">
-                      <div className="text-lg font-semibold">Nákup {trip.trip}</div>
-                      <div className="text-xs text-gray-400">dni {trip.covers_days}</div>
-                    </div>
-
-                    <ul className="mt-3 space-y-2 text-sm">
-                      {trip.items.map((it, idx) => (
-                        <li key={idx} className="flex items-start justify-between gap-3">
-                          <span className="text-gray-200">{it.name}</span>
-                          <span className="text-gray-400">{it.quantity}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ))}
               </div>
             </section>
           </div>
