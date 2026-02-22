@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 
 type Body = {
+  weekStart?: string;      // YYYY-MM-DD (pondelok)
+  language?: string;       // "sk" (do budúcna i18n)
+
   people: string;
   budget: string;
 
@@ -12,9 +15,6 @@ type Body = {
   style?: string;
   shoppingTrips?: string;
   repeatDays?: string;
-
-  weekStart?: string; // YYYY-MM-DD (pondelok)
-  language?: string;  // "sk"
 };
 
 function extractText(data: any): string {
@@ -57,10 +57,6 @@ function safeParseJSON(text: string): any | null {
   }
 }
 
-function isISODate(s?: string) {
-  return !!s && /^\d{4}-\d{2}-\d{2}$/.test(s);
-}
-
 function addDaysISO(iso: string, add: number) {
   const d = new Date(iso + "T00:00:00");
   d.setDate(d.getDate() + add);
@@ -70,16 +66,26 @@ function addDaysISO(iso: string, add: number) {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-function mondayOfWeekISOFromToday() {
-  const now = new Date();
-  const day = now.getDay(); // 0=ned, 1=pon...
-  const diffToMonday = (day + 6) % 7;
-  const monday = new Date(now);
-  monday.setDate(now.getDate() - diffToMonday);
-  const yyyy = monday.getFullYear();
-  const mm = String(monday.getMonth() + 1).padStart(2, "0");
-  const dd = String(monday.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
+const DAY_NAMES_SK = ["Pondelok", "Utorok", "Streda", "Štvrtok", "Piatok", "Sobota", "Nedeľa"];
+
+function styleHintFromValue(style: string) {
+  switch (style) {
+    case "rychle":
+      return "Uprednostni veľmi rýchle jedlá (max 20–30 min).";
+    case "vyvazene":
+      return "Uprednostni vyvážené jedlá (bielkoviny, zelenina, prílohy), stále rozumná cena.";
+    case "vegetarianske":
+      return "Vegetariánske: bez mäsa a rýb (vajcia a mliečne OK).";
+    case "tradicne":
+      return "Tradičné: domáca poctivá strava (klasické slovenské/európske jedlá).";
+    case "exoticke":
+      return "Exotické: inšpirácie Ázia/Mexiko/fusion, bežné suroviny z obchodu.";
+    case "fit":
+      return "Fit: viac bielkovín, viac zeleniny, menej cukru, striedme porcie.";
+    case "lacné":
+    default:
+      return "Uprednostni čo najlacnejšie jedlá z bežných surovín.";
+  }
 }
 
 export async function POST(req: Request) {
@@ -88,12 +94,11 @@ export async function POST(req: Request) {
 
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
-      return NextResponse.json({ error: "Chýba OPENAI_API_KEY v env" }, { status: 500 });
+      return NextResponse.json({ error: "Chýba OPENAI_API_KEY v .env.local" }, { status: 500 });
     }
 
     const people = body.people?.trim() || "1";
     const budget = body.budget?.trim() || "0";
-
     const intolerances = (body.intolerances || "").trim();
     const avoid = (body.avoid || "").trim();
     const have = (body.have || "").trim();
@@ -103,27 +108,25 @@ export async function POST(req: Request) {
     const shoppingTrips = Math.min(4, Math.max(1, Number(body.shoppingTrips || 2)));
     const repeatDays = Math.min(3, Math.max(1, Number(body.repeatDays || 2)));
 
-    const weekStart = isISODate(body.weekStart) ? body.weekStart! : mondayOfWeekISOFromToday();
+    const weekStart = (body.weekStart || "").trim(); // YYYY-MM-DD pondelok
+    const lang = (body.language || "sk").trim().toLowerCase();
 
-    const styleHint =
-      style === "rychle"
-        ? "Uprednostni veľmi rýchle jedlá (max 20–30 min)."
-        : style === "vyvazene"
-        ? "Uprednostni vyvážené jedlá (bielkoviny, zelenina, prílohy), stále však lacné."
-        : "Uprednostni čo najlacnejšie jedlá z bežných surovín.";
+    const styleHint = styleHintFromValue(style);
 
-    const d1 = weekStart;
-    const d2 = addDaysISO(weekStart, 1);
-    const d3 = addDaysISO(weekStart, 2);
-    const d4 = addDaysISO(weekStart, 3);
-    const d5 = addDaysISO(weekStart, 4);
-    const d6 = addDaysISO(weekStart, 5);
-    const d7 = addDaysISO(weekStart, 6);
+    // dátumy + názvy dní
+    const datesBlock =
+      weekStart && /^\d{4}-\d{2}-\d{2}$/.test(weekStart)
+        ? DAY_NAMES_SK.map((name, i) => `- day ${i + 1}: ${name}, date: ${addDaysISO(weekStart, i)}`).join("\n")
+        : "";
+
+    const languageRule =
+      lang === "sk"
+        ? "Všetko píš po slovensky."
+        : "Language: use the requested language.";
 
     const prompt = `
-Si plánovač jedálničkov pre Slovensko.
-
-Vráť IBA validný JSON (žiadny iný text). Všetko píš po slovensky.
+Vráť IBA validný JSON (žiadny iný text).
+${languageRule}
 
 Vytvor 7-dňový jedálniček (raňajky/obed/večera) pre domácnosť.
 Cieľ: šetriť čas aj peniaze.
@@ -133,7 +136,6 @@ Parametre:
 - weekly_budget_eur: ${budget}
 - shopping_trips_per_week: ${shoppingTrips}
 - repeat_days_max: ${repeatDays}
-- week_start_monday: ${weekStart}
 
 TVRDÉ obmedzenie:
 - forbidden_ingredients (nesmú byť použité): ${intolerances || "none"}
@@ -146,26 +148,17 @@ Preferencie:
 Štýl:
 - ${styleHint}
 
+Týždeň (ak je zadaný):
+${datesBlock || "- (no dates provided)"}
+
 Pravidlá:
 - Nadväzuj jedlá (batch cooking), aby človek nevaril 3× denne každý deň.
 - Opakuj suroviny naprieč dňami (minimalizuj odpad).
 - Rozdeľ nákup do ${shoppingTrips} nákupov podľa dní.
-- Názvy jedál a ingrediencií píš po slovensky.
-- Daj realistické množstvá.
-
-Použi tieto dátumy a názvy dní:
-1 = Pondelok, date="${d1}"
-2 = Utorok,   date="${d2}"
-3 = Streda,   date="${d3}"
-4 = Štvrtok,  date="${d4}"
-5 = Piatok,   date="${d5}"
-6 = Sobota,   date="${d6}"
-7 = Nedeľa,   date="${d7}"
-
-Dôležité:
-- V "days" nech sú jedlá IBA text (string).
-- Recepty daj zvlášť do "recipes" (mapa), kľúče presne: "d1_breakfast", "d1_lunch", "d1_dinner" ... až "d7_dinner".
-- Recepty majú byť stručné, ale plnohodnotné: čas, porcie, ingrediencie, kroky.
+- Uvádzaj názvy jedál prirodzene po slovensky.
+- V "days" doplň aj:
+  - day_name (Pondelok..Nedeľa)
+  - date v ISO formáte YYYY-MM-DD (pondelok = week_start)
 
 JSON schéma (dodrž presne):
 {
@@ -180,7 +173,7 @@ JSON schéma (dodrž presne):
   "days": [
     {
       "day": 1,
-      "day_name": "Pondelok",
+      "day_name": string,
       "date": "YYYY-MM-DD",
       "breakfast": string,
       "lunch": string,
@@ -211,7 +204,12 @@ JSON schéma (dodrž presne):
 Počet položiek:
 - days musí mať presne 7 dní (day 1..7)
 - shopping musí mať presne ${shoppingTrips} nákupov (trip 1..${shoppingTrips})
-- recipes musí obsahovať 21 receptov (7 dní × 3 jedlá), pre všetky kľúče d1..d7 a breakfast/lunch/dinner
+
+Recepty:
+- Vygeneruj recepty aspoň pre lunch a dinner (raňajky môžu byť jednoduché).
+- Kľúče receptov: d{day}_{meal}, kde meal je breakfast | lunch | dinner.
+
+Daj realistické quantity (napr. "1 kg", "10 ks", "500 g", "2 bal").
 `;
 
     const r = await fetch("https://api.openai.com/v1/responses", {

@@ -66,7 +66,6 @@ function addDaysISO(iso: string, add: number) {
 }
 
 function mondayOfWeekISO(date: Date) {
-  // local timezone (Bratislava on your machine)
   const d = new Date(date);
   const day = d.getDay(); // 0=Sun..6=Sat
   const diffToMonday = (day + 6) % 7;
@@ -76,18 +75,14 @@ function mondayOfWeekISO(date: Date) {
 
 function buildWeekOptions() {
   const today = new Date();
-  const day = today.getDay(); // 0 Sun, 1 Mon ...
+  const day = today.getDay();
   const thisMonday = mondayOfWeekISO(today);
   const nextMonday = addDaysISO(thisMonday, 7);
-
-  // pravidlo:
-  // - ak je dnes pondelok: môžeš generovať "tento" aj "budúci"
-  // - inak: iba "budúci"
   const allowThisWeek = day === 1;
 
   const options: Array<{
-    value: string; // week_start monday iso
-    label: string; // "DD.MM.YYYY – DD.MM.YYYY"
+    value: string;
+    label: string;
     kind: "this" | "next";
   }> = [];
 
@@ -108,6 +103,23 @@ function buildWeekOptions() {
   return options;
 }
 
+type StyleOption = {
+  value: string;
+  label: string;
+  emoji: string;
+  desc: string;
+};
+
+const STYLE_OPTIONS: StyleOption[] = [
+  { value: "lacné", label: "Lacné", emoji: "💰", desc: "čo najnižšia cena" },
+  { value: "rychle", label: "Rýchle", emoji: "⚡", desc: "max 20–30 min" },
+  { value: "vyvazene", label: "Vyvážené", emoji: "🥗", desc: "bielkoviny + zelenina" },
+  { value: "vegetarianske", label: "Vegetariánske", emoji: "🌱", desc: "bez mäsa" },
+  { value: "tradicne", label: "Tradičné", emoji: "🍲", desc: "domáca poctivá strava" },
+  { value: "exoticke", label: "Exotické", emoji: "🍜", desc: "ázia / mexiko / fusion" },
+  { value: "fit", label: "Fit", emoji: "🏋️", desc: "viac bielkovín, menej cukru" },
+];
+
 export default function GeneratorPage() {
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
 
@@ -125,7 +137,7 @@ export default function GeneratorPage() {
   const [have, setHave] = useState("");
   const [favorites, setFavorites] = useState("");
 
-  const [style, setStyle] = useState("lacné");
+  const [style, setStyle] = useState(STYLE_OPTIONS[0].value);
   const [shoppingTrips, setShoppingTrips] = useState("2");
   const [repeatDays, setRepeatDays] = useState("2");
 
@@ -178,7 +190,7 @@ export default function GeneratorPage() {
     setSaveMsg("");
 
     const inputPayload = {
-      weekStart,           // 🔥 kľúčové
+      weekStart,
       language: "sk",
       people,
       budget,
@@ -244,14 +256,13 @@ export default function GeneratorPage() {
 
     setSaveLoading(true);
     try {
-      // ✅ upsert podľa (user_id, week_start)
       const { error } = await supabase.from("meal_plans").upsert(
         {
           user_id: user.id,
-          week_start: weekStart, // 🔥 kľúčové
+          week_start: weekStart,
           input: lastInput,
-          plan_generated: plan,  // vždy “originál”
-          plan: null,            // čistý stav (edit sa robí v edit page)
+          plan_generated: plan,
+          plan: null,
           is_edited: false,
           edited_at: null,
         },
@@ -282,9 +293,7 @@ export default function GeneratorPage() {
           <div>
             <div className="text-sm text-gray-400">Fudly</div>
             <h1 className="mt-2 text-3xl font-bold">Týždenný jedálniček + nákupy</h1>
-            <p className="mt-2 text-gray-300">
-              Generovanie vždy na celý týždeň (pondelok → nedeľa).
-            </p>
+            <p className="mt-2 text-gray-300">Generovanie vždy na celý týždeň (pondelok → nedeľa).</p>
           </div>
 
           <div className="text-right">
@@ -365,9 +374,11 @@ export default function GeneratorPage() {
                 onChange={(e) => setStyle(e.target.value)}
                 className="w-full rounded-xl border border-gray-700 bg-black px-3 py-2 text-white"
               >
-                <option value="lacné">💰 Lacné</option>
-                <option value="rychle">⚡ Rýchle</option>
-                <option value="vyvazene">🥗 Vyvážené</option>
+                {STYLE_OPTIONS.map((s) => (
+                  <option key={s.value} value={s.value}>
+                    {s.emoji} {s.label} — {s.desc}
+                  </option>
+                ))}
               </select>
             </Field>
 
@@ -463,90 +474,12 @@ export default function GeneratorPage() {
           {saveMsg ? <div className="mt-4 text-sm text-gray-200">{saveMsg}</div> : null}
         </form>
 
-        {/* Výstup */}
         {plan && (
-          <div className="mt-8 grid grid-cols-1 gap-6">
-            <section className="rounded-2xl border border-gray-800 bg-zinc-900 p-6">
-              <h2 className="text-xl font-semibold">Prehľad</h2>
-              <div className="mt-3 grid gap-2 text-sm text-gray-200 md:grid-cols-4">
-                <div className="rounded-xl bg-black p-3">
-                  <div className="text-gray-400">Týždeň</div>
-                  <div className="text-lg font-semibold">{weekLabel}</div>
-                </div>
-                <div className="rounded-xl bg-black p-3">
-                  <div className="text-gray-400">Budget</div>
-                  <div className="text-lg font-semibold">{plan.summary.weekly_budget_eur} €</div>
-                </div>
-                <div className="rounded-xl bg-black p-3">
-                  <div className="text-gray-400">Odhad ceny</div>
-                  <div className="text-lg font-semibold">{plan.summary.estimated_total_cost_eur} €</div>
-                </div>
-                <div className="rounded-xl bg-black p-3">
-                  <div className="text-gray-400">Nákupy</div>
-                  <div className="text-lg font-semibold">{plan.summary.shopping_trips_per_week}×</div>
-                </div>
-              </div>
-            </section>
-
-            <section className="rounded-2xl border border-gray-800 bg-zinc-900 p-6">
-              <h2 className="text-xl font-semibold">Týždenný jedálniček</h2>
-
-              <div className="mt-4 overflow-auto rounded-xl border border-gray-800">
-                <table className="w-full text-left text-sm">
-                  <thead className="bg-black text-gray-300">
-                    <tr>
-                      <th className="px-3 py-2">Deň</th>
-                      <th className="px-3 py-2">Raňajky</th>
-                      <th className="px-3 py-2">Obed</th>
-                      <th className="px-3 py-2">Večera</th>
-                      <th className="px-3 py-2">Poznámka</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {plan.days.map((d) => (
-                      <tr key={d.day} className="border-t border-gray-800">
-                        <td className="px-3 py-2 font-semibold text-gray-200 whitespace-nowrap">
-                          {(d.day_name ?? `Deň ${d.day}`)}{" "}
-                          {d.date ? <span className="text-gray-400 font-normal">({formatDateSKFromISO(d.date)})</span> : null}
-                        </td>
-                        <td className="px-3 py-2 text-gray-200">{d.breakfast}</td>
-                        <td className="px-3 py-2 text-gray-200">{d.lunch}</td>
-                        <td className="px-3 py-2 text-gray-200">{d.dinner}</td>
-                        <td className="px-3 py-2 text-gray-400">{d.note}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-
-            <section className="rounded-2xl border border-gray-800 bg-zinc-900 p-6">
-              <h2 className="text-xl font-semibold">Nákupy</h2>
-
-              <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
-                {plan.shopping.map((trip) => (
-                  <div key={trip.trip} className="rounded-2xl border border-gray-800 bg-black p-4">
-                    <div className="flex items-baseline justify-between">
-                      <div className="text-lg font-semibold">Nákup {trip.trip}</div>
-                      <div className="text-xs text-gray-400">dni {trip.covers_days}</div>
-                    </div>
-
-                    <ul className="mt-3 space-y-2 text-sm">
-                      {trip.items.map((it, idx) => (
-                        <li key={idx} className="flex items-start justify-between gap-3">
-                          <span className="text-gray-200">{it.name}</span>
-                          <span className="text-gray-400">{it.quantity}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ))}
-              </div>
-
-              <div className="mt-4 text-xs text-gray-400">
-                Recepty sa zobrazujú v profile po kliknutí na jedlo (ak jedlo nebolo upravené).
-              </div>
-            </section>
+          <div className="mt-8 rounded-2xl border border-gray-800 bg-zinc-900 p-6">
+            <div className="text-lg font-semibold">Hotovo ✅</div>
+            <div className="mt-1 text-sm text-gray-300">
+              Plán je vygenerovaný. Ulož si ho do profilu.
+            </div>
           </div>
         )}
 
