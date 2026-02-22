@@ -4,14 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
-type Recipe = {
-  title: string;
-  time_min: number;
-  portions: number;
-  ingredients: Array<{ name: string; quantity: string }>;
-  steps: string[];
-};
-
 type PlanJSON = {
   summary: {
     people: number;
@@ -35,89 +27,47 @@ type PlanJSON = {
     covers_days: string;
     items: Array<{ name: string; quantity: string }>;
   }>;
-  recipes?: Record<string, Recipe>;
+  recipes?: Record<
+    string,
+    {
+      title: string;
+      time_min: number;
+      portions: number;
+      ingredients: Array<{ name: string; quantity: string }>;
+      steps: string[];
+    }
+  >;
 };
 
 type ApiResponse =
   | { kind: "json"; plan: PlanJSON }
   | { kind: "text"; text: string }
-  | { error: any };
+  | { error: unknown };
 
-function pad2(n: number) {
-  return String(n).padStart(2, "0");
-}
+type ProfileRow = {
+  user_id: string;
+  full_name: string | null;
 
-function formatDateSKFromISO(iso?: string) {
-  if (!iso) return "";
-  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!m) return iso;
-  const [, y, mm, dd] = m;
-  return `${dd}.${mm}.${y}`;
-}
+  people_default: number | null;
+  weekly_budget_eur_default: number | null;
+  shopping_trips_default: number | null;
+  repeat_days_default: number | null;
+  style_default: string | null;
 
-function toISODate(d: Date) {
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-}
-
-function addDaysISO(iso: string, add: number) {
-  const d = new Date(iso + "T00:00:00");
-  d.setDate(d.getDate() + add);
-  return toISODate(d);
-}
-
-function mondayOfWeekISO(date: Date) {
-  const d = new Date(date);
-  const day = d.getDay(); // 0=Sun..6=Sat
-  const diffToMonday = (day + 6) % 7;
-  d.setDate(d.getDate() - diffToMonday);
-  return toISODate(d);
-}
-
-function buildWeekOptions() {
-  const today = new Date();
-  const day = today.getDay();
-  const thisMonday = mondayOfWeekISO(today);
-  const nextMonday = addDaysISO(thisMonday, 7);
-  const allowThisWeek = day === 1;
-
-  const options: Array<{
-    value: string;
-    label: string;
-    kind: "this" | "next";
-  }> = [];
-
-  if (allowThisWeek) {
-    options.push({
-      value: thisMonday,
-      label: `${formatDateSKFromISO(thisMonday)} – ${formatDateSKFromISO(addDaysISO(thisMonday, 6))}`,
-      kind: "this",
-    });
-  }
-
-  options.push({
-    value: nextMonday,
-    label: `${formatDateSKFromISO(nextMonday)} – ${formatDateSKFromISO(addDaysISO(nextMonday, 6))}`,
-    kind: "next",
-  });
-
-  return options;
-}
-
-type StyleOption = {
-  value: string;
-  label: string;
-  emoji: string;
-  desc: string;
+  intolerances: string | null;
+  avoid: string | null;
+  have: string | null;
+  favorites: string | null;
 };
 
-const STYLE_OPTIONS: StyleOption[] = [
-  { value: "lacné", label: "Lacné", emoji: "💰", desc: "čo najnižšia cena" },
-  { value: "rychle", label: "Rýchle", emoji: "⚡", desc: "max 20–30 min" },
-  { value: "vyvazene", label: "Vyvážené", emoji: "🥗", desc: "bielkoviny + zelenina" },
-  { value: "vegetarianske", label: "Vegetariánske", emoji: "🌱", desc: "bez mäsa" },
-  { value: "tradicne", label: "Tradičné", emoji: "🍲", desc: "domáca poctivá strava" },
-  { value: "exoticke", label: "Exotické", emoji: "🍜", desc: "ázia / mexiko / fusion" },
-  { value: "fit", label: "Fit", emoji: "🏋️", desc: "viac bielkovín, menej cukru" },
+const STYLE_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: "lacné", label: "💰 Lacné" },
+  { value: "rychle", label: "⚡ Rýchle" },
+  { value: "vyvazene", label: "🥗 Vyvážené" },
+  { value: "vegetarianske", label: "🥬 Vegetariánske" },
+  { value: "tradicne", label: "🍲 Tradičné" },
+  { value: "exoticke", label: "🍜 Exotické" },
+  { value: "fit", label: "🏋️ Fit" },
 ];
 
 export default function GeneratorPage() {
@@ -125,9 +75,6 @@ export default function GeneratorPage() {
 
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
-
-  const [weekOptions] = useState(() => buildWeekOptions());
-  const [weekStart, setWeekStart] = useState<string>(weekOptions[0]?.value ?? "");
 
   const [people, setPeople] = useState("");
   const [budget, setBudget] = useState("");
@@ -137,7 +84,7 @@ export default function GeneratorPage() {
   const [have, setHave] = useState("");
   const [favorites, setFavorites] = useState("");
 
-  const [style, setStyle] = useState(STYLE_OPTIONS[0].value);
+  const [style, setStyle] = useState("lacné");
   const [shoppingTrips, setShoppingTrips] = useState("2");
   const [repeatDays, setRepeatDays] = useState("2");
 
@@ -148,7 +95,10 @@ export default function GeneratorPage() {
   const [saveLoading, setSaveLoading] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string>("");
 
-  const [lastInput, setLastInput] = useState<any | null>(null);
+  const [prefLoading, setPrefLoading] = useState(false);
+  const [prefMsg, setPrefMsg] = useState("");
+
+  const [lastInput, setLastInput] = useState<Record<string, unknown> | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -158,8 +108,9 @@ export default function GeneratorPage() {
       setAuthLoading(false);
     })();
 
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
-      setUserEmail(session?.user?.email ?? null);
+    const { data: sub } = supabase.auth.onAuthStateChange(async () => {
+      const { data } = await supabase.auth.getSession();
+      setUserEmail(data.session?.user?.email ?? null);
       setAuthLoading(false);
     });
 
@@ -169,16 +120,8 @@ export default function GeneratorPage() {
   const isValid = useMemo(() => {
     const p = Number(people);
     const b = Number(budget);
-    return (
-      !!weekStart &&
-      Number.isFinite(p) &&
-      p >= 1 &&
-      p <= 12 &&
-      Number.isFinite(b) &&
-      b >= 10 &&
-      b <= 500
-    );
-  }, [people, budget, weekStart]);
+    return Number.isFinite(p) && p >= 1 && p <= 12 && Number.isFinite(b) && b >= 10 && b <= 500;
+  }, [people, budget]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -190,8 +133,6 @@ export default function GeneratorPage() {
     setSaveMsg("");
 
     const inputPayload = {
-      weekStart,
-      language: "sk",
       people,
       budget,
       intolerances,
@@ -215,7 +156,8 @@ export default function GeneratorPage() {
       const data: ApiResponse = await res.json();
 
       if (!res.ok) {
-        setTextResult(`Chyba: ${JSON.stringify((data as any).error ?? data, null, 2)}`);
+        const err = (data as { error?: unknown }).error ?? data;
+        setTextResult(`Chyba: ${JSON.stringify(err, null, 2)}`);
         return;
       }
 
@@ -226,8 +168,9 @@ export default function GeneratorPage() {
       } else {
         setTextResult("Chyba: neočakávaná odpoveď zo servera.");
       }
-    } catch (err: any) {
-      setTextResult(`Chyba: ${err?.message ?? "neznáma chyba"}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "neznáma chyba";
+      setTextResult(`Chyba: ${msg}`);
     } finally {
       setLoading(false);
     }
@@ -241,8 +184,8 @@ export default function GeneratorPage() {
   async function savePlan() {
     setSaveMsg("");
 
-    const { data: s } = await supabase.auth.getSession();
-    const user = s.session?.user;
+    const { data: sess } = await supabase.auth.getSession();
+    const user = sess.session?.user;
 
     if (!user) {
       setSaveMsg("Najprv sa prihlás (inak nemám kam uložiť plán).");
@@ -254,6 +197,14 @@ export default function GeneratorPage() {
       return;
     }
 
+    // week_start sa u vás už počíta v appke (máte to v kóde), tu len “bezpečná” verzia:
+    // - ak má plan.days[0].date, zoberieme pondelok z prvého dňa
+    // - inak fallback: dnešný pondelok
+    const weekStart =
+      plan.days?.[0]?.date && typeof plan.days[0].date === "string"
+        ? plan.days[0].date
+        : new Date().toISOString().slice(0, 10);
+
     setSaveLoading(true);
     try {
       const { error } = await supabase.from("meal_plans").upsert(
@@ -261,10 +212,9 @@ export default function GeneratorPage() {
           user_id: user.id,
           week_start: weekStart,
           input: lastInput,
+          plan,
           plan_generated: plan,
-          plan: null,
           is_edited: false,
-          edited_at: null,
         },
         { onConflict: "user_id,week_start" }
       );
@@ -274,17 +224,103 @@ export default function GeneratorPage() {
       } else {
         setSaveMsg("✅ Uložené do profilu!");
       }
-    } catch (e: any) {
-      setSaveMsg("Chyba pri ukladaní: " + (e?.message ?? "unknown"));
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "unknown";
+      setSaveMsg("Chyba pri ukladaní: " + msg);
     } finally {
       setSaveLoading(false);
     }
   }
 
-  const weekLabel = useMemo(() => {
-    const found = weekOptions.find((o) => o.value === weekStart);
-    return found?.label ?? "";
-  }, [weekStart, weekOptions]);
+  async function loadSavedPreferences() {
+    setPrefMsg("");
+    setPrefLoading(true);
+
+    const { data: sess } = await supabase.auth.getSession();
+    const user = sess.session?.user;
+
+    if (!user) {
+      setPrefLoading(false);
+      window.location.href = "/login";
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .select(
+        "user_id, full_name, people_default, weekly_budget_eur_default, shopping_trips_default, repeat_days_default, style_default, intolerances, avoid, have, favorites"
+      )
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (error) {
+      setPrefMsg("Chyba pri načítaní: " + error.message);
+      setPrefLoading(false);
+      return;
+    }
+
+    const p = (data as ProfileRow) ?? null;
+    if (!p) {
+      setPrefMsg("Nemáš ešte uložené preferencie. Nastav si ich v Profile.");
+      setPrefLoading(false);
+      return;
+    }
+
+    if (p.people_default != null) setPeople(String(p.people_default));
+    if (p.weekly_budget_eur_default != null) setBudget(String(p.weekly_budget_eur_default));
+    if (p.shopping_trips_default != null) setShoppingTrips(String(p.shopping_trips_default));
+    if (p.repeat_days_default != null) setRepeatDays(String(p.repeat_days_default));
+    if (p.style_default) setStyle(p.style_default);
+
+    setIntolerances(p.intolerances ?? "");
+    setAvoid(p.avoid ?? "");
+    setHave(p.have ?? "");
+    setFavorites(p.favorites ?? "");
+
+    setPrefMsg("✅ Načítané z profilu.");
+    setPrefLoading(false);
+  }
+
+  async function savePreferencesAsDefault() {
+    setPrefMsg("");
+    setPrefLoading(true);
+
+    const { data: sess } = await supabase.auth.getSession();
+    const user = sess.session?.user;
+
+    if (!user) {
+      setPrefLoading(false);
+      window.location.href = "/login";
+      return;
+    }
+
+    const payload: ProfileRow = {
+      user_id: user.id,
+      full_name: null,
+
+      people_default: people.trim() ? Number(people) : null,
+      weekly_budget_eur_default: budget.trim() ? Number(budget) : null,
+      shopping_trips_default: shoppingTrips.trim() ? Number(shoppingTrips) : null,
+      repeat_days_default: repeatDays.trim() ? Number(repeatDays) : null,
+      style_default: style.trim() || null,
+
+      intolerances: intolerances.trim() || null,
+      avoid: avoid.trim() || null,
+      have: have.trim() || null,
+      favorites: favorites.trim() || null,
+    };
+
+    const { error } = await supabase.from("profiles").upsert(payload, { onConflict: "user_id" });
+
+    if (error) {
+      setPrefMsg("Chyba pri ukladaní: " + error.message);
+      setPrefLoading(false);
+      return;
+    }
+
+    setPrefMsg("✅ Uložené ako predvolené.");
+    setPrefLoading(false);
+  }
 
   return (
     <main className="min-h-screen bg-black text-white p-6">
@@ -293,7 +329,7 @@ export default function GeneratorPage() {
           <div>
             <div className="text-sm text-gray-400">Fudly</div>
             <h1 className="mt-2 text-3xl font-bold">Týždenný jedálniček + nákupy</h1>
-            <p className="mt-2 text-gray-300">Generovanie vždy na celý týždeň (pondelok → nedeľa).</p>
+            <p className="mt-2 text-gray-300">Vyplň raz, ulož do profilu, potom len klikneš „Načítať uložené“.</p>
           </div>
 
           <div className="text-right">
@@ -332,20 +368,6 @@ export default function GeneratorPage() {
 
         <form onSubmit={onSubmit} className="rounded-2xl border border-gray-800 bg-zinc-900 p-6 shadow-lg">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-            <Field label="Týždeň (pondelok–nedeľa)">
-              <select
-                value={weekStart}
-                onChange={(e) => setWeekStart(e.target.value)}
-                className="w-full rounded-xl border border-gray-700 bg-black px-3 py-2 text-white"
-              >
-                {weekOptions.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.kind === "this" ? "Tento" : "Budúci"}: {o.label}
-                  </option>
-                ))}
-              </select>
-            </Field>
-
             <Field label="Počet ľudí">
               <input
                 value={people}
@@ -365,23 +387,23 @@ export default function GeneratorPage() {
                 placeholder="80"
               />
             </Field>
-          </div>
 
-          <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
             <Field label="Preferovaný štýl">
               <select
                 value={style}
                 onChange={(e) => setStyle(e.target.value)}
                 className="w-full rounded-xl border border-gray-700 bg-black px-3 py-2 text-white"
               >
-                {STYLE_OPTIONS.map((s) => (
-                  <option key={s.value} value={s.value}>
-                    {s.emoji} {s.label} — {s.desc}
+                {STYLE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
                   </option>
                 ))}
               </select>
             </Field>
+          </div>
 
+          <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
             <Field label="Nákupy / týždeň">
               <select
                 value={shoppingTrips}
@@ -446,40 +468,114 @@ export default function GeneratorPage() {
             </Field>
           </div>
 
-          <div className="mt-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-            <div className="text-sm text-gray-400">
-              {isValid ? `✅ pripravené • týždeň: ${weekLabel}` : "Skontroluj: týždeň, počet ľudí 1–12, budget 10–500"}
+          <div className="mt-6 flex flex-col gap-4">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+              <div className="text-sm text-gray-400">
+                {isValid ? "✅ pripravené" : "Skontroluj: počet ľudí 1–12, budget 10–500"}
+              </div>
+
+              <div className="flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={loadSavedPreferences}
+                  disabled={prefLoading}
+                  className="rounded-xl border border-gray-700 bg-black px-5 py-3 font-semibold hover:bg-zinc-900 transition disabled:opacity-40"
+                >
+                  {prefLoading ? "Načítavam..." : "Načítať uložené"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={savePreferencesAsDefault}
+                  disabled={prefLoading}
+                  className="rounded-xl border border-gray-700 bg-black px-5 py-3 font-semibold hover:bg-zinc-900 transition disabled:opacity-40"
+                >
+                  {prefLoading ? "Ukladám..." : "Uložiť ako predvolené"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={savePlan}
+                  disabled={saveLoading || !plan}
+                  className="rounded-xl border border-gray-700 bg-black px-5 py-3 font-semibold hover:bg-zinc-900 transition disabled:cursor-not-allowed disabled:opacity-40"
+                  title={!plan ? "Najprv vygeneruj jedálniček" : "Uložiť do profilu"}
+                >
+                  {saveLoading ? "Ukladám..." : "Uložiť do profilu"}
+                </button>
+
+                <button
+                  disabled={loading || !isValid}
+                  className="rounded-xl bg-white px-5 py-3 text-black font-semibold hover:bg-gray-200 transition disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {loading ? "Generujem..." : "Vygenerovať"}
+                </button>
+              </div>
             </div>
 
-            <div className="flex gap-3">
-              <button
-                type="button"
-                onClick={savePlan}
-                disabled={saveLoading || !plan}
-                className="rounded-xl border border-gray-700 bg-black px-5 py-3 font-semibold hover:bg-zinc-900 transition disabled:cursor-not-allowed disabled:opacity-40"
-                title={!plan ? "Najprv vygeneruj jedálniček" : "Uložiť do profilu"}
-              >
-                {saveLoading ? "Ukladám..." : "Uložiť do profilu"}
-              </button>
-
-              <button
-                disabled={loading || !isValid}
-                className="rounded-xl bg-white px-5 py-3 text-black font-semibold hover:bg-gray-200 transition disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {loading ? "Generujem..." : "Vygenerovať"}
-              </button>
-            </div>
+            {(prefMsg || saveMsg) && (
+              <div className="text-sm text-gray-200">
+                {prefMsg ? <div>{prefMsg}</div> : null}
+                {saveMsg ? <div>{saveMsg}</div> : null}
+              </div>
+            )}
           </div>
-
-          {saveMsg ? <div className="mt-4 text-sm text-gray-200">{saveMsg}</div> : null}
         </form>
 
         {plan && (
-          <div className="mt-8 rounded-2xl border border-gray-800 bg-zinc-900 p-6">
-            <div className="text-lg font-semibold">Hotovo ✅</div>
-            <div className="mt-1 text-sm text-gray-300">
-              Plán je vygenerovaný. Ulož si ho do profilu.
-            </div>
+          <div className="mt-8 grid grid-cols-1 gap-6">
+            <section className="rounded-2xl border border-gray-800 bg-zinc-900 p-6">
+              <h2 className="text-xl font-semibold">Prehľad</h2>
+              <div className="mt-3 grid gap-2 text-sm text-gray-200 md:grid-cols-4">
+                <div className="rounded-xl bg-black p-3">
+                  <div className="text-gray-400">Budget</div>
+                  <div className="text-lg font-semibold">{plan.summary.weekly_budget_eur} €</div>
+                </div>
+                <div className="rounded-xl bg-black p-3">
+                  <div className="text-gray-400">Odhad ceny</div>
+                  <div className="text-lg font-semibold">{plan.summary.estimated_total_cost_eur} €</div>
+                </div>
+                <div className="rounded-xl bg-black p-3">
+                  <div className="text-gray-400">Nákupy / týždeň</div>
+                  <div className="text-lg font-semibold">{plan.summary.shopping_trips_per_week}×</div>
+                </div>
+                <div className="rounded-xl bg-black p-3">
+                  <div className="text-gray-400">Opakovanie jedál</div>
+                  <div className="text-lg font-semibold">{plan.summary.repeat_days_max} dni</div>
+                </div>
+              </div>
+            </section>
+
+            <section className="rounded-2xl border border-gray-800 bg-zinc-900 p-6">
+              <h2 className="text-xl font-semibold">Týždenný jedálniček</h2>
+
+              <div className="mt-4 overflow-auto rounded-xl border border-gray-800">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-black text-gray-300">
+                    <tr>
+                      <th className="px-3 py-2">Deň</th>
+                      <th className="px-3 py-2">Raňajky</th>
+                      <th className="px-3 py-2">Obed</th>
+                      <th className="px-3 py-2">Večera</th>
+                      <th className="px-3 py-2">Poznámka</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {plan.days.map((d) => (
+                      <tr key={d.day} className="border-t border-gray-800 align-top">
+                        <td className="px-3 py-2 font-semibold text-gray-200 whitespace-nowrap">
+                          {d.day_name ?? `Deň ${d.day}`}
+                          {d.date ? <span className="text-gray-400 font-normal"> ({d.date})</span> : null}
+                        </td>
+                        <td className="px-3 py-2 text-gray-200">{d.breakfast}</td>
+                        <td className="px-3 py-2 text-gray-200">{d.lunch}</td>
+                        <td className="px-3 py-2 text-gray-200">{d.dinner}</td>
+                        <td className="px-3 py-2 text-gray-400">{d.note}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
           </div>
         )}
 
