@@ -70,6 +70,18 @@ function addDaysISO(iso: string, add: number) {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+function mondayOfWeekISOFromToday() {
+  const now = new Date();
+  const day = now.getDay(); // 0=ned, 1=pon...
+  const diffToMonday = (day + 6) % 7;
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - diffToMonday);
+  const yyyy = monday.getFullYear();
+  const mm = String(monday.getMonth() + 1).padStart(2, "0");
+  const dd = String(monday.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as Body;
@@ -91,7 +103,7 @@ export async function POST(req: Request) {
     const shoppingTrips = Math.min(4, Math.max(1, Number(body.shoppingTrips || 2)));
     const repeatDays = Math.min(3, Math.max(1, Number(body.repeatDays || 2)));
 
-    const weekStart = isISODate(body.weekStart) ? body.weekStart! : addDaysISO(addDaysISO(new Date().toISOString().slice(0, 10), 0), 0);
+    const weekStart = isISODate(body.weekStart) ? body.weekStart! : mondayOfWeekISOFromToday();
 
     const styleHint =
       style === "rychle"
@@ -138,7 +150,7 @@ Pravidlá:
 - Nadväzuj jedlá (batch cooking), aby človek nevaril 3× denne každý deň.
 - Opakuj suroviny naprieč dňami (minimalizuj odpad).
 - Rozdeľ nákup do ${shoppingTrips} nákupov podľa dní.
-- Jedlá a názvy ingrediencií píš po slovensky.
+- Názvy jedál a ingrediencií píš po slovensky.
 - Daj realistické množstvá.
 
 Použi tieto dátumy a názvy dní:
@@ -149,6 +161,11 @@ Použi tieto dátumy a názvy dní:
 5 = Piatok,   date="${d5}"
 6 = Sobota,   date="${d6}"
 7 = Nedeľa,   date="${d7}"
+
+Dôležité:
+- V "days" nech sú jedlá IBA text (string).
+- Recepty daj zvlášť do "recipes" (mapa), kľúče presne: "d1_breakfast", "d1_lunch", "d1_dinner" ... až "d7_dinner".
+- Recepty majú byť stručné, ale plnohodnotné: čas, porcie, ingrediencie, kroky.
 
 JSON schéma (dodrž presne):
 {
@@ -179,12 +196,22 @@ JSON schéma (dodrž presne):
         { "name": string, "quantity": string }
       ]
     }
-  ]
+  ],
+  "recipes": {
+    "d1_breakfast": {
+      "title": string,
+      "time_min": number,
+      "portions": number,
+      "ingredients": [{ "name": string, "quantity": string }],
+      "steps": string[]
+    }
+  }
 }
 
 Počet položiek:
 - days musí mať presne 7 dní (day 1..7)
 - shopping musí mať presne ${shoppingTrips} nákupov (trip 1..${shoppingTrips})
+- recipes musí obsahovať 21 receptov (7 dní × 3 jedlá), pre všetky kľúče d1..d7 a breakfast/lunch/dinner
 `;
 
     const r = await fetch("https://api.openai.com/v1/responses", {
