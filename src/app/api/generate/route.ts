@@ -23,9 +23,17 @@ type Status = "inactive" | "trialing" | "active" | "past_due" | "canceled";
 
 function planLimits(plan: Plan) {
   if (plan === "plus") {
-    return { weekly_limit: 5, calories_enabled: true, allowed_styles: ["lacné", "rychle", "vyvazene", "vegetarianske", "fit", "tradicne", "exoticke"] };
+    return {
+      weekly_limit: 5,
+      calories_enabled: true,
+      allowed_styles: ["lacné", "rychle", "vyvazene", "vegetarianske", "fit", "tradicne", "exoticke"],
+    };
   }
-  return { weekly_limit: 3, calories_enabled: false, allowed_styles: ["lacné", "rychle", "vyvazene", "vegetarianske"] };
+  return {
+    weekly_limit: 3,
+    calories_enabled: false,
+    allowed_styles: ["lacné", "rychle", "vyvazene", "vegetarianske"],
+  };
 }
 
 function isActiveLike(status: Status, now: Date, currentPeriodEnd?: string | null, trialEnd?: string | null) {
@@ -93,30 +101,115 @@ const DAY_NAMES_SK = ["Pondelok", "Utorok", "Streda", "Štvrtok", "Piatok", "Sob
 const DAY_NAMES_EN = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const DAY_NAMES_UK = ["Понеділок", "Вівторок", "Середа", "Четвер", "П’ятниця", "Субота", "Неділя"];
 
-function styleHintFromValue(style: string, lang: string) {
-  const sk = (s: string) => s;
-  const en = (s: string) => s;
-  const uk = (s: string) => s;
+function styleHintFromValue(style: string, lang: "sk" | "en" | "uk") {
+  if (lang === "en") {
+    switch (style) {
+      case "rychle":
+        return "Prefer very quick meals (max 20–30 min).";
+      case "vyvazene":
+        return "Prefer balanced meals (protein + veggies + sides), still budget-friendly.";
+      case "vegetarianske":
+        return "Vegetarian: no meat or fish (eggs and dairy OK).";
+      case "tradicne":
+        return "Traditional home-style meals.";
+      case "exoticke":
+        return "Exotic inspirations (Asia/Mexico/fusion) using common store ingredients.";
+      case "fit":
+        return "Fit: more protein and veggies, less sugar.";
+      case "lacné":
+      default:
+        return "Prefer the cheapest meals from common ingredients.";
+    }
+  }
 
-  const t = lang === "en" ? en : lang === "uk" ? uk : sk;
+  if (lang === "uk") {
+    switch (style) {
+      case "rychle":
+        return "Надавай перевагу дуже швидким стравам (макс 20–30 хв).";
+      case "vyvazene":
+        return "Надавай перевагу збалансованим стравам (білок + овочі + гарнір), бюджетно.";
+      case "vegetarianske":
+        return "Вегетаріанське: без м’яса та риби (яйця й молочне можна).";
+      case "tradicne":
+        return "Традиційні домашні страви.";
+      case "exoticke":
+        return "Екзотика (Азія/Мексика/fusion) зі звичайних продуктів.";
+      case "fit":
+        return "Fit: більше білка й овочів, менше цукру.";
+      case "lacné":
+      default:
+        return "Надавай перевагу найдешевшим стравам зі звичайних продуктів.";
+    }
+  }
 
+  // sk
   switch (style) {
     case "rychle":
-      return t(lang === "en" ? "Prefer very quick meals (max 20–30 min)." : lang === "uk" ? "Надавай перевагу дуже швидким стравам (макс 20–30 хв)." : "Uprednostni veľmi rýchle jedlá (max 20–30 min).");
+      return "Uprednostni veľmi rýchle jedlá (max 20–30 min).";
     case "vyvazene":
-      return t(lang === "en" ? "Prefer balanced meals (protein + veggies + sides), still budget-friendly." : lang === "uk" ? "Надавай перевагу збалансованим стравам (білок + овочі + гарнір), бюджетно." : "Uprednostni vyvážené jedlá (bielkoviny, zelenina, prílohy), stále rozumná cena.");
+      return "Uprednostni vyvážené jedlá (bielkoviny, zelenina, prílohy), stále rozumná cena.";
     case "vegetarianske":
-      return t(lang === "en" ? "Vegetarian: no meat or fish (eggs and dairy OK)." : lang === "uk" ? "Вегетаріанське: без м’яса та риби (яйця й молочне можна)." : "Vegetariánske: bez mäsa a rýb (vajcia a mliečne OK).");
+      return "Vegetariánske: bez mäsa a rýb (vajcia a mliečne OK).";
     case "tradicne":
-      return t(lang === "en" ? "Traditional home-style meals." : lang === "uk" ? "Традиційні домашні страви." : "Tradičné: domáca poctivá strava (klasické slovenské/európske jedlá).");
+      return "Tradičné: domáca poctivá strava (klasické slovenské/európske jedlá).";
     case "exoticke":
-      return t(lang === "en" ? "Exotic inspirations (Asia/Mexico/fusion) using common store ingredients." : lang === "uk" ? "Екзотика (Азія/Мексика/fusion) зі звичайних продуктів." : "Exotické: inšpirácie Ázia/Mexiko/fusion, bežné suroviny z obchodu.");
+      return "Exotické: inšpirácie Ázia/Mexiko/fusion, bežné suroviny z obchodu.";
     case "fit":
-      return t(lang === "en" ? "Fit: more protein and veggies, less sugar." : lang === "uk" ? "Fit: більше білка й овочів, менше цукру." : "Fit: viac bielkovín, viac zeleniny, menej cukru, striedme porcie.");
+      return "Fit: viac bielkovín, viac zeleniny, menej cukru, striedme porcie.";
     case "lacné":
     default:
-      return t(lang === "en" ? "Prefer the cheapest meals from common ingredients." : lang === "uk" ? "Надавай перевагу найдешевшим стравам зі звичайних продуктів." : "Uprednostni čo najlacnejšie jedlá z bežných surovín.");
+      return "Uprednostni čo najlacnejšie jedlá z bežných surovín.";
   }
+}
+
+function coerceNumber(v: any, fallback: number) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function requiredRecipeKeys() {
+  const keys: string[] = [];
+  for (let d = 1; d <= 7; d++) keys.push(`d${d}_breakfast`, `d${d}_lunch`, `d${d}_dinner`);
+  return keys;
+}
+
+function normalizeRecipeKey(key: string) {
+  const k = (key || "").trim();
+  if (!k) return k;
+  const m1 = k.match(/^d(\d)(breakfast|lunch|dinner)$/i);
+  if (m1) return `d${m1[1]}_${m1[2].toLowerCase()}`;
+  const m2 = k.match(/^d(\d)[\-_](breakfast|lunch|dinner)$/i);
+  if (m2) return `d${m2[1]}_${m2[2].toLowerCase()}`;
+  return k;
+}
+
+function normalizePlan(plan: any) {
+  const next = JSON.parse(JSON.stringify(plan ?? {}));
+
+  // normalize recipes keys
+  if (next.recipes && typeof next.recipes === "object") {
+    const fixed: Record<string, any> = {};
+    for (const [k, v] of Object.entries(next.recipes)) {
+      fixed[normalizeRecipeKey(k)] = v;
+    }
+    next.recipes = fixed;
+  }
+
+  // clamp days
+  if (Array.isArray(next.days)) next.days = next.days.slice(0, 7);
+
+  return next;
+}
+
+function ensurePerPersonCalories(summary: any) {
+  const people = Math.max(1, coerceNumber(summary?.people, 1));
+  const avg = coerceNumber(summary?.avg_daily_kcal, 0);
+  const weekly = coerceNumber(summary?.weekly_total_kcal, 0);
+
+  // doplníme per-person
+  summary.avg_daily_kcal_per_person = people ? Math.round(avg / people) : null;
+  summary.weekly_total_kcal_per_person = people ? Math.round(weekly / people) : null;
+  return summary;
 }
 
 export async function POST(req: Request) {
@@ -124,16 +217,17 @@ export async function POST(req: Request) {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) return NextResponse.json({ error: "Chýba OPENAI_API_KEY" }, { status: 500 });
 
-    // auth (supabase access token)
+    // auth token z klienta
     const auth = req.headers.get("authorization") || "";
     const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
     if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const supabase = createSupabaseAdminClient();
+
     const { data: userRes, error: userErr } = await supabase.auth.getUser(token);
     if (userErr || !userRes?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    const userId = userRes.user.id;
 
+    const userId = userRes.user.id;
     const body = (await req.json()) as Body;
 
     const weekStart = (body.weekStart || "").trim();
@@ -141,8 +235,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Neplatný weekStart" }, { status: 400 });
     }
 
-    const lang = (body.language || "sk").trim().toLowerCase();
-    const language = lang === "en" ? "en" : lang === "uk" ? "uk" : "sk";
+    const langRaw = (body.language || "sk").trim().toLowerCase();
+    const lang: "sk" | "en" | "uk" = langRaw === "en" ? "en" : langRaw === "uk" ? "uk" : "sk";
 
     // subscription check
     const { data: subRow } = await supabase
@@ -151,38 +245,36 @@ export async function POST(req: Request) {
       .eq("user_id", userId)
       .maybeSingle();
 
-    const plan = (subRow?.plan as Plan) || "basic";
-    const status = (subRow?.status as Status) || "inactive";
-    const now = new Date();
+    const plan = ((subRow?.plan as Plan) || "basic") as Plan;
+    const status = ((subRow?.status as Status) || "inactive") as Status;
 
+    const now = new Date();
     const limits = planLimits(plan);
-    const canGenerate = isActiveLike(status, now, subRow?.current_period_end, subRow?.trial_end);
+    const canGenerate = isActiveLike(status, now, subRow?.current_period_end ?? null, subRow?.trial_end ?? null);
 
     if (!canGenerate) {
-      return NextResponse.json(
-        { error: { code: "SUBSCRIPTION_INACTIVE", plan, status } },
-        { status: 402 }
-      );
+      return NextResponse.json({ error: { code: "SUBSCRIPTION_INACTIVE", plan, status } }, { status: 402 });
     }
 
     // style gate
     const style = (body.style || "lacné").trim();
     if (!limits.allowed_styles.includes(style)) {
-      return NextResponse.json(
-        { error: { code: "STYLE_NOT_ALLOWED", style, plan } },
-        { status: 403 }
-      );
+      return NextResponse.json({ error: { code: "STYLE_NOT_ALLOWED", style, plan } }, { status: 403 });
     }
 
     // weekly usage gate
-    const { data: usage } = await supabase
+    const { data: usageRow, error: usageErr } = await supabase
       .from("generation_usage")
       .select("count")
       .eq("user_id", userId)
       .eq("week_start", weekStart)
       .maybeSingle();
 
-    const used = usage?.count ?? 0;
+    if (usageErr) {
+      return NextResponse.json({ error: { code: "USAGE_READ_FAILED", message: usageErr.message } }, { status: 500 });
+    }
+
+    const used = usageRow?.count ?? 0;
     if (used >= limits.weekly_limit) {
       return NextResponse.json(
         { error: { code: "WEEKLY_LIMIT_REACHED", used, limit: limits.weekly_limit, plan } },
@@ -190,46 +282,25 @@ export async function POST(req: Request) {
       );
     }
 
-    // increment usage (atomic-ish cez upsert)
-    await supabase.from("generation_usage").upsert(
-      { user_id: userId, week_start: weekStart, count: used + 1 },
-      { onConflict: "user_id,week_start" }
-    );
-
-    // input fields
+    // input
     const people = body.people?.trim() || "1";
     const budget = body.budget?.trim() || "0";
     const intolerances = (body.intolerances || "").trim();
     const avoid = (body.avoid || "").trim();
     const have = (body.have || "").trim();
     const favorites = (body.favorites || "").trim();
+
     const shoppingTrips = Math.min(4, Math.max(1, Number(body.shoppingTrips || 2)));
     const repeatDays = Math.min(3, Math.max(1, Number(body.repeatDays || 2)));
 
-    const styleHint = styleHintFromValue(style, language);
-
-    const dayNames = language === "en" ? DAY_NAMES_EN : language === "uk" ? DAY_NAMES_UK : DAY_NAMES_SK;
-
+    const styleHint = styleHintFromValue(style, lang);
+    const dayNames = lang === "en" ? DAY_NAMES_EN : lang === "uk" ? DAY_NAMES_UK : DAY_NAMES_SK;
     const datesBlock = dayNames.map((name, i) => `- day ${i + 1}: ${name}, date: ${addDaysISO(weekStart, i)}`).join("\n");
 
     const languageRule =
-      language === "en" ? "Write everything in English."
-      : language === "uk" ? "Пиши все українською."
+      lang === "en" ? "Write everything in English."
+      : lang === "uk" ? "Пиши все українською."
       : "Všetko píš po slovensky.";
-
-    const recipesRule =
-      language === "en"
-        ? "Generate a recipe for every meal (breakfast, lunch, dinner)."
-        : language === "uk"
-        ? "Згенеруй рецепт для кожного прийому їжі (сніданок, обід, вечеря)."
-        : "Vygeneruj recept pre každé jedlo (raňajky, obed, večera).";
-
-    const caloriesRule =
-      language === "en"
-        ? "Calories are per person/serving. Provide daily totals."
-        : language === "uk"
-        ? "Калорії вказуй на 1 порцію/особу. Дай підсумок за день."
-        : "Kalórie sú per person/porcia. Daj denné súčty.";
 
     const prompt = `
 Return ONLY valid JSON (no other text).
@@ -264,16 +335,17 @@ Rules:
 - Provide realistic quantities.
 
 CALORIES:
+- Calories must be per person/serving.
 - For each day include breakfast_kcal, lunch_kcal, dinner_kcal and total_kcal.
-${caloriesRule}
+- In summary include weekly_total_kcal and avg_daily_kcal (for the whole household).
 
 SHOPPING:
 - For each trip include estimated_cost_eur.
 
 RECIPES:
-- ${recipesRule}
-- Keys must be: d{day}_{meal} where meal is breakfast|lunch|dinner.
-- That means 21 recipes total (7 days * 3 meals).
+- Generate a recipe for EVERY meal: breakfast, lunch and dinner.
+- Keys must be exactly: d{day}_{meal} where meal is breakfast|lunch|dinner.
+- That means 21 recipes total.
 
 JSON schema (follow exactly):
 {
@@ -331,43 +403,44 @@ Counts:
 
     const r = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gpt-4.1-mini",
-        input: prompt,
-      }),
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "gpt-4.1-mini", input: prompt }),
     });
 
     const data = await r.json();
-
-    if (!r.ok) {
-      return NextResponse.json({ error: data }, { status: 500 });
-    }
+    if (!r.ok) return NextResponse.json({ error: data }, { status: 500 });
 
     const text = extractText(data);
-    const parsed = safeParseJSON(text);
+    const parsedRaw = safeParseJSON(text);
 
-    if (!parsed) return NextResponse.json({ kind: "text", text }, { status: 200 });
+    if (!parsedRaw) return NextResponse.json({ kind: "text", text }, { status: 200 });
 
-    // safety: verify recipes coverage (21)
+    const parsed = normalizePlan(parsedRaw);
+
+    // validate recipes exist (21)
     const recipes = parsed?.recipes && typeof parsed.recipes === "object" ? parsed.recipes : null;
-    const requiredMeals = ["breakfast", "lunch", "dinner"];
-    const missing: string[] = [];
-
-    for (let d = 1; d <= 7; d++) {
-      for (const m of requiredMeals) {
-        const key = `d${d}_${m}`;
-        if (!recipes?.[key]) missing.push(key);
-      }
-    }
+    const missing = requiredRecipeKeys().filter((k) => !recipes?.[k]);
 
     if (missing.length) {
+      return NextResponse.json({ error: { code: "MISSING_RECIPES", missing } }, { status: 500 });
+    }
+
+    // add per-person calories to summary
+    if (!parsed.summary) parsed.summary = {};
+    parsed.summary.people = coerceNumber(parsed.summary.people, Number(people) || 1);
+    parsed.summary = ensurePerPersonCalories(parsed.summary);
+
+    // IMPORTANT: až po úspešnej validácii navýšime usage
+    const { error: upErr } = await supabase.from("generation_usage").upsert(
+      { user_id: userId, week_start: weekStart, count: used + 1 },
+      { onConflict: "user_id,week_start" }
+    );
+
+    if (upErr) {
+      // plán vrátime aj tak, len upozorníme, že usage sa nepodarilo zapísať
       return NextResponse.json(
-        { error: { code: "MISSING_RECIPES", missing } },
-        { status: 500 }
+        { kind: "json", plan: parsed, warning: { code: "USAGE_WRITE_FAILED", message: upErr.message } },
+        { status: 200 }
       );
     }
 

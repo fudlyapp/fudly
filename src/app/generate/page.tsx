@@ -499,11 +499,21 @@ export default function GeneratorPage() {
     setLastInput(inputPayload);
 
     try {
-      const res = await fetch("/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(inputPayload),
-      });
+      const { data: s } = await supabase.auth.getSession();
+const accessToken = s.session?.access_token;
+if (!accessToken) {
+  setTextResult("Nie si prihlásený.");
+  return;
+}
+
+const res = await fetch("/api/generate", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${accessToken}`,
+  },
+  body: JSON.stringify(inputPayload),
+});
 
       const data: ApiResponse = await res.json();
 
