@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 type Body = {
   weekStart?: string; // YYYY-MM-DD (pondelok)
-  language?: string; // "sk"
+  language?: string; // sk|en|uk
 
   people: string;
   budget: string;
@@ -17,13 +18,27 @@ type Body = {
   repeatDays?: string;
 };
 
-type Recipe = {
-  title: string;
-  time_min: number;
-  portions: number;
-  ingredients: Array<{ name: string; quantity: string }>;
-  steps: string[];
-};
+type Plan = "basic" | "plus";
+type Status = "inactive" | "trialing" | "active" | "past_due" | "canceled";
+
+function planLimits(plan: Plan) {
+  if (plan === "plus") {
+    return { weekly_limit: 5, calories_enabled: true, allowed_styles: ["lacné", "rychle", "vyvazene", "vegetarianske", "fit", "tradicne", "exoticke"] };
+  }
+  return { weekly_limit: 3, calories_enabled: false, allowed_styles: ["lacné", "rychle", "vyvazene", "vegetarianske"] };
+}
+
+function isActiveLike(status: Status, now: Date, currentPeriodEnd?: string | null, trialEnd?: string | null) {
+  if (status === "active") {
+    if (!currentPeriodEnd) return true;
+    return new Date(currentPeriodEnd).getTime() > now.getTime();
+  }
+  if (status === "trialing") {
+    if (!trialEnd) return false;
+    return new Date(trialEnd).getTime() > now.getTime();
+  }
+  return false;
+}
 
 function extractText(data: any): string {
   if (!data) return "";
@@ -75,288 +90,192 @@ function addDaysISO(iso: string, add: number) {
 }
 
 const DAY_NAMES_SK = ["Pondelok", "Utorok", "Streda", "Štvrtok", "Piatok", "Sobota", "Nedeľa"];
+const DAY_NAMES_EN = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const DAY_NAMES_UK = ["Понеділок", "Вівторок", "Середа", "Четвер", "П’ятниця", "Субота", "Неділя"];
 
-function styleHintFromValue(style: string) {
+function styleHintFromValue(style: string, lang: string) {
+  const sk = (s: string) => s;
+  const en = (s: string) => s;
+  const uk = (s: string) => s;
+
+  const t = lang === "en" ? en : lang === "uk" ? uk : sk;
+
   switch (style) {
     case "rychle":
-      return "Uprednostni veľmi rýchle jedlá (max 20–30 min).";
+      return t(lang === "en" ? "Prefer very quick meals (max 20–30 min)." : lang === "uk" ? "Надавай перевагу дуже швидким стравам (макс 20–30 хв)." : "Uprednostni veľmi rýchle jedlá (max 20–30 min).");
     case "vyvazene":
-      return "Uprednostni vyvážené jedlá (bielkoviny, zelenina, prílohy), stále rozumná cena.";
+      return t(lang === "en" ? "Prefer balanced meals (protein + veggies + sides), still budget-friendly." : lang === "uk" ? "Надавай перевагу збалансованим стравам (білок + овочі + гарнір), бюджетно." : "Uprednostni vyvážené jedlá (bielkoviny, zelenina, prílohy), stále rozumná cena.");
     case "vegetarianske":
-      return "Vegetariánske: bez mäsa a rýb (vajcia a mliečne OK).";
+      return t(lang === "en" ? "Vegetarian: no meat or fish (eggs and dairy OK)." : lang === "uk" ? "Вегетаріанське: без м’яса та риби (яйця й молочне можна)." : "Vegetariánske: bez mäsa a rýb (vajcia a mliečne OK).");
     case "tradicne":
-      return "Tradičné: domáca poctivá strava (klasické slovenské/európske jedlá).";
+      return t(lang === "en" ? "Traditional home-style meals." : lang === "uk" ? "Традиційні домашні страви." : "Tradičné: domáca poctivá strava (klasické slovenské/európske jedlá).");
     case "exoticke":
-      return "Exotické: inšpirácie Ázia/Mexiko/fusion, bežné suroviny z obchodu.";
+      return t(lang === "en" ? "Exotic inspirations (Asia/Mexico/fusion) using common store ingredients." : lang === "uk" ? "Екзотика (Азія/Мексика/fusion) зі звичайних продуктів." : "Exotické: inšpirácie Ázia/Mexiko/fusion, bežné suroviny z obchodu.");
     case "fit":
-      return "Fit: viac bielkovín, viac zeleniny, menej cukru, striedme porcie.";
+      return t(lang === "en" ? "Fit: more protein and veggies, less sugar." : lang === "uk" ? "Fit: більше білка й овочів, менше цукру." : "Fit: viac bielkovín, viac zeleniny, menej cukru, striedme porcie.");
     case "lacné":
     default:
-      return "Uprednostni čo najlacnejšie jedlá z bežných surovín.";
+      return t(lang === "en" ? "Prefer the cheapest meals from common ingredients." : lang === "uk" ? "Надавай перевагу найдешевшим стравам зі звичайних продуктів." : "Uprednostni čo najlacnejšie jedlá z bežných surovín.");
   }
-}
-
-function clampInt(n: number, min: number, max: number) {
-  if (!Number.isFinite(n)) return min;
-  return Math.min(max, Math.max(min, Math.trunc(n)));
-}
-
-function normalizeRecipeKey(key: string) {
-  const k = (key || "").trim();
-  if (!k) return k;
-  const m1 = k.match(/^d(\d)(breakfast|lunch|dinner)$/i);
-  if (m1) return `d${m1[1]}_${m1[2].toLowerCase()}`;
-  const m2 = k.match(/^d(\d)[\-_](breakfast|lunch|dinner)$/i);
-  if (m2) return `d${m2[1]}_${m2[2].toLowerCase()}`;
-  return k;
-}
-
-function expectedRecipeKeys() {
-  const keys: string[] = [];
-  for (let d = 1; d <= 7; d++) {
-    keys.push(`d${d}_breakfast`, `d${d}_lunch`, `d${d}_dinner`);
-  }
-  return keys;
-}
-
-function coerceNumber(x: any): number | null {
-  if (typeof x === "number" && Number.isFinite(x)) return x;
-  if (typeof x === "string") {
-    const n = Number(x.replace(",", "."));
-    if (Number.isFinite(n)) return n;
-  }
-  return null;
-}
-
-function ensureKcalAndSummary(plan: any, people: number) {
-  if (!plan || typeof plan !== "object") return plan;
-
-  plan.summary = plan.summary && typeof plan.summary === "object" ? plan.summary : {};
-  plan.days = Array.isArray(plan.days) ? plan.days : [];
-
-  // Kalórie VSTUP: chceme per person na deň
-  let weeklyPerPerson = 0;
-
-  for (const d of plan.days) {
-    if (!d || typeof d !== "object") continue;
-
-    const bk = coerceNumber(d.breakfast_kcal);
-    const lk = coerceNumber(d.lunch_kcal);
-    const dk = coerceNumber(d.dinner_kcal);
-
-    // ak niečo chýba, necháme null (radšej), ale total sa pokúsime dopočítať len ak sú všetky tri
-    d.breakfast_kcal = bk ?? d.breakfast_kcal;
-    d.lunch_kcal = lk ?? d.lunch_kcal;
-    d.dinner_kcal = dk ?? d.dinner_kcal;
-
-    const allThree = typeof bk === "number" && typeof lk === "number" && typeof dk === "number";
-    const total = allThree ? bk + lk + dk : coerceNumber(d.total_kcal);
-
-    d.total_kcal = typeof total === "number" ? Math.round(total) : d.total_kcal;
-
-    if (typeof d.total_kcal === "number" && Number.isFinite(d.total_kcal)) {
-      weeklyPerPerson += d.total_kcal;
-    }
-  }
-
-  // summary per person
-  const daysCount = plan.days.length || 7;
-  const avgPerPerson = daysCount ? weeklyPerPerson / daysCount : 0;
-
-  plan.summary.weekly_total_kcal_per_person = Math.round(weeklyPerPerson);
-  plan.summary.avg_daily_kcal_per_person = Math.round(avgPerPerson);
-
-  // summary household (people × per person)
-  plan.summary.people = typeof plan.summary.people === "number" ? plan.summary.people : people;
-  plan.summary.weekly_total_kcal = Math.round(weeklyPerPerson * people);
-  plan.summary.avg_daily_kcal = Math.round(avgPerPerson * people);
-
-  return plan;
-}
-
-function normalizePlan(plan: any) {
-  if (!plan || typeof plan !== "object") return plan;
-
-  // ensure arrays
-  plan.days = Array.isArray(plan.days) ? plan.days.slice(0, 7) : [];
-  plan.shopping = Array.isArray(plan.shopping) ? plan.shopping : [];
-
-  // normalize recipes keys
-  if (plan.recipes && typeof plan.recipes === "object") {
-    const fixed: Record<string, Recipe> = {};
-    for (const [k, v] of Object.entries(plan.recipes)) {
-      fixed[normalizeRecipeKey(k)] = v as Recipe;
-    }
-    plan.recipes = fixed;
-  } else {
-    plan.recipes = {};
-  }
-
-  return plan;
-}
-
-function getMissingRecipeKeys(plan: any) {
-  const want = expectedRecipeKeys();
-  const have = new Set<string>(Object.keys(plan?.recipes || {}).map(normalizeRecipeKey));
-  return want.filter((k) => !have.has(k));
-}
-
-async function callOpenAIJSON(apiKey: string, prompt: string) {
-  const r = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "gpt-4.1-mini",
-      input: prompt,
-    }),
-  });
-
-  const data = await r.json();
-  if (!r.ok) throw new Error(`OpenAI error: ${JSON.stringify(data)}`);
-
-  const text = extractText(data);
-  const parsed = safeParseJSON(text);
-  return { text, parsed };
-}
-
-function buildRecipesRepairPrompt(plan: any, missingKeys: string[], languageRule: string) {
-  // aby recepty sedeli na názvy jedál, pošleme mapu key -> názov jedla z days
-  const days = Array.isArray(plan?.days) ? plan.days : [];
-  const nameMap: Record<string, string> = {};
-
-  for (const d of days) {
-    const day = d?.day;
-    if (!day) continue;
-    nameMap[`d${day}_breakfast`] = d.breakfast || "";
-    nameMap[`d${day}_lunch`] = d.lunch || "";
-    nameMap[`d${day}_dinner`] = d.dinner || "";
-  }
-
-  return `
-Vráť IBA validný JSON (žiadny iný text).
-${languageRule}
-
-Potrebujem doplniť CHÝBAJÚCE recepty do objektu "recipes". Nemeň nič iné.
-Vráť iba tento tvar:
-
-{
-  "recipes": {
-    "<key>": {
-      "title": string,
-      "time_min": number,
-      "portions": number,
-      "ingredients": [{ "name": string, "quantity": string }],
-      "steps": string[]
-    }
-  }
-}
-
-Chýbajúce kľúče (vráť presne tieto a žiadne iné):
-${missingKeys.map((k) => `- ${k}`).join("\n")}
-
-Názvy jedál (aby recept sedel na konkrétne jedlo):
-${missingKeys
-  .map((k) => `- ${k}: ${JSON.stringify(nameMap[k] || "")}`)
-  .join("\n")}
-
-Pravidlá:
-- Každý missing key MUSÍ mať recept.
-- "portions" nastav na počet porcií pre domácnosť (nie per person).
-- Kroky píš stručne, ale komplet.
-- Quantity realistické (napr. "1 kg", "500 g", "2 ks", "1 bal").
-`;
 }
 
 export async function POST(req: Request) {
   try {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) return NextResponse.json({ error: "Chýba OPENAI_API_KEY" }, { status: 500 });
+
+    // auth (supabase access token)
+    const auth = req.headers.get("authorization") || "";
+    const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+    if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    const supabase = createSupabaseAdminClient();
+    const { data: userRes, error: userErr } = await supabase.auth.getUser(token);
+    if (userErr || !userRes?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const userId = userRes.user.id;
+
     const body = (await req.json()) as Body;
 
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json({ error: "Chýba OPENAI_API_KEY v .env.local" }, { status: 500 });
+    const weekStart = (body.weekStart || "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) {
+      return NextResponse.json({ error: "Neplatný weekStart" }, { status: 400 });
     }
 
-    const peopleRaw = body.people?.trim() || "1";
-    const budgetRaw = body.budget?.trim() || "0";
+    const lang = (body.language || "sk").trim().toLowerCase();
+    const language = lang === "en" ? "en" : lang === "uk" ? "uk" : "sk";
 
-    const peopleNum = clampInt(Number(peopleRaw), 1, 6);
-    const budgetNum = clampInt(Number(budgetRaw), 1, 1000);
+    // subscription check
+    const { data: subRow } = await supabase
+      .from("subscriptions")
+      .select("plan,status,current_period_end,trial_end")
+      .eq("user_id", userId)
+      .maybeSingle();
 
+    const plan = (subRow?.plan as Plan) || "basic";
+    const status = (subRow?.status as Status) || "inactive";
+    const now = new Date();
+
+    const limits = planLimits(plan);
+    const canGenerate = isActiveLike(status, now, subRow?.current_period_end, subRow?.trial_end);
+
+    if (!canGenerate) {
+      return NextResponse.json(
+        { error: { code: "SUBSCRIPTION_INACTIVE", plan, status } },
+        { status: 402 }
+      );
+    }
+
+    // style gate
+    const style = (body.style || "lacné").trim();
+    if (!limits.allowed_styles.includes(style)) {
+      return NextResponse.json(
+        { error: { code: "STYLE_NOT_ALLOWED", style, plan } },
+        { status: 403 }
+      );
+    }
+
+    // weekly usage gate
+    const { data: usage } = await supabase
+      .from("generation_usage")
+      .select("count")
+      .eq("user_id", userId)
+      .eq("week_start", weekStart)
+      .maybeSingle();
+
+    const used = usage?.count ?? 0;
+    if (used >= limits.weekly_limit) {
+      return NextResponse.json(
+        { error: { code: "WEEKLY_LIMIT_REACHED", used, limit: limits.weekly_limit, plan } },
+        { status: 429 }
+      );
+    }
+
+    // increment usage (atomic-ish cez upsert)
+    await supabase.from("generation_usage").upsert(
+      { user_id: userId, week_start: weekStart, count: used + 1 },
+      { onConflict: "user_id,week_start" }
+    );
+
+    // input fields
+    const people = body.people?.trim() || "1";
+    const budget = body.budget?.trim() || "0";
     const intolerances = (body.intolerances || "").trim();
     const avoid = (body.avoid || "").trim();
     const have = (body.have || "").trim();
     const favorites = (body.favorites || "").trim();
+    const shoppingTrips = Math.min(4, Math.max(1, Number(body.shoppingTrips || 2)));
+    const repeatDays = Math.min(3, Math.max(1, Number(body.repeatDays || 2)));
 
-    const style = (body.style || "lacné").trim();
-    const shoppingTrips = clampInt(Number(body.shoppingTrips || 2), 1, 4);
-    const repeatDays = clampInt(Number(body.repeatDays || 2), 1, 3);
+    const styleHint = styleHintFromValue(style, language);
 
-    const weekStart = (body.weekStart || "").trim();
-    const lang = (body.language || "sk").trim().toLowerCase();
+    const dayNames = language === "en" ? DAY_NAMES_EN : language === "uk" ? DAY_NAMES_UK : DAY_NAMES_SK;
 
-    const styleHint = styleHintFromValue(style);
+    const datesBlock = dayNames.map((name, i) => `- day ${i + 1}: ${name}, date: ${addDaysISO(weekStart, i)}`).join("\n");
 
-    const datesBlock =
-      weekStart && /^\d{4}-\d{2}-\d{2}$/.test(weekStart)
-        ? DAY_NAMES_SK.map((name, i) => `- day ${i + 1}: ${name}, date: ${addDaysISO(weekStart, i)}`).join("\n")
-        : "";
+    const languageRule =
+      language === "en" ? "Write everything in English."
+      : language === "uk" ? "Пиши все українською."
+      : "Všetko píš po slovensky.";
 
-    const languageRule = lang === "sk" ? "Všetko píš po slovensky." : "Language: use the requested language.";
+    const recipesRule =
+      language === "en"
+        ? "Generate a recipe for every meal (breakfast, lunch, dinner)."
+        : language === "uk"
+        ? "Згенеруй рецепт для кожного прийому їжі (сніданок, обід, вечеря)."
+        : "Vygeneruj recept pre každé jedlo (raňajky, obed, večera).";
 
-    // ✅ DÔLEŽITÉ: recepty už nie "aspoň lunch/dinner", ale PRE KAŽDÉ jedlo
+    const caloriesRule =
+      language === "en"
+        ? "Calories are per person/serving. Provide daily totals."
+        : language === "uk"
+        ? "Калорії вказуй на 1 порцію/особу. Дай підсумок за день."
+        : "Kalórie sú per person/porcia. Daj denné súčty.";
+
     const prompt = `
-Vráť IBA validný JSON (žiadny iný text).
+Return ONLY valid JSON (no other text).
 ${languageRule}
 
-Vytvor 7-dňový jedálniček (raňajky/obed/večera) pre domácnosť.
-Cieľ: šetriť čas aj peniaze.
+Create a 7-day meal plan (breakfast/lunch/dinner).
+Goal: save time and money.
 
-Parametre:
-- people: ${peopleNum}
-- weekly_budget_eur: ${budgetNum}
+Parameters:
+- people: ${people}
+- weekly_budget_eur: ${budget}
 - shopping_trips_per_week: ${shoppingTrips}
 - repeat_days_max: ${repeatDays}
 
-TVRDÉ obmedzenie:
-- forbidden_ingredients (nesmú byť použité): ${intolerances || "none"}
+Hard restriction:
+- forbidden_ingredients: ${intolerances || "none"}
 
-Preferencie:
+Preferences:
 - avoid: ${avoid || "none"}
 - favorites: ${favorites || "none"}
 - have_at_home: ${have || "none"}
 
-Štýl:
+Style:
 - ${styleHint}
 
-Týždeň (ak je zadaný):
-${datesBlock || "- (no dates provided)"}
+Week:
+${datesBlock}
 
-Pravidlá:
-- Nadväzuj jedlá (batch cooking), aby človek nevaril 3× denne každý deň.
-- Opakuj suroviny naprieč dňami (minimalizuj odpad).
-- Rozdeľ nákup do ${shoppingTrips} nákupov podľa dní.
-- Uvádzaj názvy jedál prirodzene po slovensky.
-- V "days" doplň aj day_name + date.
+Rules:
+- Batch cooking, reuse ingredients across days.
+- Split shopping into exactly ${shoppingTrips} trips.
+- Provide realistic quantities.
 
-KALÓRIE:
-- Kalórie uvádzaj PER PERSON (na 1 porciu).
-- Ku každému jedlu daj odhad kalórií v kcal (breakfast_kcal, lunch_kcal, dinner_kcal).
-- Pridaj total_kcal pre deň = súčet 3 jedál (per person).
+CALORIES:
+- For each day include breakfast_kcal, lunch_kcal, dinner_kcal and total_kcal.
+${caloriesRule}
 
-NÁKUPY:
-- Okrem celkového odhadu týždňa uveď aj odhad ceny pre každý nákup: estimated_cost_eur na úrovni shopping trip.
+SHOPPING:
+- For each trip include estimated_cost_eur.
 
-RECEPTY (KRITICKÉ):
-- MUSÍŠ vygenerovať recept pre KAŽDÉ jedlo (raňajky + obed + večera) pre každý deň.
-- To je spolu 21 receptov.
-- Kľúče receptov: d{day}_{meal}, kde meal je breakfast | lunch | dinner.
-- Recept musí zodpovedať názvu jedla v days (title nech sedí na názov jedla).
-- "portions" nastav pre CELÚ domácnosť (people), nie per person.
+RECIPES:
+- ${recipesRule}
+- Keys must be: d{day}_{meal} where meal is breakfast|lunch|dinner.
+- That means 21 recipes total (7 days * 3 meals).
 
-JSON schéma (dodrž presne):
+JSON schema (follow exactly):
 {
   "summary": {
     "people": number,
@@ -404,67 +323,55 @@ JSON schéma (dodrž presne):
   }
 }
 
-Počet položiek:
-- days musí mať presne 7 dní (day 1..7)
-- shopping musí mať presne ${shoppingTrips} nákupov (trip 1..${shoppingTrips})
-- recipes MUSÍ mať presne 21 kľúčov (d1_breakfast..d7_dinner)
+Counts:
+- days must be exactly 7 (day 1..7)
+- shopping must be exactly ${shoppingTrips} trips
+- recipes must include ALL 21 keys (d1_breakfast..d7_dinner)
 `;
 
-    // 1) prvý call
-    const first = await callOpenAIJSON(apiKey, prompt);
+    const r = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "gpt-4.1-mini",
+        input: prompt,
+      }),
+    });
 
-    if (!first.parsed) {
-      return NextResponse.json({ kind: "text", text: first.text }, { status: 200 });
+    const data = await r.json();
+
+    if (!r.ok) {
+      return NextResponse.json({ error: data }, { status: 500 });
     }
 
-    let plan = normalizePlan(first.parsed);
+    const text = extractText(data);
+    const parsed = safeParseJSON(text);
 
-    // 2) tvrdá validácia receptov + repair (max 2 pokusy)
-    let missing = getMissingRecipeKeys(plan);
+    if (!parsed) return NextResponse.json({ kind: "text", text }, { status: 200 });
 
-    if (missing.length > 0) {
-      const repairPrompt = buildRecipesRepairPrompt(plan, missing, languageRule);
+    // safety: verify recipes coverage (21)
+    const recipes = parsed?.recipes && typeof parsed.recipes === "object" ? parsed.recipes : null;
+    const requiredMeals = ["breakfast", "lunch", "dinner"];
+    const missing: string[] = [];
 
-      const repair = await callOpenAIJSON(apiKey, repairPrompt);
-      if (repair.parsed && repair.parsed.recipes && typeof repair.parsed.recipes === "object") {
-        const repairedRecipes: Record<string, Recipe> = {};
-        for (const [k, v] of Object.entries(repair.parsed.recipes)) {
-          repairedRecipes[normalizeRecipeKey(k)] = v as Recipe;
-        }
-
-        plan.recipes = plan.recipes && typeof plan.recipes === "object" ? plan.recipes : {};
-        plan.recipes = { ...plan.recipes, ...repairedRecipes };
+    for (let d = 1; d <= 7; d++) {
+      for (const m of requiredMeals) {
+        const key = `d${d}_${m}`;
+        if (!recipes?.[key]) missing.push(key);
       }
-
-      // re-check
-      plan = normalizePlan(plan);
-      missing = getMissingRecipeKeys(plan);
     }
 
-    // ak aj po repair stále chýba, vrátime error (radšej ako uložiť poloplan)
-    if (missing.length > 0) {
+    if (missing.length) {
       return NextResponse.json(
-        {
-          error: {
-            message: "Generovanie zlyhalo: chýbajú recepty pre niektoré jedlá.",
-            missing_recipe_keys: missing,
-          },
-        },
+        { error: { code: "MISSING_RECIPES", missing } },
         { status: 500 }
       );
     }
 
-    // 3) doplň kcal summary (per person aj household)
-    plan = ensureKcalAndSummary(plan, peopleNum);
-
-    // 4) ešte základné sanity fields
-    plan.summary = plan.summary ?? {};
-    plan.summary.people = peopleNum;
-    plan.summary.weekly_budget_eur = budgetNum;
-    plan.summary.shopping_trips_per_week = shoppingTrips;
-    plan.summary.repeat_days_max = repeatDays;
-
-    return NextResponse.json({ kind: "json", plan }, { status: 200 });
+    return NextResponse.json({ kind: "json", plan: parsed }, { status: 200 });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message ?? "Unknown error" }, { status: 500 });
   }
