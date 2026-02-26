@@ -22,8 +22,11 @@ export default function PricingPage() {
   // LOAD SUBSCRIPTION
   // =========================
   useEffect(() => {
-    loadSubscription();
-  }, []);
+  (async () => {
+    await loadSubscription();
+  })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, []);
 
   async function loadSubscription() {
     const { data: sess } = await supabase.auth.getSession();
