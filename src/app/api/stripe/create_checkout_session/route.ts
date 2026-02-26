@@ -18,22 +18,23 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Invalid plan" }, { status: 400 });
     }
 
-    const priceId =
-      plan === "basic" ? process.env.STRIPE_PRICE_BASIC : process.env.STRIPE_PRICE_PLUS;
-
+    const priceId = plan === "basic" ? process.env.STRIPE_PRICE_BASIC : process.env.STRIPE_PRICE_PLUS;
     if (!priceId) {
       return NextResponse.json({ error: "Missing STRIPE_PRICE_* env" }, { status: 500 });
     }
 
+    // ✅ auth cez Bearer token z klienta
+    const auth = req.headers.get("authorization") || "";
+    const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+    if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
     const supabase = createSupabaseAdminClient();
 
-    // získať usera zo Supabase tokenu v cookie (server-side)
-    const { data, error } = await supabase.auth.getUser();
-    if (error || !data?.user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    const userId = data.user.id;
-    const email = data.user.email ?? undefined;
+    const { data: userRes, error: userErr } = await supabase.auth.getUser(token);
+    if (userErr || !userRes?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    const userId = userRes.user.id;
+    const email = userRes.user.email ?? undefined;
 
     // ak už máme stripe_customer_id, použijeme ho
     const { data: existingSub } = await supabase
@@ -44,7 +45,6 @@ export async function POST(req: Request) {
 
     const customer = existingSub?.stripe_customer_id ?? undefined;
 
-    // redirecty
     const origin = process.env.NEXT_PUBLIC_SITE_URL || new URL(req.url).origin;
     const successUrl = `${origin}/pricing?success=1`;
     const cancelUrl = `${origin}/pricing?canceled=1`;
@@ -58,19 +58,12 @@ export async function POST(req: Request) {
       customer,
       customer_email: customer ? undefined : email,
 
-      // 14 dní trial (ak chceš)
       subscription_data: {
         trial_period_days: 14,
-        metadata: {
-          user_id: userId,
-          plan,
-        },
+        metadata: { user_id: userId, plan },
       },
 
-      metadata: {
-        user_id: userId,
-        plan,
-      },
+      metadata: { user_id: userId, plan },
     });
 
     return NextResponse.json({ url: session.url });

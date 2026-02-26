@@ -10,14 +10,15 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string);
 
 export async function POST(req: Request) {
   try {
+    const auth = req.headers.get("authorization") || "";
+    const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+    if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
     const supabase = createSupabaseAdminClient();
+    const { data: userRes, error: userErr } = await supabase.auth.getUser(token);
+    if (userErr || !userRes?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const { data, error } = await supabase.auth.getUser();
-    if (error || !data?.user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const userId = data.user.id;
+    const userId = userRes.user.id;
 
     const { data: subRow } = await supabase
       .from("subscriptions")
@@ -27,18 +28,14 @@ export async function POST(req: Request) {
 
     const customerId = subRow?.stripe_customer_id;
     if (!customerId) {
-      return NextResponse.json(
-        { error: "Nemám stripe_customer_id pre tohto používateľa (najprv vytvor predplatné)." },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "No Stripe customer for user" }, { status: 400 });
     }
 
     const origin = process.env.NEXT_PUBLIC_SITE_URL || new URL(req.url).origin;
-    const return_url = `${origin}/pricing`;
 
     const portal = await stripe.billingPortal.sessions.create({
       customer: customerId,
-      return_url,
+      return_url: `${origin}/pricing`,
     });
 
     return NextResponse.json({ url: portal.url });
