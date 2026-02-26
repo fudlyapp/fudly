@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { DICT, type Lang, type Dict } from "@/lib/i18n/dict";
 
 const COOKIE_NAME = "lang";
@@ -17,14 +17,31 @@ export function setLangCookie(lang: Lang) {
   document.cookie = `${COOKIE_NAME}=${encodeURIComponent(lang)}; Path=/; Max-Age=${60 * 60 * 24 * 365}; SameSite=Lax`;
 }
 
-export function useT(lang?: Lang): { t: Dict; lang: Lang } {
-  const resolved = useMemo<Lang>(() => {
-    if (lang === "sk" || lang === "en" || lang === "uk") return lang;
-    const c = getLangCookie();
-    return c ?? "sk";
-  }, [lang]);
+type UseTReturn = {
+  t: Dict;
+  lang: Lang;
+  setLang: (next: Lang) => void;
+};
 
-  const t = useMemo(() => DICT[resolved], [resolved]);
+export function useT(initialLang?: Lang): UseTReturn {
+  const [lang, setLangState] = useState<Lang>(() => {
+    if (initialLang === "sk" || initialLang === "en" || initialLang === "uk") return initialLang;
+    return getLangCookie() ?? "sk";
+  });
 
-  return { t, lang: resolved };
+  // ak parent posiela initialLang (napr. useT(uiLang)), synchronizuj
+  useEffect(() => {
+    if (initialLang === "sk" || initialLang === "en" || initialLang === "uk") {
+      setLangState(initialLang);
+    }
+  }, [initialLang]);
+
+  const t = useMemo(() => DICT[lang], [lang]);
+
+  function setLang(next: Lang) {
+    setLangState(next);
+    setLangCookie(next);
+  }
+
+  return { t, lang, setLang };
 }
