@@ -1,39 +1,80 @@
+// src/app/api/stripe/create_checkout_session/route.ts
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function getStripe() {
-  const key = process.env.STRIPE_SECRET_KEY;
-  if (!key) return null;
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string);
 
-  // Pozn.: typ apiVersion v Stripe balíku býva “string literal”.
-  // Keď ti TypeScript nadáva, nechaj `as any`.
-  return new Stripe(key, { apiVersion: "2026-01-28.clover" as any });
-}
+type Body = { plan: "basic" | "plus" };
 
 export async function POST(req: Request) {
   try {
-    const stripe = getStripe();
-    if (!stripe) {
-      return NextResponse.json(
-        { error: "Stripe nie je nakonfigurovaný (chýba STRIPE_SECRET_KEY)." },
-        { status: 500 }
-      );
+    const { plan } = (await req.json()) as Body;
+
+    if (plan !== "basic" && plan !== "plus") {
+      return NextResponse.json({ error: "Invalid plan" }, { status: 400 });
     }
 
-    // TODO: sem pôjde tvoja logika na vytvorenie checkout session
-    // (priceId, customer, successUrl/cancelUrl, metadata user_id, atď.)
+    const priceId =
+      plan === "basic" ? process.env.STRIPE_PRICE_BASIC : process.env.STRIPE_PRICE_PLUS;
 
-    return NextResponse.json(
-      { error: "Not implemented yet" },
-      { status: 501 }
-    );
+    if (!priceId) {
+      return NextResponse.json({ error: "Missing STRIPE_PRICE_* env" }, { status: 500 });
+    }
+
+    const supabase = createSupabaseAdminClient();
+
+    // získať usera zo Supabase tokenu v cookie (server-side)
+    const { data, error } = await supabase.auth.getUser();
+    if (error || !data?.user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    const userId = data.user.id;
+    const email = data.user.email ?? undefined;
+
+    // ak už máme stripe_customer_id, použijeme ho
+    const { data: existingSub } = await supabase
+      .from("subscriptions")
+      .select("stripe_customer_id")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    const customer = existingSub?.stripe_customer_id ?? undefined;
+
+    // redirecty
+    const origin = process.env.NEXT_PUBLIC_SITE_URL || new URL(req.url).origin;
+    const successUrl = `${origin}/pricing?success=1`;
+    const cancelUrl = `${origin}/pricing?canceled=1`;
+
+    const session = await stripe.checkout.sessions.create({
+      mode: "subscription",
+      line_items: [{ price: priceId, quantity: 1 }],
+      success_url: successUrl,
+      cancel_url: cancelUrl,
+
+      customer,
+      customer_email: customer ? undefined : email,
+
+      // 14 dní trial (ak chceš)
+      subscription_data: {
+        trial_period_days: 14,
+        metadata: {
+          user_id: userId,
+          plan,
+        },
+      },
+
+      metadata: {
+        user_id: userId,
+        plan,
+      },
+    });
+
+    return NextResponse.json({ url: session.url });
   } catch (e: any) {
-    return NextResponse.json(
-      { error: e?.message ?? "Unknown error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: e?.message ?? "Unknown error" }, { status: 500 });
   }
 }

@@ -1,37 +1,22 @@
-export default function Home() {
+import Link from "next/link";
+
+export default function HomePage() {
   return (
-    <main style={{
-      display: "flex",
-      flexDirection: "column",
-      justifyContent: "center",
-      alignItems: "center",
-      height: "100vh",
-      fontFamily: "Arial"
-    }}>
-      
-      <h1 style={{fontSize: "48px", marginBottom: "20px"}}>
-        🍽️ Fudly
-      </h1>
-
-      <p style={{fontSize: "20px", marginBottom: "40px"}}>
-        AI jedálniček, ktorý šetrí čas aj peniaze
-      </p>
-
-      <a
-  href="/generate"
-  style={{
-    padding: "15px 30px",
-    fontSize: "18px",
-    background: "black",
-    color: "white",
-    borderRadius: "10px",
-    textDecoration: "none",
-    display: "inline-block",
-  }}
->
-  Vygenerovať jedálniček
-</a>
-
+    <main className="min-h-screen bg-black text-white p-8">
+      <div className="mx-auto max-w-xl space-y-4">
+        <h1 className="text-3xl font-bold">Fudly</h1>
+        <div className="flex flex-col gap-3">
+          <Link className="rounded-xl border border-gray-700 px-4 py-3 hover:bg-zinc-900" href="/generate">
+            Generátor
+          </Link>
+          <Link className="rounded-xl border border-gray-700 px-4 py-3 hover:bg-zinc-900" href="/pricing">
+            Cenník
+          </Link>
+          <Link className="rounded-xl border border-gray-700 px-4 py-3 hover:bg-zinc-900" href="/profile">
+            Profil
+          </Link>
+        </div>
+      </div>
     </main>
   );
 }

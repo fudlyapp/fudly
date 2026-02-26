@@ -1,8 +1,11 @@
+// src/app/profile/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { useT, getLangCookie, setLangCookie } from "@/lib/i18n/useT";
+import type { Lang } from "@/lib/i18n/dict";
 
 type MealPlanRow = {
   id: string;
@@ -17,6 +20,8 @@ type MealPlanRow = {
 type ProfileRow = {
   user_id: string;
   full_name: string | null;
+
+  language: string | null;
 
   people_default: number | null;
   weekly_budget_eur_default: number | null;
@@ -210,6 +215,10 @@ export default function ProfilePage() {
 
   const [tab, setTab] = useState<TabKey>("plans");
 
+  // UI jazyk (cookie + profiles.language)
+  const [uiLang, setUiLang] = useState<Lang>("sk");
+  const {t} = useT(uiLang);
+
   // uložené plány
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<MealPlanRow[]>([]);
@@ -239,6 +248,10 @@ export default function ProfilePage() {
   const [financeMsg, setFinanceMsg] = useState<string>("");
 
   useEffect(() => {
+    // cookie fallback (hneď na začiatku)
+    const c = getLangCookie();
+    if (c === "sk" || c === "en" || c === "uk") setUiLang(c);
+
     (async () => {
       setAuthLoading(true);
       const { data } = await supabase.auth.getSession();
@@ -254,6 +267,7 @@ export default function ProfilePage() {
     return () => sub.subscription.unsubscribe();
   }, [supabase]);
 
+  // uložené plány
   useEffect(() => {
     (async () => {
       setError("");
@@ -280,6 +294,7 @@ export default function ProfilePage() {
     })();
   }, [supabase, email]);
 
+  // načítanie profilu (predvolené + language)
   useEffect(() => {
     (async () => {
       setPrefMsg("");
@@ -296,7 +311,7 @@ export default function ProfilePage() {
       const { data, error } = await supabase
         .from("profiles")
         .select(
-          "user_id, full_name, people_default, weekly_budget_eur_default, shopping_trips_default, repeat_days_default, style_default, intolerances, avoid, have, favorites"
+          "user_id, full_name, language, people_default, weekly_budget_eur_default, shopping_trips_default, repeat_days_default, style_default, intolerances, avoid, have, favorites"
         )
         .eq("user_id", user.id)
         .maybeSingle();
@@ -310,6 +325,12 @@ export default function ProfilePage() {
 
       const p = (data as ProfileRow) ?? null;
       setProfileRow(p);
+
+      // jazyk z profilu > cookie
+      if (p?.language === "sk" || p?.language === "en" || p?.language === "uk") {
+        setUiLang(p.language);
+        setLangCookie( p.language);
+      }
 
       if (p) {
         if (p.people_default != null) setPeople(String(p.people_default));
@@ -334,6 +355,18 @@ export default function ProfilePage() {
   async function logout() {
     await supabase.auth.signOut();
     window.location.href = "/login";
+  }
+
+  async function changeLanguage(next: Lang) {
+    setUiLang(next);
+    setLangCookie(next);
+
+    const { data: sess } = await supabase.auth.getSession();
+    const user = sess.session?.user;
+    if (!user) return;
+
+    // upsert iba language, nech nezmažeme ostatné polia
+    await supabase.from("profiles").upsert({ user_id: user.id, language: next }, { onConflict: "user_id" });
   }
 
   const years = useMemo(() => {
@@ -465,6 +498,8 @@ export default function ProfilePage() {
       user_id: user.id,
       full_name: null,
 
+      language: uiLang,
+
       people_default: people.trim() ? Number(people) : null,
       weekly_budget_eur_default: budget.trim() ? Number(budget) : null,
       shopping_trips_default: shoppingTrips.trim() ? Number(shoppingTrips) : null,
@@ -558,7 +593,7 @@ export default function ProfilePage() {
         <header className="mb-6 flex items-start justify-between gap-4">
           <div>
             <div className="text-sm text-gray-400">Fudly</div>
-            <h1 className="mt-2 text-3xl font-bold">Profil</h1>
+            <h1 className="mt-2 text-3xl font-bold">{t.nav.profile}</h1>
             <p className="mt-2 text-gray-300">Prehľad: predvolené, jedálničky, nákupy, kalórie a financie.</p>
           </div>
 
@@ -570,18 +605,31 @@ export default function ProfilePage() {
                 <div className="text-sm text-gray-300">
                   Prihlásený ako <span className="text-white font-semibold">{email}</span>
                 </div>
+
+                <div className="flex justify-end">
+                  <select
+                    value={uiLang}
+                    onChange={(e) => changeLanguage(e.target.value as Lang)}
+                    className="rounded-xl border border-gray-700 bg-black px-3 py-2 text-sm text-white"
+                  >
+                    <option value="sk">Slovenčina</option>
+                    <option value="en">English</option>
+                    <option value="uk">Українська</option>
+                  </select>
+                </div>
+
                 <div className="flex justify-end gap-2">
                   <Link
                     href="/generate"
                     className="rounded-xl border border-gray-700 bg-black px-4 py-2 text-sm hover:bg-zinc-900"
                   >
-                    Generátor
+                    {t.nav.generator}
                   </Link>
                   <button
                     onClick={logout}
                     className="rounded-xl border border-gray-700 bg-black px-4 py-2 text-sm hover:bg-zinc-900"
                   >
-                    Odhlásiť
+                    {t.nav.logout}
                   </button>
                 </div>
               </div>
@@ -1106,14 +1154,20 @@ export default function ProfilePage() {
                                   </div>
                                   <div className="mt-1 text-sm text-gray-400">
                                     Budget:{" "}
-                                    <span className="text-white font-semibold">{budgetVal != null ? `${budgetVal} €` : "—"}</span>
+                                    <span className="text-white font-semibold">
+                                      {budgetVal != null ? `${budgetVal} €` : "—"}
+                                    </span>
                                     {" • "}
                                     Odhad:{" "}
                                     <span className="text-white font-semibold">{estVal != null ? `${estVal} €` : "—"}</span>
                                     {diffEst != null ? (
                                       <>
                                         {" • "}vs budget:{" "}
-                                        <span className={diffEst > 0 ? "text-red-300 font-semibold" : "text-green-300 font-semibold"}>
+                                        <span
+                                          className={
+                                            diffEst > 0 ? "text-red-300 font-semibold" : "text-green-300 font-semibold"
+                                          }
+                                        >
                                           {diffEst > 0 ? "+" : ""}
                                           {diffEst.toFixed(2)} €
                                         </span>
@@ -1127,7 +1181,11 @@ export default function ProfilePage() {
                                     {diffAct != null ? (
                                       <>
                                         {" • "}vs budget:{" "}
-                                        <span className={diffAct > 0 ? "text-red-300 font-semibold" : "text-green-300 font-semibold"}>
+                                        <span
+                                          className={
+                                            diffAct > 0 ? "text-red-300 font-semibold" : "text-green-300 font-semibold"
+                                          }
+                                        >
                                           {diffAct > 0 ? "+" : ""}
                                           {diffAct.toFixed(2)} €
                                         </span>
@@ -1156,11 +1214,10 @@ export default function ProfilePage() {
                                   <button
                                     type="button"
                                     onClick={() => {
-                                      const input = document.activeElement as HTMLInputElement | null;
-                                      // fallback: nájdi input v tejto karte cez DOM nie je super,
-                                      // preto radšej ber hodnotu cez prompt, ak user klikne mimo input.
-                                      // (UX: Enter v inpute je preferovaný)
-                                      const v = window.prompt("Zadaj reálnu cenu (€):", actVal != null ? String(actVal) : "");
+                                      const v = window.prompt(
+                                        "Zadaj reálnu cenu (€):",
+                                        actVal != null ? String(actVal) : ""
+                                      );
                                       if (v != null) saveActualCost(r.id, r.week_start, v);
                                     }}
                                     disabled={financeSavingId === r.id}

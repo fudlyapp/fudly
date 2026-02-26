@@ -21,6 +21,8 @@ type Body = {
 type Plan = "basic" | "plus";
 type Status = "inactive" | "trialing" | "active" | "past_due" | "canceled";
 
+const TRIAL_DAYS = 14;
+
 function planLimits(plan: Plan) {
   if (plan === "plus") {
     return {
@@ -46,6 +48,55 @@ function isActiveLike(status: Status, now: Date, currentPeriodEnd?: string | nul
     return new Date(trialEnd).getTime() > now.getTime();
   }
   return false;
+}
+
+function addDays(date: Date, days: number) {
+  const d = new Date(date.getTime());
+  d.setDate(d.getDate() + days);
+  return d;
+}
+
+/**
+ * Ak user nemá subscriptions row, spravíme mu automaticky trial (Basic) na 14 dní.
+ * Vráti finálny subRow (už existujúci alebo novovytvorený).
+ */
+async function ensureSubscriptionOrTrial(supabase: ReturnType<typeof createSupabaseAdminClient>, userId: string) {
+  const { data: subRow, error } = await supabase
+    .from("subscriptions")
+    .select("plan,status,current_period_end,trial_end")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error("SUBSCRIPTION_READ_FAILED: " + error.message);
+  }
+
+  if (subRow) return subRow;
+
+  const now = new Date();
+  const trialEnd = addDays(now, TRIAL_DAYS).toISOString();
+
+  // vytvor riadok pre trial (basic)
+  const { data: created, error: upErr } = await supabase
+    .from("subscriptions")
+    .upsert(
+      {
+        user_id: userId,
+        plan: "basic",
+        status: "trialing",
+        trial_end: trialEnd,
+        current_period_end: null,
+      },
+      { onConflict: "user_id" }
+    )
+    .select("plan,status,current_period_end,trial_end")
+    .maybeSingle();
+
+  if (upErr) {
+    throw new Error("SUBSCRIPTION_TRIAL_CREATE_FAILED: " + upErr.message);
+  }
+
+  return created ?? { plan: "basic", status: "trialing", current_period_end: null, trial_end: trialEnd };
 }
 
 function extractText(data: any): string {
@@ -186,16 +237,12 @@ function normalizeRecipeKey(key: string) {
 function normalizePlan(plan: any) {
   const next = JSON.parse(JSON.stringify(plan ?? {}));
 
-  // normalize recipes keys
   if (next.recipes && typeof next.recipes === "object") {
     const fixed: Record<string, any> = {};
-    for (const [k, v] of Object.entries(next.recipes)) {
-      fixed[normalizeRecipeKey(k)] = v;
-    }
+    for (const [k, v] of Object.entries(next.recipes)) fixed[normalizeRecipeKey(k)] = v;
     next.recipes = fixed;
   }
 
-  // clamp days
   if (Array.isArray(next.days)) next.days = next.days.slice(0, 7);
 
   return next;
@@ -206,7 +253,6 @@ function ensurePerPersonCalories(summary: any) {
   const avg = coerceNumber(summary?.avg_daily_kcal, 0);
   const weekly = coerceNumber(summary?.weekly_total_kcal, 0);
 
-  // doplníme per-person
   summary.avg_daily_kcal_per_person = people ? Math.round(avg / people) : null;
   summary.weekly_total_kcal_per_person = people ? Math.round(weekly / people) : null;
   return summary;
@@ -217,7 +263,6 @@ export async function POST(req: Request) {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) return NextResponse.json({ error: "Chýba OPENAI_API_KEY" }, { status: 500 });
 
-    // auth token z klienta
     const auth = req.headers.get("authorization") || "";
     const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
     if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -238,12 +283,8 @@ export async function POST(req: Request) {
     const langRaw = (body.language || "sk").trim().toLowerCase();
     const lang: "sk" | "en" | "uk" = langRaw === "en" ? "en" : langRaw === "uk" ? "uk" : "sk";
 
-    // subscription check
-    const { data: subRow } = await supabase
-      .from("subscriptions")
-      .select("plan,status,current_period_end,trial_end")
-      .eq("user_id", userId)
-      .maybeSingle();
+    // ✅ PAYWALL + AUTO TRIAL
+    const subRow = await ensureSubscriptionOrTrial(supabase, userId);
 
     const plan = ((subRow?.plan as Plan) || "basic") as Plan;
     const status = ((subRow?.status as Status) || "inactive") as Status;
@@ -412,32 +453,27 @@ Counts:
 
     const text = extractText(data);
     const parsedRaw = safeParseJSON(text);
-
     if (!parsedRaw) return NextResponse.json({ kind: "text", text }, { status: 200 });
 
     const parsed = normalizePlan(parsedRaw);
 
-    // validate recipes exist (21)
     const recipes = parsed?.recipes && typeof parsed.recipes === "object" ? parsed.recipes : null;
     const missing = requiredRecipeKeys().filter((k) => !recipes?.[k]);
-
     if (missing.length) {
       return NextResponse.json({ error: { code: "MISSING_RECIPES", missing } }, { status: 500 });
     }
 
-    // add per-person calories to summary
     if (!parsed.summary) parsed.summary = {};
     parsed.summary.people = coerceNumber(parsed.summary.people, Number(people) || 1);
     parsed.summary = ensurePerPersonCalories(parsed.summary);
 
-    // IMPORTANT: až po úspešnej validácii navýšime usage
+    // ✅ usage navýšime až po úspešnej validácii
     const { error: upErr } = await supabase.from("generation_usage").upsert(
       { user_id: userId, week_start: weekStart, count: used + 1 },
       { onConflict: "user_id,week_start" }
     );
 
     if (upErr) {
-      // plán vrátime aj tak, len upozorníme, že usage sa nepodarilo zapísať
       return NextResponse.json(
         { kind: "json", plan: parsed, warning: { code: "USAGE_WRITE_FAILED", message: upErr.message } },
         { status: 200 }
