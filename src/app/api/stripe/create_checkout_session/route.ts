@@ -10,33 +10,34 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string);
 
 type Body = { plan: "basic" | "plus" };
 
+function getBearer(req: Request) {
+  const auth = req.headers.get("authorization") || "";
+  return auth.startsWith("Bearer ") ? auth.slice(7) : "";
+}
+
 export async function POST(req: Request) {
   try {
-    const { plan } = (await req.json()) as Body;
+    const token = getBearer(req);
+    if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+    const { plan } = (await req.json()) as Body;
     if (plan !== "basic" && plan !== "plus") {
       return NextResponse.json({ error: "Invalid plan" }, { status: 400 });
     }
 
     const priceId = plan === "basic" ? process.env.STRIPE_PRICE_BASIC : process.env.STRIPE_PRICE_PLUS;
-    if (!priceId) {
-      return NextResponse.json({ error: "Missing STRIPE_PRICE_* env" }, { status: 500 });
-    }
-
-    // ✅ auth cez Bearer token z klienta
-    const auth = req.headers.get("authorization") || "";
-    const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-    if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!priceId) return NextResponse.json({ error: "Missing STRIPE_PRICE_* env" }, { status: 500 });
 
     const supabase = createSupabaseAdminClient();
 
+    // user z tokenu
     const { data: userRes, error: userErr } = await supabase.auth.getUser(token);
     if (userErr || !userRes?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const userId = userRes.user.id;
     const email = userRes.user.email ?? undefined;
 
-    // ak už máme stripe_customer_id, použijeme ho
+    // existujúci stripe customer?
     const { data: existingSub } = await supabase
       .from("subscriptions")
       .select("stripe_customer_id")
@@ -59,6 +60,7 @@ export async function POST(req: Request) {
       customer_email: customer ? undefined : email,
 
       subscription_data: {
+        // trial len keď ešte nemá customer / alebo ak chceš vždy — tu to nechám ako máš
         trial_period_days: 14,
         metadata: { user_id: userId, plan },
       },

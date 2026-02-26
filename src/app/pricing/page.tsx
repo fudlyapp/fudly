@@ -6,8 +6,9 @@ import { useEffect, useMemo, useState } from "react";
 import { useT } from "@/lib/i18n/useT";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
+type Plan = "basic" | "plus";
 type SubRow = {
-  plan: "basic" | "plus" | null;
+  plan: Plan | null;
   status: string | null;
   stripe_customer_id: string | null;
   current_period_end: string | null;
@@ -27,31 +28,34 @@ export default function PricingPage() {
   const [sub, setSub] = useState<SubRow | null>(null);
   const [msg, setMsg] = useState<string>("");
 
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      setMsg("");
+  async function loadSubscription() {
+    setLoading(true);
+    setMsg("");
 
-      const { data: sess } = await supabase.auth.getSession();
-      const user = sess.session?.user ?? null;
-      setEmail(user?.email ?? null);
+    const { data: sess } = await supabase.auth.getSession();
+    const user = sess.session?.user ?? null;
+    setEmail(user?.email ?? null);
 
-      if (!user) {
-        setSub(null);
-        setLoading(false);
-        return;
-      }
-
-      const { data: row } = await supabase
-        .from("subscriptions")
-        .select("plan,status,stripe_customer_id,current_period_end,trial_end")
-        .eq("user_id", user.id)
-        .maybeSingle();
-
-      setSub((row as any) ?? null);
+    if (!user) {
+      setSub(null);
       setLoading(false);
-    })();
-  }, [supabase]);
+      return;
+    }
+
+    const { data: row } = await supabase
+      .from("subscriptions")
+      .select("plan,status,stripe_customer_id,current_period_end,trial_end")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    setSub((row as any) ?? null);
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    loadSubscription();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function withToken<T>(fn: (token: string) => Promise<T>) {
     const { data: sess } = await supabase.auth.getSession();
@@ -60,7 +64,7 @@ export default function PricingPage() {
     return fn(token);
   }
 
-  async function startCheckout(plan: "basic" | "plus") {
+  async function startCheckout(plan: Plan) {
     try {
       setMsg("");
       const res = await withToken(async (token) => {
@@ -100,7 +104,16 @@ export default function PricingPage() {
   }
 
   const active = isActiveLike(sub?.status);
-  const showPortal = !!sub?.stripe_customer_id;
+  const currentPlan = (sub?.plan ?? null) as Plan | null;
+
+  // UI pravidlá:
+  // - bez login: iba info
+  // - bez aktívneho predplatného: obidve karty = Predplatiť
+  // - active basic: Basic = Spravovať, Plus = Upgrade (checkout na plus)
+  // - active plus: Plus = Spravovať, Basic = disabled
+  const canManage = active && !!sub?.stripe_customer_id;
+  const isBasicActive = active && currentPlan === "basic";
+  const isPlusActive = active && currentPlan === "plus";
 
   return (
     <main className="min-h-screen bg-black text-white p-6">
@@ -119,9 +132,9 @@ export default function PricingPage() {
                 {sub?.status ? (
                   <>
                     {" • "}status: <span className="text-white font-semibold">{sub.status}</span>
-                    {sub.plan ? (
+                    {currentPlan ? (
                       <>
-                        {" • "}plan: <span className="text-white font-semibold">{sub.plan}</span>
+                        {" • "}plan: <span className="text-white font-semibold">{currentPlan}</span>
                       </>
                     ) : null}
                   </>
@@ -171,28 +184,44 @@ export default function PricingPage() {
             <div className="mt-6 text-xs text-gray-500">{t.pricing.basic.note}</div>
 
             <div className="mt-5 flex gap-2">
-              <button
-                type="button"
-                disabled={!email || loading || active}
-                onClick={() => startCheckout("basic")}
-                className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-gray-200 disabled:opacity-40"
-              >
-                {t.pricing.subscribe}
-              </button>
-
-              {showPortal ? (
+              {/* Ak nemáš active -> Predplatiť Basic */}
+              {!active ? (
                 <button
                   type="button"
                   disabled={!email || loading}
-                  onClick={openPortal}
-                  className="rounded-xl border border-gray-700 bg-black px-4 py-2 text-sm font-semibold hover:bg-zinc-900 disabled:opacity-40"
+                  onClick={() => startCheckout("basic")}
+                  className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-gray-200 disabled:opacity-40"
                 >
-                  {t.pricing.manage}
+                  {t.pricing.subscribe} Basic
                 </button>
-              ) : null}
+              ) : (
+                // active:
+                <>
+                  <button
+                    type="button"
+                    disabled
+                    className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black opacity-40"
+                    title="Tento plán je už aktívny alebo máš vyšší."
+                  >
+                    {isPlusActive ? "Nižší plán" : "Aktívne"}
+                  </button>
+
+                  {canManage ? (
+                    <button
+                      type="button"
+                      disabled={!email || loading}
+                      onClick={openPortal}
+                      className="rounded-xl border border-gray-700 bg-black px-4 py-2 text-sm font-semibold hover:bg-zinc-900 disabled:opacity-40"
+                    >
+                      {t.pricing.manage}
+                    </button>
+                  ) : null}
+                </>
+              )}
             </div>
 
-            {active ? <div className="mt-2 text-xs text-gray-400">Už máš aktívne predplatné.</div> : null}
+            {isBasicActive ? <div className="mt-2 text-xs text-gray-400">Máš aktívny Basic.</div> : null}
+            {isPlusActive ? <div className="mt-2 text-xs text-gray-400">Máš aktívny Plus.</div> : null}
           </div>
 
           {/* PLUS */}
@@ -209,28 +238,56 @@ export default function PricingPage() {
             <div className="mt-6 text-xs text-gray-500">{t.pricing.plus.note}</div>
 
             <div className="mt-5 flex gap-2">
-              <button
-                type="button"
-                disabled={!email || loading || active}
-                onClick={() => startCheckout("plus")}
-                className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-gray-200 disabled:opacity-40"
-              >
-                {t.pricing.subscribe}
-              </button>
-
-              {showPortal ? (
+              {/* Bez aktívneho -> Predplatiť Plus */}
+              {!active ? (
                 <button
                   type="button"
                   disabled={!email || loading}
-                  onClick={openPortal}
-                  className="rounded-xl border border-gray-700 bg-black px-4 py-2 text-sm font-semibold hover:bg-zinc-900 disabled:opacity-40"
+                  onClick={() => startCheckout("plus")}
+                  className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-gray-200 disabled:opacity-40"
                 >
-                  {t.pricing.manage}
+                  {t.pricing.subscribe} Plus
                 </button>
-              ) : null}
+              ) : (
+                <>
+                  {/* Active Basic -> upgrade button */}
+                  {isBasicActive ? (
+                    <button
+                      type="button"
+                      disabled={!email || loading}
+                      onClick={() => startCheckout("plus")}
+                      className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-gray-200 disabled:opacity-40"
+                    >
+                      Upgrade na Plus
+                    </button>
+                  ) : (
+                    // Active Plus -> už aktívne
+                    <button
+                      type="button"
+                      disabled
+                      className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black opacity-40"
+                      title="Tento plán je už aktívny."
+                    >
+                      Aktívne
+                    </button>
+                  )}
+
+                  {canManage ? (
+                    <button
+                      type="button"
+                      disabled={!email || loading}
+                      onClick={openPortal}
+                      className="rounded-xl border border-gray-700 bg-black px-4 py-2 text-sm font-semibold hover:bg-zinc-900 disabled:opacity-40"
+                    >
+                      {t.pricing.manage}
+                    </button>
+                  ) : null}
+                </>
+              )}
             </div>
 
-            {active ? <div className="mt-2 text-xs text-gray-400">Už máš aktívne predplatné.</div> : null}
+            {isPlusActive ? <div className="mt-2 text-xs text-gray-400">Máš aktívny Plus.</div> : null}
+            {isBasicActive ? <div className="mt-2 text-xs text-gray-400">Plus môžeš aktivovať cez Upgrade.</div> : null}
           </div>
         </section>
       </div>
