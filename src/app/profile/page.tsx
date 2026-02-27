@@ -4,8 +4,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
-import { useT, getLangCookie, setLangCookie } from "@/lib/i18n/useT";
-import type { Lang } from "@/lib/i18n/dict";
+import { useT } from "@/lib/i18n/useT";
 
 type MealPlanRow = {
   id: string;
@@ -122,12 +121,7 @@ function normalizeItemName(raw: string) {
   }
 
   const first = s.split(",")[0]?.trim() ?? s.trim();
-  const cleaned = first
-    .replace(/\([^)]*\)/g, "")
-    .replace(/[–—-]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
+  const cleaned = first.replace(/\([^)]*\)/g, "").replace(/[–—-]/g, " ").replace(/\s+/g, " ").trim();
   return cleaned;
 }
 
@@ -172,12 +166,6 @@ function iconForIngredient(rawName: string) {
   if (/(soľ|sol|koren|paprika mletá|rasca)/.test(n)) return "🧂";
   if (/(cukor|med)/.test(n)) return "🍯";
 
-  if (/(zelenin|šalát|salat|mix zeleniny)/.test(n)) return "🥬";
-  if (/(ovoc|mix ovocia)/.test(n)) return "🍎";
-  if (/(mäso|maso)/.test(n)) return "🥩";
-  if (/(ryby|ryba)/.test(n)) return "🐟";
-  if (/(príloh|priloh|obilnin)/.test(n)) return "🌾";
-
   return "🛒";
 }
 
@@ -210,21 +198,17 @@ function deepClone<T>(x: T): T {
 
 export default function ProfilePage() {
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
+  const { t } = useT();
+
   const [authLoading, setAuthLoading] = useState(true);
   const [email, setEmail] = useState<string | null>(null);
 
   const [tab, setTab] = useState<TabKey>("plans");
 
-  // UI jazyk (cookie + profiles.language)
-  const [uiLang, setUiLang] = useState<Lang>("sk");
-  const {t} = useT(uiLang);
-
-  // uložené plány
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<MealPlanRow[]>([]);
   const [error, setError] = useState<string>("");
 
-  // predvolené
   const [prefLoading, setPrefLoading] = useState(false);
   const [prefMsg, setPrefMsg] = useState("");
   const [profileRow, setProfileRow] = useState<ProfileRow | null>(null);
@@ -239,19 +223,13 @@ export default function ProfilePage() {
   const [have, setHave] = useState("");
   const [favorites, setFavorites] = useState("");
 
-  // filter rok/mesiac (spoločné pre “Jedálničky” aj “Nákupy” aj “Kalórie” aj “Financie”)
   const [yearFilter, setYearFilter] = useState<string>("all");
-  const [monthFilter, setMonthFilter] = useState<string>("all"); // "01".."12"
+  const [monthFilter, setMonthFilter] = useState<string>("all");
 
-  // financie – ukladanie reálnej ceny
   const [financeSavingId, setFinanceSavingId] = useState<string | null>(null);
   const [financeMsg, setFinanceMsg] = useState<string>("");
 
   useEffect(() => {
-    // cookie fallback (hneď na začiatku)
-    const c = getLangCookie();
-    if (c === "sk" || c === "en" || c === "uk") setUiLang(c);
-
     (async () => {
       setAuthLoading(true);
       const { data } = await supabase.auth.getSession();
@@ -294,7 +272,7 @@ export default function ProfilePage() {
     })();
   }, [supabase, email]);
 
-  // načítanie profilu (predvolené + language)
+  // načítanie profilu (predvolené)
   useEffect(() => {
     (async () => {
       setPrefMsg("");
@@ -326,12 +304,6 @@ export default function ProfilePage() {
       const p = (data as ProfileRow) ?? null;
       setProfileRow(p);
 
-      // jazyk z profilu > cookie
-      if (p?.language === "sk" || p?.language === "en" || p?.language === "uk") {
-        setUiLang(p.language);
-        setLangCookie( p.language);
-      }
-
       if (p) {
         if (p.people_default != null) setPeople(String(p.people_default));
         if (p.weekly_budget_eur_default != null) setBudget(String(p.weekly_budget_eur_default));
@@ -355,18 +327,6 @@ export default function ProfilePage() {
   async function logout() {
     await supabase.auth.signOut();
     window.location.href = "/login";
-  }
-
-  async function changeLanguage(next: Lang) {
-    setUiLang(next);
-    setLangCookie(next);
-
-    const { data: sess } = await supabase.auth.getSession();
-    const user = sess.session?.user;
-    if (!user) return;
-
-    // upsert iba language, nech nezmažeme ostatné polia
-    await supabase.from("profiles").upsert({ user_id: user.id, language: next }, { onConflict: "user_id" });
   }
 
   const years = useMemo(() => {
@@ -498,7 +458,7 @@ export default function ProfilePage() {
       user_id: user.id,
       full_name: null,
 
-      language: uiLang,
+      language: null, // jazyk rieši globálne tlačidlá, tu ho netreba prepisovať
 
       people_default: people.trim() ? Number(people) : null,
       weekly_budget_eur_default: budget.trim() ? Number(budget) : null,
@@ -575,7 +535,6 @@ export default function ProfilePage() {
       return;
     }
 
-    // update lokálne
     setRows((prev) =>
       prev.map((r) => {
         if (r.id !== rowId) return r;
@@ -604,18 +563,6 @@ export default function ProfilePage() {
               <div className="space-y-2">
                 <div className="text-sm text-gray-300">
                   Prihlásený ako <span className="text-white font-semibold">{email}</span>
-                </div>
-
-                <div className="flex justify-end">
-                  <select
-                    value={uiLang}
-                    onChange={(e) => changeLanguage(e.target.value as Lang)}
-                    className="rounded-xl border border-gray-700 bg-black px-3 py-2 text-sm text-white"
-                  >
-                    <option value="sk">Slovenčina</option>
-                    <option value="en">English</option>
-                    <option value="uk">Українська</option>
-                  </select>
                 </div>
 
                 <div className="flex justify-end gap-2">
@@ -658,7 +605,6 @@ export default function ProfilePage() {
 
         {email && (
           <>
-            {/* TABS */}
             <div className="mb-6 flex flex-wrap gap-2">
               <TabButton active={tab === "plans"} onClick={() => setTab("plans")}>
                 Uložené jedálničky
@@ -677,7 +623,6 @@ export default function ProfilePage() {
               </TabButton>
             </div>
 
-            {/* FILTERS (spoločné pre plans/shopping/calories/finance) */}
             {(tab === "plans" || tab === "shopping" || tab === "calories" || tab === "finance") && (
               <div className="mb-4 flex flex-wrap items-center gap-2">
                 <select
@@ -722,9 +667,7 @@ export default function ProfilePage() {
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <h2 className="text-xl font-semibold">Predvolené</h2>
-                    <p className="mt-1 text-sm text-gray-300">
-                      Toto sa načíta v Generátore cez „Načítať uložené“.
-                    </p>
+                    <p className="mt-1 text-sm text-gray-300">Toto sa načíta v Generátore cez „Načítať uložené“.</p>
                   </div>
 
                   <button
@@ -846,12 +789,8 @@ export default function ProfilePage() {
             {/* PLANS */}
             {tab === "plans" ? (
               <section className="rounded-2xl border border-gray-800 bg-zinc-900 p-6">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <h2 className="text-xl font-semibold">Uložené jedálničky</h2>
-                    <p className="mt-1 text-sm text-gray-300">Filtrovanie podľa roka a mesiaca.</p>
-                  </div>
-                </div>
+                <h2 className="text-xl font-semibold">Uložené jedálničky</h2>
+                <p className="mt-1 text-sm text-gray-300">Filtrovanie podľa roka a mesiaca.</p>
 
                 {loading ? <div className="mt-4 text-sm text-gray-400">Načítavam…</div> : null}
                 {error ? <div className="mt-4 text-sm text-red-300">Chyba: {error}</div> : null}
@@ -914,14 +853,9 @@ export default function ProfilePage() {
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <h2 className="text-xl font-semibold">Uložené nákupy</h2>
-                    <p className="mt-1 text-sm text-gray-300">
-                      Rovnaké filtrovanie ako pri jedálničkoch + export zatiaľ iba TXT.
-                    </p>
+                    <p className="mt-1 text-sm text-gray-300">Filtrovanie + export zatiaľ iba TXT.</p>
                   </div>
-                  <Link
-                    href="/generate"
-                    className="rounded-xl border border-gray-700 bg-black px-4 py-2 text-sm hover:bg-zinc-900"
-                  >
+                  <Link href="/generate" className="rounded-xl border border-gray-700 bg-black px-4 py-2 text-sm hover:bg-zinc-900">
                     Generovať nový týždeň
                   </Link>
                 </div>
@@ -988,9 +922,7 @@ export default function ProfilePage() {
                                     {firstTrip?.estimated_cost_eur != null ? (
                                       <>
                                         {" • "}odhad:{" "}
-                                        <span className="text-white font-semibold">
-                                          {firstTrip.estimated_cost_eur} €
-                                        </span>
+                                        <span className="text-white font-semibold">{firstTrip.estimated_cost_eur} €</span>
                                       </>
                                     ) : null}
                                   </div>
@@ -1013,9 +945,7 @@ export default function ProfilePage() {
                                 )}
 
                                 {firstTrip?.items?.length > 6 ? (
-                                  <div className="mt-2 text-xs text-gray-500">
-                                    Zobrazených 6 položiek. Zvyšok nájdeš v detaile týždňa.
-                                  </div>
+                                  <div className="mt-2 text-xs text-gray-500">Zobrazených 6 položiek. Zvyšok nájdeš v detaile týždňa.</div>
                                 ) : null}
                               </div>
                             </div>
@@ -1034,14 +964,9 @@ export default function ProfilePage() {
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <h2 className="text-xl font-semibold">Kalórie</h2>
-                    <p className="mt-1 text-sm text-gray-300">
-                      Priemer kcal/deň + súčet týždňa. Dáta sú v uloženom pláne.
-                    </p>
+                    <p className="mt-1 text-sm text-gray-300">Priemer kcal/deň + súčet týždňa.</p>
                   </div>
-                  <Link
-                    href="/generate"
-                    className="rounded-xl border border-gray-700 bg-black px-4 py-2 text-sm hover:bg-zinc-900"
-                  >
+                  <Link href="/generate" className="rounded-xl border border-gray-700 bg-black px-4 py-2 text-sm hover:bg-zinc-900">
                     Generovať nový týždeň
                   </Link>
                 </div>
@@ -1050,9 +975,7 @@ export default function ProfilePage() {
                 {error ? <div className="mt-4 text-sm text-red-300">Chyba: {error}</div> : null}
 
                 {!loading && !error && caloriesWeeksFiltered.length === 0 ? (
-                  <div className="mt-4 text-gray-300">
-                    Pre tento filter nemáš uložené kalórie. Vygeneruj nový týždeň (API už kalórie vracia).
-                  </div>
+                  <div className="mt-4 text-gray-300">Pre tento filter nemáš uložené kalórie.</div>
                 ) : null}
 
                 <div className="mt-4 space-y-6">
@@ -1063,7 +986,7 @@ export default function ProfilePage() {
                       </div>
 
                       <div className="grid grid-cols-1 gap-4">
-                        {g.items.map(({ r, plan, avg, weekly }) => {
+                        {g.items.map(({ r, avg, weekly }) => {
                           const weekEnd = addDaysISO(r.week_start, 6);
                           return (
                             <Link
@@ -1077,15 +1000,9 @@ export default function ProfilePage() {
                                     Týždeň {formatDateSK(r.week_start)} – {formatDateSK(weekEnd)}
                                   </div>
                                   <div className="mt-1 text-sm text-gray-400">
-                                    Priemer:{" "}
-                                    <span className="text-white font-semibold">{typeof avg === "number" ? avg : "—"}</span>{" "}
-                                    kcal/deň
+                                    Priemer: <span className="text-white font-semibold">{typeof avg === "number" ? avg : "—"}</span> kcal/deň
                                     {" • "}
-                                    Týždeň:{" "}
-                                    <span className="text-white font-semibold">
-                                      {typeof weekly === "number" ? weekly : "—"}
-                                    </span>{" "}
-                                    kcal
+                                    Týždeň: <span className="text-white font-semibold">{typeof weekly === "number" ? weekly : "—"}</span> kcal
                                   </div>
                                 </div>
                                 <div className="text-sm text-gray-400">Otvor</div>
@@ -1106,14 +1023,9 @@ export default function ProfilePage() {
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <h2 className="text-xl font-semibold">Financie</h2>
-                    <p className="mt-1 text-sm text-gray-300">
-                      Budget vs odhad vs reálna cena. Reálnu cenu vieš dopísať ručne.
-                    </p>
+                    <p className="mt-1 text-sm text-gray-300">Budget vs odhad vs reálna cena.</p>
                   </div>
-                  <Link
-                    href="/generate"
-                    className="rounded-xl border border-gray-700 bg-black px-4 py-2 text-sm hover:bg-zinc-900"
-                  >
+                  <Link href="/generate" className="rounded-xl border border-gray-700 bg-black px-4 py-2 text-sm hover:bg-zinc-900">
                     Generovať nový týždeň
                   </Link>
                 </div>
@@ -1152,22 +1064,15 @@ export default function ProfilePage() {
                                   <div className="text-lg font-semibold">
                                     Týždeň {formatDateSK(r.week_start)} – {formatDateSK(weekEnd)}
                                   </div>
+
                                   <div className="mt-1 text-sm text-gray-400">
-                                    Budget:{" "}
-                                    <span className="text-white font-semibold">
-                                      {budgetVal != null ? `${budgetVal} €` : "—"}
-                                    </span>
+                                    Budget: <span className="text-white font-semibold">{budgetVal != null ? `${budgetVal} €` : "—"}</span>
                                     {" • "}
-                                    Odhad:{" "}
-                                    <span className="text-white font-semibold">{estVal != null ? `${estVal} €` : "—"}</span>
+                                    Odhad: <span className="text-white font-semibold">{estVal != null ? `${estVal} €` : "—"}</span>
                                     {diffEst != null ? (
                                       <>
                                         {" • "}vs budget:{" "}
-                                        <span
-                                          className={
-                                            diffEst > 0 ? "text-red-300 font-semibold" : "text-green-300 font-semibold"
-                                          }
-                                        >
+                                        <span className={diffEst > 0 ? "text-red-300 font-semibold" : "text-green-300 font-semibold"}>
                                           {diffEst > 0 ? "+" : ""}
                                           {diffEst.toFixed(2)} €
                                         </span>
@@ -1176,16 +1081,11 @@ export default function ProfilePage() {
                                   </div>
 
                                   <div className="mt-1 text-sm text-gray-400">
-                                    Reálna cena:{" "}
-                                    <span className="text-white font-semibold">{actVal != null ? `${actVal} €` : "—"}</span>
+                                    Reálna cena: <span className="text-white font-semibold">{actVal != null ? `${actVal} €` : "—"}</span>
                                     {diffAct != null ? (
                                       <>
                                         {" • "}vs budget:{" "}
-                                        <span
-                                          className={
-                                            diffAct > 0 ? "text-red-300 font-semibold" : "text-green-300 font-semibold"
-                                          }
-                                        >
+                                        <span className={diffAct > 0 ? "text-red-300 font-semibold" : "text-green-300 font-semibold"}>
                                           {diffAct > 0 ? "+" : ""}
                                           {diffAct.toFixed(2)} €
                                         </span>
@@ -1214,10 +1114,7 @@ export default function ProfilePage() {
                                   <button
                                     type="button"
                                     onClick={() => {
-                                      const v = window.prompt(
-                                        "Zadaj reálnu cenu (€):",
-                                        actVal != null ? String(actVal) : ""
-                                      );
+                                      const v = window.prompt("Zadaj reálnu cenu (€):", actVal != null ? String(actVal) : "");
                                       if (v != null) saveActualCost(r.id, r.week_start, v);
                                     }}
                                     disabled={financeSavingId === r.id}
@@ -1242,9 +1139,7 @@ export default function ProfilePage() {
                   ))}
                 </div>
 
-                <div className="mt-4 text-xs text-gray-500">
-                  Tip: neskôr vieme doplniť reálne ceny aj per nákup (trip), nie len celkovo za týždeň.
-                </div>
+                <div className="mt-4 text-xs text-gray-500">Tip: neskôr doplníme reálne ceny aj per nákup (trip).</div>
               </section>
             ) : null}
           </>

@@ -25,3 +25,21 @@ body {
     text-wrap: balance;
   }
 }
+/* Full-page watermark */
+.fudly-watermark {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: url("/fudly_white.png");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 1400px 1400px; /* uprav podľa chuti */
+  opacity: 0.6; /* 0.08–0.14 je najčastejšie sweet spot */
+  filter: blur(0.2px);
+}
+@media (max-width: 768px) {
+  .fudly-watermark {
+    background-size: 900px 900px;
+    opacity: 0.08;
+  }
+}

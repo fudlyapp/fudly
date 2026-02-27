@@ -1,8 +1,10 @@
+// src/app/generate/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { useT } from "@/lib/i18n/useT";
 
 type Recipe = {
   title: string;
@@ -39,10 +41,7 @@ type PlanJSON = {
   recipes?: Record<string, Recipe>;
 };
 
-type ApiResponse =
-  | { kind: "json"; plan: PlanJSON }
-  | { kind: "text"; text: string }
-  | { error: any };
+type ApiResponse = { kind: "json"; plan: PlanJSON } | { kind: "text"; text: string } | { error: any };
 
 type ProfileRow = {
   user_id: string;
@@ -60,9 +59,6 @@ type ProfileRow = {
   avoid: string | null;
   have: string | null;
   favorites: string | null;
-
-  // (do budúcna) tier / membership (ak to dáš do profiles)
-  // membership_tier?: string | null;
 };
 
 type MealPlanRowLite = {
@@ -95,7 +91,7 @@ function mondayOfWeekISO(date: Date) {
   return toISODate(d);
 }
 
-function formatDateSKFromISO(iso?: string) {
+function formatDateFromISO(iso?: string) {
   if (!iso) return "";
   const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!m) return iso;
@@ -109,26 +105,21 @@ function buildWeekOptions() {
   const thisMonday = mondayOfWeekISO(today);
   const nextMonday = addDaysISO(thisMonday, 7);
 
-  // iba v pondelok môžeš generovať aj tento týždeň
   const allowThisWeek = day === 1;
 
-  const options: Array<{
-    value: string; // monday ISO
-    label: string; // DD.MM.YYYY – DD.MM.YYYY
-    kind: "this" | "next";
-  }> = [];
+  const options: Array<{ value: string; label: string; kind: "this" | "next" }> = [];
 
   if (allowThisWeek) {
     options.push({
       value: thisMonday,
-      label: `${formatDateSKFromISO(thisMonday)} – ${formatDateSKFromISO(addDaysISO(thisMonday, 6))}`,
+      label: `${formatDateFromISO(thisMonday)} – ${formatDateFromISO(addDaysISO(thisMonday, 6))}`,
       kind: "this",
     });
   }
 
   options.push({
     value: nextMonday,
-    label: `${formatDateSKFromISO(nextMonday)} – ${formatDateSKFromISO(addDaysISO(nextMonday, 6))}`,
+    label: `${formatDateFromISO(nextMonday)} – ${formatDateFromISO(addDaysISO(nextMonday, 6))}`,
     kind: "next",
   });
 
@@ -143,13 +134,12 @@ type StyleOption = {
   plusOnly?: boolean;
 };
 
+// hodnoty nechávam SK kvôli backendu/inputu
 const STYLE_OPTIONS: StyleOption[] = [
   { value: "lacné", label: "Lacné", emoji: "💰", desc: "čo najnižšia cena" },
   { value: "rychle", label: "Rýchle", emoji: "⚡", desc: "max 20–30 min" },
   { value: "vyvazene", label: "Vyvážené", emoji: "🥗", desc: "bielkoviny + zelenina" },
   { value: "vegetarianske", label: "Vegetariánske", emoji: "🌱", desc: "bez mäsa" },
-
-  // PLUS-only podľa tvojho zadania
   { value: "tradicne", label: "Tradičné", emoji: "🍲", desc: "domáca poctivá strava", plusOnly: true },
   { value: "exoticke", label: "Exotické", emoji: "🍜", desc: "ázia / mexiko / fusion", plusOnly: true },
   { value: "fit", label: "Fit", emoji: "🏋️", desc: "viac bielkovín, menej cukru", plusOnly: true },
@@ -178,7 +168,6 @@ function normalizePlan(plan: PlanJSON): PlanJSON {
   }
 
   if (Array.isArray(next.days)) next.days = next.days.slice(0, 7);
-
   return next;
 }
 
@@ -195,9 +184,7 @@ function hasAllRecipes(plan: PlanJSON | null) {
 }
 
 function getActiveTier() {
-  // ZATIAĽ jednoduchý stub:
-  // - teraz sme ešte nenapojili Stripe/členstvá, tak beriem "basic"
-  // Keď spravíme membership, toto budeme čítať z DB (profiles alebo subscriptions tabuľky).
+  // TODO: napojiť na Stripe/subscriptions.
   return "basic" as "basic" | "plus";
 }
 
@@ -207,6 +194,7 @@ function GENERATION_LIMIT_FOR_TIER(tier: "basic" | "plus") {
 
 export default function GeneratorPage() {
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
+  const { t, lang } = useT();
 
   const tier = getActiveTier();
   const generationLimit = GENERATION_LIMIT_FOR_TIER(tier);
@@ -229,8 +217,6 @@ export default function GeneratorPage() {
   const [shoppingTrips, setShoppingTrips] = useState("2");
   const [repeatDays, setRepeatDays] = useState("2");
 
-  const [language, setLanguage] = useState<"sk" | "en" | "uk">("sk");
-
   const [loading, setLoading] = useState(false);
   const [textResult, setTextResult] = useState("");
   const [plan, setPlan] = useState<PlanJSON | null>(null);
@@ -238,16 +224,11 @@ export default function GeneratorPage() {
   const [prefLoading, setPrefLoading] = useState(false);
   const [prefMsg, setPrefMsg] = useState("");
 
-  // existujúci plán na týždeň (kvôli limitu + modal)
   const [existingRow, setExistingRow] = useState<MealPlanRowLite | null>(null);
   const [existingLoading, setExistingLoading] = useState(false);
 
-  // modal
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmMsg, setConfirmMsg] = useState("");
-  const [pendingAction, setPendingAction] = useState<null | { kind: "overwrite" | "keep" }>(null);
-
-  const [lastInput, setLastInput] = useState<any | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -273,18 +254,9 @@ export default function GeneratorPage() {
   const isValid = useMemo(() => {
     const p = Number(people);
     const b = Number(budget);
-    return (
-      !!weekStart &&
-      Number.isFinite(p) &&
-      p >= 1 &&
-      p <= 6 &&
-      Number.isFinite(b) &&
-      b >= 1 &&
-      b <= 1000
-    );
+    return !!weekStart && Number.isFinite(p) && p >= 1 && p <= 6 && Number.isFinite(b) && b >= 1 && b <= 1000;
   }, [people, budget, weekStart]);
 
-  // načítaj existujúci plán + generation_count vždy keď zmeníš týždeň (a si prihlásený)
   useEffect(() => {
     (async () => {
       setExistingRow(null);
@@ -303,12 +275,8 @@ export default function GeneratorPage() {
           .eq("week_start", weekStart)
           .maybeSingle();
 
-        if (error) {
-          // ticho, len nech to neblokuje
-          setExistingRow(null);
-        } else {
-          setExistingRow((data as any) ?? null);
-        }
+        if (error) setExistingRow(null);
+        else setExistingRow((data as any) ?? null);
       } finally {
         setExistingLoading(false);
       }
@@ -320,11 +288,8 @@ export default function GeneratorPage() {
     return typeof n === "number" && Number.isFinite(n) ? n : 0;
   }, [existingRow]);
 
-  const remainingGenerations = useMemo(() => {
-    return Math.max(0, generationLimit - usedGenerations);
-  }, [generationLimit, usedGenerations]);
+  const remainingGenerations = useMemo(() => Math.max(0, generationLimit - usedGenerations), [generationLimit, usedGenerations]);
 
-  // načítaj defaulty z profilu
   async function loadSavedFromProfile() {
     setPrefMsg("");
     setPrefLoading(true);
@@ -346,14 +311,14 @@ export default function GeneratorPage() {
       .maybeSingle();
 
     if (error) {
-      setPrefMsg("Chyba pri načítaní profilu: " + error.message);
+      setPrefMsg(`${t.generator.loadProfileError} ${error.message}`);
       setPrefLoading(false);
       return;
     }
 
     const p = (data as ProfileRow) ?? null;
     if (!p) {
-      setPrefMsg("Nemáš ešte uložené predvolené. Ulož ich tlačidlom „Uložiť ako predvolené“.");
+      setPrefMsg(t.generator.loadProfileNoDefaults);
       setPrefLoading(false);
       return;
     }
@@ -362,10 +327,6 @@ export default function GeneratorPage() {
     if (p.weekly_budget_eur_default != null) setBudget(String(p.weekly_budget_eur_default));
     if (p.shopping_trips_default != null) setShoppingTrips(String(p.shopping_trips_default));
     if (p.repeat_days_default != null) setRepeatDays(String(p.repeat_days_default));
-
-    if (p.language === "en" || p.language === "uk" || p.language === "sk") {
-      setLanguage(p.language);
-    }
 
     if (p.style_default) {
       const allowed = new Set(STYLE_OPTIONS.map((x) => x.value));
@@ -378,7 +339,7 @@ export default function GeneratorPage() {
     setHave(p.have ?? "");
     setFavorites(p.favorites ?? "");
 
-    setPrefMsg("✅ Načítané z profilu.");
+    setPrefMsg(t.generator.loadedFromProfile);
     setPrefLoading(false);
   }
 
@@ -397,8 +358,7 @@ export default function GeneratorPage() {
     const payload: ProfileRow = {
       user_id: user.id,
       full_name: null,
-
-      language,
+      language: lang,
 
       people_default: people.trim() ? Number(people) : null,
       weekly_budget_eur_default: budget.trim() ? Number(budget) : null,
@@ -415,12 +375,12 @@ export default function GeneratorPage() {
     const { error } = await supabase.from("profiles").upsert(payload as any, { onConflict: "user_id" });
 
     if (error) {
-      setPrefMsg("Chyba pri ukladaní profilu: " + error.message);
+      setPrefMsg(`${t.generator.saveProfileError} ${error.message}`);
       setPrefLoading(false);
       return;
     }
 
-    setPrefMsg("✅ Uložené ako predvolené do profilu.");
+    setPrefMsg(t.generator.savedToProfile);
     setPrefLoading(false);
   }
 
@@ -430,25 +390,22 @@ export default function GeneratorPage() {
   }
 
   function openOverwriteModal() {
-    setConfirmMsg(
-      `Pre týždeň ${weekLabel} už máš uložený jedálniček.\n\nChceš ho prepísať novým generovaním?`
-    );
+    setConfirmMsg(t.generator.overwriteTitle(weekLabel));
     setConfirmOpen(true);
   }
 
   async function keepExistingPlan() {
-    // len načítame existujúci plán do preview
     const p = (existingRow?.plan ?? existingRow?.plan_generated) as PlanJSON | null;
     if (p) {
       setPlan(normalizePlan(p));
       setTextResult("");
     } else {
       setPlan(null);
-      setTextResult("Tento týždeň má uložený záznam, ale plán je prázdny.");
+      setTextResult(t.generator.emptySavedPlan);
     }
   }
 
-  async function generateAndAutoSave({ overwrite }: { overwrite: boolean }) {
+  async function generateAndAutoSave() {
     setLoading(true);
     setTextResult("");
     setPlan(null);
@@ -462,29 +419,23 @@ export default function GeneratorPage() {
       return;
     }
 
-    // limit (ak už je limit vyčerpaný, nepustíme)
     const currentCount = existingRow?.generation_count ?? 0;
     if (currentCount >= generationLimit) {
       setLoading(false);
-      setTextResult(
-        `Dosiahol si limit generovaní pre tento týždeň (${generationLimit}). Ak chceš viac, bude to v Plus členstve.`
-      );
+      setTextResult(t.generator.limitReached(generationLimit));
       return;
     }
 
-    // PLUS-only štýly
     const styleMeta = STYLE_OPTIONS.find((x) => x.value === style);
     if (styleMeta?.plusOnly && tier !== "plus") {
       setLoading(false);
-      setTextResult(
-        `Štýl „${styleMeta.label}“ je dostupný iba v Plus členstve. Vyber iný štýl alebo upgrade.`
-      );
+      setTextResult(t.generator.plusOnlyStyle(styleMeta.label));
       return;
     }
 
     const inputPayload = {
       weekStart,
-      language,
+      language: lang, // sk/en/ua
       people,
       budget,
       intolerances,
@@ -496,47 +447,38 @@ export default function GeneratorPage() {
       repeatDays,
     };
 
-    setLastInput(inputPayload);
-
     try {
-      const { data: s } = await supabase.auth.getSession();
-const accessToken = s.session?.access_token;
-if (!accessToken) {
-  setTextResult("Nie si prihlásený.");
-  return;
-}
+      const { data: ss } = await supabase.auth.getSession();
+      const accessToken = ss.session?.access_token;
+      if (!accessToken) {
+        setTextResult(t.generator.notLoggedIn);
+        return;
+      }
 
-const res = await fetch("/api/generate", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-    Authorization: `Bearer ${accessToken}`,
-  },
-  body: JSON.stringify(inputPayload),
-});
+      const res = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify(inputPayload),
+      });
 
       const data: ApiResponse = await res.json();
 
       if (!res.ok) {
-        setTextResult(`Chyba: ${JSON.stringify((data as any).error ?? data, null, 2)}`);
+        setTextResult(t.generator.serverError(JSON.stringify((data as any).error ?? data, null, 2)));
         return;
       }
 
       if ("kind" in data && data.kind === "json") {
         const normalized = normalizePlan(data.plan);
 
-        // bezpečnostná poistka: recepty musia byť komplet
         if (!hasAllRecipes(normalized)) {
-          setTextResult(
-            "Chyba: vygenerovaný plán nemá recept pre každé jedlo. Skús znova (API má teraz validáciu, takže by sa to už nemalo stávať)."
-          );
+          // toto môžeš neskôr tiež preložiť – zatiaľ nechávam ako server-problém
+          setTextResult(t.common.errorPrefix + " missing recipes, try again.");
           return;
         }
 
-        // AUTO-SAVE do Supabase (plan aj plan_generated rovnaké)
         const weekEnd = addDaysISO(weekStart, 6);
-        const nextCount = overwrite ? currentCount + 1 : currentCount + 1; // aj prvé uloženie je +1
-
+        const nextCount = currentCount + 1;
         const nowIso = new Date().toISOString();
 
         const { error } = await supabase.from("meal_plans").upsert(
@@ -556,31 +498,24 @@ const res = await fetch("/api/generate", {
         );
 
         if (error) {
-          setTextResult("Plán sa síce vygeneroval, ale nepodarilo sa ho uložiť: " + error.message);
+          setTextResult(t.generator.generatedButSaveFailed(error.message));
           setPlan(normalized);
           return;
         }
 
-        // refresh existingRow + remaining counter
         setExistingRow((prev) => {
           const base = prev ?? ({} as any);
-          return {
-            id: base.id ?? "unknown",
-            week_start: weekStart,
-            generation_count: nextCount,
-            plan: normalized,
-            plan_generated: normalized,
-          };
+          return { id: base.id ?? "unknown", week_start: weekStart, generation_count: nextCount, plan: normalized, plan_generated: normalized };
         });
 
         setPlan(normalized);
       } else if ("kind" in data && data.kind === "text") {
         setTextResult(data.text);
       } else {
-        setTextResult("Chyba: neočakávaná odpoveď zo servera.");
+        setTextResult(t.generator.unexpectedServer);
       }
     } catch (err: any) {
-      setTextResult(`Chyba: ${err?.message ?? "neznáma chyba"}`);
+      setTextResult(t.generator.serverError(err?.message ?? "unknown"));
     } finally {
       setLoading(false);
     }
@@ -590,19 +525,17 @@ const res = await fetch("/api/generate", {
     e.preventDefault();
     if (!isValid) return;
 
-    // ak existuje plán na týždeň, spýtaj sa
     if (existingRow) {
       openOverwriteModal();
       return;
     }
 
-    // inak generuj a ulož
-    await generateAndAutoSave({ overwrite: false });
+    await generateAndAutoSave();
   }
 
   const canGenerate = useMemo(() => {
     if (!isValid) return false;
-    if (!userEmail) return true; // button bude viesť na login
+    if (!userEmail) return true;
     if (existingLoading) return false;
     if (remainingGenerations <= 0) return false;
     return true;
@@ -614,32 +547,24 @@ const res = await fetch("/api/generate", {
         <header className="mb-6 flex items-start justify-between gap-4">
           <div>
             <div className="text-sm text-gray-400">Fudly</div>
-            <h1 className="mt-2 text-3xl font-bold">Týždenný jedálniček + nákupy</h1>
-            <div className="mt-2 text-xs text-gray-500">
-              Plánovanie môže trvať 2–3 minúty (jedálniček + nákupy + recepty). Počas generovania stránku nerefrešuj.
-            </div>
+            <h1 className="mt-2 text-3xl font-bold">{t.generator.title}</h1>
+            <div className="mt-2 text-sm text-gray-400">{t.generator.subtitle}</div>
           </div>
 
           <div className="text-right">
             {authLoading ? (
-              <div className="text-sm text-gray-400">Kontrolujem prihlásenie…</div>
+              <div className="text-sm text-gray-400">{t.generator.checkingAuth}</div>
             ) : userEmail ? (
               <div className="space-y-2">
                 <div className="text-sm text-gray-300">
-                  Prihlásený ako <span className="text-white font-semibold">{userEmail}</span>
+                  {t.generator.loggedAs} <span className="text-white font-semibold">{userEmail}</span>
                 </div>
                 <div className="flex justify-end gap-2">
-                  <Link
-                    href="/profile"
-                    className="rounded-xl border border-gray-700 bg-black px-4 py-2 text-sm hover:bg-zinc-900"
-                  >
-                    Profil
+                  <Link href="/profile" className="rounded-xl border border-gray-700 bg-black px-4 py-2 text-sm hover:bg-zinc-900">
+                    {t.generator.profile}
                   </Link>
-                  <button
-                    onClick={logout}
-                    className="rounded-xl border border-gray-700 bg-black px-4 py-2 text-sm hover:bg-zinc-900"
-                  >
-                    Odhlásiť sa
+                  <button onClick={logout} className="rounded-xl border border-gray-700 bg-black px-4 py-2 text-sm hover:bg-zinc-900">
+                    {t.generator.logout}
                   </button>
                 </div>
               </div>
@@ -648,15 +573,15 @@ const res = await fetch("/api/generate", {
                 onClick={() => (window.location.href = "/login")}
                 className="rounded-xl bg-white px-4 py-2 text-sm text-black font-semibold hover:bg-gray-200"
               >
-                Prihlásiť sa
+                {t.generator.login}
               </button>
             )}
           </div>
         </header>
 
         <form onSubmit={onSubmit} className="rounded-2xl border border-gray-800 bg-zinc-900 p-6 shadow-lg">
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-            <Field label="Týždeň (pondelok–nedeľa)">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <Field label={t.generator.week}>
               <select
                 value={weekStart}
                 onChange={(e) => setWeekStart(e.target.value)}
@@ -664,13 +589,13 @@ const res = await fetch("/api/generate", {
               >
                 {weekOptions.map((o) => (
                   <option key={o.value} value={o.value}>
-                    {o.kind === "this" ? "Tento" : "Budúci"}: {o.label}
+                    {o.kind === "this" ? t.generator.thisWeek : t.generator.nextWeek}: {o.label}
                   </option>
                 ))}
               </select>
             </Field>
 
-            <Field label="Počet ľudí (1–6)">
+            <Field label={t.generator.people}>
               <input
                 value={people}
                 onChange={(e) => setPeople(e.target.value)}
@@ -680,7 +605,7 @@ const res = await fetch("/api/generate", {
               />
             </Field>
 
-            <Field label="Budget / týždeň (€) (1–1000)">
+            <Field label={t.generator.budget}>
               <input
                 value={budget}
                 onChange={(e) => setBudget(e.target.value)}
@@ -689,22 +614,10 @@ const res = await fetch("/api/generate", {
                 placeholder="80"
               />
             </Field>
-
-            <Field label="Jazyk">
-              <select
-                value={language}
-                onChange={(e) => setLanguage(e.target.value as any)}
-                className="w-full rounded-xl border border-gray-700 bg-black px-3 py-2 text-white"
-              >
-                <option value="sk">Slovenčina</option>
-                <option value="en">English</option>
-                <option value="uk">Українська</option>
-              </select>
-            </Field>
           </div>
 
           <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
-            <Field label="Preferovaný štýl">
+            <Field label={t.generator.style}>
               <select
                 value={style}
                 onChange={(e) => setStyle(e.target.value)}
@@ -720,12 +633,10 @@ const res = await fetch("/api/generate", {
                   );
                 })}
               </select>
-              {tier !== "plus" ? (
-                <div className="mt-1 text-xs text-gray-500">Fit / Tradičné / Exotické budú v Plus členstve.</div>
-              ) : null}
+              {tier !== "plus" ? <div className="mt-1 text-xs text-gray-500">Fit / Tradičné / Exotické budú v Plus členstve.</div> : null}
             </Field>
 
-            <Field label="Nákupy / týždeň">
+            <Field label={t.generator.trips}>
               <select
                 value={shoppingTrips}
                 onChange={(e) => setShoppingTrips(e.target.value)}
@@ -738,21 +649,21 @@ const res = await fetch("/api/generate", {
               </select>
             </Field>
 
-            <Field label="Varenie na viac dní">
+            <Field label={t.generator.repeatDays}>
               <select
                 value={repeatDays}
                 onChange={(e) => setRepeatDays(e.target.value)}
                 className="w-full rounded-xl border border-gray-700 bg-black px-3 py-2 text-white"
               >
-                <option value="1">1 deň (bez opakovania)</option>
-                <option value="2">2 dni</option>
-                <option value="3">3 dni</option>
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
               </select>
             </Field>
           </div>
 
           <div className="mt-4 grid grid-cols-1 gap-4">
-            <Field label="❌ Intolerancie / NESMÚ byť použité" hint="tvrdý zákaz">
+            <Field label={t.generator.intolerances} hint={t.generator.hardBanHint}>
               <input
                 value={intolerances}
                 onChange={(e) => setIntolerances(e.target.value)}
@@ -761,7 +672,7 @@ const res = await fetch("/api/generate", {
               />
             </Field>
 
-            <Field label="Vyhnúť sa" hint="mäkká preferencia">
+            <Field label={t.generator.avoid} hint={t.generator.softPrefHint}>
               <input
                 value={avoid}
                 onChange={(e) => setAvoid(e.target.value)}
@@ -770,7 +681,7 @@ const res = await fetch("/api/generate", {
               />
             </Field>
 
-            <Field label="Mám doma (použi)" hint="minimalizuj odpad">
+            <Field label={t.generator.have} hint={t.generator.wasteLessHint}>
               <input
                 value={have}
                 onChange={(e) => setHave(e.target.value)}
@@ -779,7 +690,7 @@ const res = await fetch("/api/generate", {
               />
             </Field>
 
-            <Field label="Obľúbené" hint="nech je to chutné">
+            <Field label={t.generator.favorites} hint={t.generator.tastyHint}>
               <input
                 value={favorites}
                 onChange={(e) => setFavorites(e.target.value)}
@@ -794,26 +705,24 @@ const res = await fetch("/api/generate", {
               <div className="text-sm text-gray-400">
                 {isValid ? (
                   <>
-                    ✅ pripravené • týždeň: {weekLabel}
+                    {t.generator.ready} • {t.generator.week}: {weekLabel}
                     {userEmail ? (
                       <>
                         {" • "}
-                        generovaní:{" "}
+                        {t.generator.generations}:{" "}
                         <span className="text-white font-semibold">
                           {usedGenerations}/{generationLimit}
                         </span>{" "}
-                        (zostáva{" "}
-                        <span className="text-white font-semibold">{remainingGenerations}</span>)
+                        ({t.generator.remaining} <span className="text-white font-semibold">{remainingGenerations}</span>)
                       </>
                     ) : null}
                   </>
                 ) : (
-                  "Skontroluj: týždeň, počet ľudí 1–6, budget 1–1000"
+                  t.generator.checkInputs
                 )}
               </div>
 
               <div className="flex flex-wrap items-center gap-3">
-                {/* malé chips tlačidlá */}
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
@@ -821,7 +730,7 @@ const res = await fetch("/api/generate", {
                     disabled={prefLoading}
                     className="rounded-full border border-gray-700 bg-black px-3 py-1.5 text-xs text-gray-200 hover:bg-zinc-900 transition disabled:opacity-40"
                   >
-                    {prefLoading ? "Načítavam..." : "Načítať uložené"}
+                    {prefLoading ? t.common.loading : t.generator.loadSaved}
                   </button>
 
                   <button
@@ -830,26 +739,18 @@ const res = await fetch("/api/generate", {
                     disabled={prefLoading}
                     className="rounded-full border border-gray-700 bg-black px-3 py-1.5 text-xs text-gray-200 hover:bg-zinc-900 transition disabled:opacity-40"
                   >
-                    {prefLoading ? "Ukladám..." : "Uložiť ako predvolené"}
+                    {prefLoading ? t.common.loading : t.generator.saveAsDefault}
                   </button>
-
-                  <div className="text-xs text-gray-500 md:ml-2">
-                    Vyplň raz, ulož do profilu, potom len klikneš „Načítať uložené“.
-                  </div>
                 </div>
 
-                {/* hlavné CTA */}
                 {userEmail ? (
                   <button
                     disabled={loading || !canGenerate}
                     className="rounded-xl bg-white px-6 py-3 text-black font-semibold hover:bg-gray-200 transition disabled:cursor-not-allowed disabled:opacity-40"
-                    title={
-                      remainingGenerations <= 0
-                        ? `Limit pre týždeň: ${generationLimit} generovaní`
-                        : "Vygenerovať a automaticky uložiť"
-                    }
+                    title={remainingGenerations <= 0 ? t.generator.generateCtaHint(generationLimit) : t.generator.generateCtaHintOk}
+                    type="submit"
                   >
-                    {loading ? "Generujem..." : "Vygenerovať"}
+                    {loading ? t.generator.generating : t.generator.generate}
                   </button>
                 ) : (
                   <button
@@ -857,261 +758,56 @@ const res = await fetch("/api/generate", {
                     onClick={() => (window.location.href = "/login")}
                     className="rounded-xl bg-white px-6 py-3 text-black font-semibold hover:bg-gray-200 transition"
                   >
-                    Prihlásiť sa a generovať
+                    {t.generator.loginToGenerate}
                   </button>
                 )}
               </div>
             </div>
 
+            <div className="text-xs text-gray-500">{t.generator.planningTip}</div>
+
             {prefMsg ? <div className="text-sm text-gray-200">{prefMsg}</div> : null}
+            {textResult ? <pre className="whitespace-pre-wrap text-sm text-gray-200">{textResult}</pre> : null}
+
+            {/* Overwrite modal - zatiaľ len jednoduchá verzia, aby si to mal funkčné */}
+            {confirmOpen ? (
+              <div className="rounded-2xl border border-gray-800 bg-black/60 p-4">
+                <div className="text-sm text-gray-200 whitespace-pre-wrap">{confirmMsg}</div>
+                <div className="mt-3 flex gap-2">
+                  <button
+                    type="button"
+                    className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-gray-200"
+                    onClick={async () => {
+                      setConfirmOpen(false);
+                      await generateAndAutoSave();
+                    }}
+                  >
+                    {t.generator.generate}
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-xl border border-gray-700 bg-black px-4 py-2 text-sm hover:bg-zinc-900"
+                    onClick={async () => {
+                      setConfirmOpen(false);
+                      await keepExistingPlan();
+                    }}
+                  >
+                    {t.common.close}
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </div>
         </form>
 
-        {/* PREVIEW plánu */}
-        {plan && (
-          <section className="mt-8 rounded-2xl border border-gray-800 bg-zinc-900 p-6">
-            <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-              <div>
-                <div className="text-lg font-semibold">Vygenerované ✅</div>
-                <div className="mt-1 text-sm text-gray-300">
-                  Týždeň <span className="font-semibold">{weekLabel}</span>
-                </div>
-              </div>
-
-              <div className="text-sm text-gray-400">
-                Odhad:{" "}
-                <span className="text-white font-semibold">{plan.summary?.estimated_total_cost_eur ?? "—"} €</span>
-                {" • "}
-                Budget:{" "}
-                <span className="text-white font-semibold">{plan.summary?.weekly_budget_eur ?? "—"} €</span>
-              </div>
-            </div>
-
-            {/* KALÓRIE: v basic zatiaľ skryté, v plus zobrazíme */}
-            {tier === "plus" ? (
-              <div className="mt-4 rounded-xl border border-gray-800 bg-black p-4">
-                <div className="flex items-baseline justify-between gap-3">
-                  <div className="text-sm font-semibold">Kalórie</div>
-                  <div className="text-xs text-gray-400">
-                    domácnosť:{" "}
-                    <span className="text-white font-semibold">{plan.summary?.avg_daily_kcal ?? "—"}</span> kcal/deň
-                    {" • "}
-                    týždeň:{" "}
-                    <span className="text-white font-semibold">{plan.summary?.weekly_total_kcal ?? "—"}</span> kcal
-                    {" • "}
-                    na osobu:{" "}
-                    <span className="text-white font-semibold">
-                      {plan.summary?.avg_daily_kcal_per_person ?? "—"}
-                    </span>{" "}
-                    kcal/deň
-                    {" • "}
-                    týždeň na osobu:{" "}
-                    <span className="text-white font-semibold">
-                      {plan.summary?.weekly_total_kcal_per_person ?? "—"}
-                    </span>{" "}
-                    kcal
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="mt-4 rounded-xl border border-gray-800 bg-black p-4">
-                <div className="text-sm text-gray-300">
-                  Kalórie budú dostupné v Plus členstve.
-                </div>
-              </div>
-            )}
-
-            <div className="mt-6 grid grid-cols-1 gap-4">
-              <div className="rounded-2xl border border-gray-800 bg-black p-4">
-                <div className="text-sm font-semibold mb-3">Jedálniček (7 dní)</div>
-                <div className="grid grid-cols-1 gap-3">
-                  {plan.days.map((d) => (
-                    <div key={d.day} className="rounded-xl border border-gray-800 bg-zinc-950 p-3">
-                      <div className="flex items-baseline justify-between gap-3">
-                        <div className="font-semibold">
-                          {d.day_name ?? `Deň ${d.day}`}
-                          {d.date ? ` • ${formatDateSKFromISO(d.date)}` : ""}
-                        </div>
-                        <div className="text-xs text-gray-400">Deň {d.day}</div>
-                      </div>
-                      <div className="mt-2 grid grid-cols-1 md:grid-cols-3 gap-2 text-sm">
-                        <div className="rounded-lg border border-gray-800 bg-black p-2">
-                          <div className="text-xs text-gray-400 mb-1">Raňajky</div>
-                          <div className="text-gray-200">{d.breakfast}</div>
-                        </div>
-                        <div className="rounded-lg border border-gray-800 bg-black p-2">
-                          <div className="text-xs text-gray-400 mb-1">Obed</div>
-                          <div className="text-gray-200">{d.lunch}</div>
-                        </div>
-                        <div className="rounded-lg border border-gray-800 bg-black p-2">
-                          <div className="text-xs text-gray-400 mb-1">Večera</div>
-                          <div className="text-gray-200">{d.dinner}</div>
-                        </div>
-                      </div>
-                      {d.note ? (
-                        <div className="mt-2 text-xs text-gray-400">
-                          Poznámka: <span className="text-gray-300">{d.note}</span>
-                        </div>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-gray-800 bg-black p-4">
-                <div className="text-sm font-semibold mb-3">Nákupy</div>
-                {plan.shopping?.length ? (
-                  <div className="grid grid-cols-1 gap-3">
-                    {plan.shopping.map((s) => (
-                      <div key={s.trip} className="rounded-xl border border-gray-800 bg-zinc-950 p-3">
-                        <div className="flex items-baseline justify-between gap-3">
-                          <div className="font-semibold">Nákup {s.trip}</div>
-                          <div className="text-xs text-gray-400">
-                            Pokryje dni: {s.covers_days}
-                            {s.estimated_cost_eur != null ? (
-                              <>
-                                {" • "}odhad:{" "}
-                                <span className="text-white font-semibold">{s.estimated_cost_eur}</span> €
-                              </>
-                            ) : null}
-                          </div>
-                        </div>
-                        <ul className="mt-2 space-y-1 text-sm text-gray-200">
-                          {s.items?.map((it, i) => (
-                            <li key={i} className="flex items-center justify-between gap-3">
-                              <span className="truncate">{it.name}</span>
-                              <span className="text-gray-400">{it.quantity}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-sm text-gray-400">Tento plán nemá uložené nákupy.</div>
-                )}
-              </div>
-
-              <div className="rounded-2xl border border-gray-800 bg-black p-4">
-                <div className="text-sm font-semibold mb-3">Recepty</div>
-                {plan.recipes && Object.keys(plan.recipes).length > 0 ? (
-                  <div className="grid grid-cols-1 gap-3">
-                    {Object.entries(plan.recipes).map(([key, r]) => (
-                      <details key={key} className="rounded-xl border border-gray-800 bg-zinc-950 p-3">
-                        <summary className="cursor-pointer select-none">
-                          <span className="font-semibold">{r.title || key}</span>{" "}
-                          <span className="text-xs text-gray-400">
-                            • {r.time_min ?? "—"} min • porcie: {r.portions ?? "—"} • ({key})
-                          </span>
-                        </summary>
-
-                        <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
-                          <div className="rounded-lg border border-gray-800 bg-black p-3">
-                            <div className="text-xs text-gray-400 mb-2">Suroviny</div>
-                            <ul className="space-y-1 text-sm text-gray-200">
-                              {(r.ingredients || []).map((ing, i) => (
-                                <li key={i} className="flex items-center justify-between gap-3">
-                                  <span className="truncate">{ing.name}</span>
-                                  <span className="text-gray-400">{ing.quantity}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-
-                          <div className="rounded-lg border border-gray-800 bg-black p-3">
-                            <div className="text-xs text-gray-400 mb-2">Postup</div>
-                            <ol className="list-decimal pl-5 space-y-1 text-sm text-gray-200">
-                              {(r.steps || []).map((st, i) => (
-                                <li key={i}>{st}</li>
-                              ))}
-                            </ol>
-                          </div>
-                        </div>
-                      </details>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-sm text-gray-400">
-                    Tento plán nemá uložené recepty. (Ak sa to deje, API to teraz bude vracať ako error.)
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="mt-6 text-xs text-gray-500">
-              Tip: V detaile týždňa v profile vieš plán upravovať.
-            </div>
-          </section>
-        )}
-
-        {!plan && textResult ? (
-          <section className="mt-8 rounded-2xl border border-gray-800 bg-zinc-900 p-6">
-            <h2 className="text-xl font-semibold mb-3">Výstup</h2>
-            <pre className="overflow-auto rounded-xl bg-black p-4 text-sm text-green-400 whitespace-pre-wrap">
-              {textResult}
-            </pre>
-          </section>
-        ) : null}
-
-        {/* MODAL: existuje plán na týždeň */}
-        {confirmOpen ? (
-          <Modal
-            title="Už existuje jedálniček"
-            body={confirmMsg}
-            onClose={() => setConfirmOpen(false)}
-            actions={
-              <div className="flex flex-wrap gap-2 justify-end">
-                <button
-                  type="button"
-                  className="rounded-xl border border-gray-700 bg-black px-4 py-2 text-sm hover:bg-zinc-900"
-                  onClick={async () => {
-                    setConfirmOpen(false);
-                    setPendingAction({ kind: "keep" });
-                    await keepExistingPlan();
-                    setPendingAction(null);
-                  }}
-                >
-                  Nie, ponechať aktuálny
-                </button>
-                <button
-                  type="button"
-                  className="rounded-xl bg-white px-4 py-2 text-sm text-black font-semibold hover:bg-gray-200"
-                  onClick={async () => {
-                    setConfirmOpen(false);
-                    setPendingAction({ kind: "overwrite" });
-                    await generateAndAutoSave({ overwrite: true });
-                    setPendingAction(null);
-                  }}
-                  disabled={remainingGenerations <= 0}
-                  title={remainingGenerations <= 0 ? `Limit pre týždeň: ${generationLimit}` : ""}
-                >
-                  Áno, vygenerovať nový
-                </button>
-              </div>
-            }
-          />
-        ) : null}
-
-        {/* drobný stav keď sa vykonáva modal akcia */}
-        {pendingAction ? (
-          <div className="mt-4 text-xs text-gray-500">
-            {pendingAction.kind === "keep" ? "Načítavam existujúci plán…" : "Generujem a ukladám…"}
-          </div>
-        ) : null}
+        {/* TODO: tu si dopojíš render plánu, recepty, atď. */}
+        {plan ? <div className="mt-6 text-sm text-gray-400">OK (plan loaded)</div> : null}
       </div>
     </main>
   );
 }
 
-function Field({
-  label,
-  hint,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
+function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <label className="block">
       <div className="mb-1 flex items-baseline justify-between gap-3">
@@ -1120,42 +816,5 @@ function Field({
       </div>
       {children}
     </label>
-  );
-}
-
-function Modal({
-  title,
-  body,
-  actions,
-  onClose,
-}: {
-  title: string;
-  body: string;
-  actions: React.ReactNode;
-  onClose: () => void;
-}) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/70" onClick={onClose} />
-      <div className="relative w-full max-w-lg rounded-2xl border border-gray-800 bg-zinc-950 p-5 shadow-2xl">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="text-sm text-gray-400">Fudly</div>
-            <div className="text-lg font-semibold">{title}</div>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-xl border border-gray-700 bg-black px-3 py-2 text-sm hover:bg-zinc-900"
-          >
-            Zavrieť
-          </button>
-        </div>
-
-        <div className="mt-4 whitespace-pre-wrap text-sm text-gray-200">{body}</div>
-
-        <div className="mt-5">{actions}</div>
-      </div>
-    </div>
   );
 }

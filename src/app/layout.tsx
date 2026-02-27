@@ -1,21 +1,16 @@
-import type { Metadata } from "next";
+// src/app/layout.tsx
 import "./globals.css";
-import Header from "@/components/Header";
-
-export const metadata: Metadata = {
-  title: "Fudly",
-  description: "Intelingentný jedálniček, ktorý šetrí čas aj peniaze",
-  icons: {
-    icon: "/favicon.ico",
-  },
-};
+import { LangProvider } from "@/lib/i18n/useT";
+import TopNav from "@/components/TopNav";
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="sk">
+    <html lang="sk" suppressHydrationWarning>
       <body className="bg-black text-white">
-        <Header />
-        {children}
+        <LangProvider>
+          <TopNav />
+          {children}
+        </LangProvider>
       </body>
     </html>
   );
