@@ -337,7 +337,7 @@ export const DICT = {
     },
 
     generator: {
-      title: "Týždenný jedálniček + nákupy",
+      title: "Týždenný generátor",
       subtitle: "Nastav preferencie a vygeneruj si týždeň.",
       loginToGenerate: "Prihlásiť sa a generovať",
 
@@ -594,7 +594,7 @@ export const DICT = {
     },
 
     generator: {
-      title: "Weekly meal plan + groceries",
+      title: "Weekly plan",
       subtitle: "Set your preferences and generate your week.",
       loginToGenerate: "Log in to generate",
 
@@ -822,7 +822,7 @@ export const DICT = {
     },
 
     generator: {
-      title: "Тижневий раціон + покупки",
+      title: "Тижневий генератор",
       subtitle: "Налаштуй уподобання та згенеруй тиждень.",
       loginToGenerate: "Увійти та згенерувати",
 

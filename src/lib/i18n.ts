@@ -14,9 +14,9 @@ export const dict: Dict = {
   appName: { sk: "Fudly", en: "Fudly", uk: "Fudly" },
 
   generatorTitle: {
-    sk: "Týždenný jedálniček + nákupy",
-    en: "Weekly meal plan + shopping",
-    uk: "Тижневий план харчування + покупки",
+    sk: "Generátor týždenného plánu",
+    en: "Weekly plan generator",
+    uk: "Генератор тижневого плану",
   },
 
   week: { sk: "Týždeň (pondelok–nedeľa)", en: "Week (Mon–Sun)", uk: "Тиждень (пн–нд)" },

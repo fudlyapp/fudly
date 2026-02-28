@@ -102,7 +102,9 @@ function shoppingToTXT(weekStart: string, shopping: any[]) {
   lines.push("");
 
   for (const t of shopping || []) {
-    lines.push(`Nákup ${t.trip} (dni ${t.covers_days}) – odhad: ${t.estimated_cost_eur ?? "—"} €`);
+    lines.push(
+      `Nákup ${t.trip} (dni ${t.covers_days}) – odhad: ${t.estimated_cost_eur ?? "—"} € – reálna: ${t.actual_cost_eur ?? "—"} €`
+    );
     for (const it of t.items || []) {
       lines.push(`- ${it.name} — ${it.quantity}`);
     }
@@ -196,6 +198,28 @@ function deepClone<T>(x: T): T {
   return JSON.parse(JSON.stringify(x));
 }
 
+function computeActualFromTrips(plan: any) {
+  const shopping = plan?.shopping;
+  if (!Array.isArray(shopping)) return { sum: null as number | null, missing: 0, totalTrips: 0 };
+
+  const totalTrips = shopping.length;
+  let missing = 0;
+  let sum = 0;
+  let any = false;
+
+  for (const t of shopping) {
+    const v = t?.actual_cost_eur;
+    if (typeof v === "number" && Number.isFinite(v) && v >= 0) {
+      sum += v;
+      any = true;
+    } else {
+      missing += 1;
+    }
+  }
+
+  return { sum: any ? Number(sum.toFixed(2)) : null, missing, totalTrips };
+}
+
 export default function ProfilePage() {
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
   const { t } = useT();
@@ -225,9 +249,6 @@ export default function ProfilePage() {
 
   const [yearFilter, setYearFilter] = useState<string>("all");
   const [monthFilter, setMonthFilter] = useState<string>("all");
-
-  const [financeSavingId, setFinanceSavingId] = useState<string | null>(null);
-  const [financeMsg, setFinanceMsg] = useState<string>("");
 
   useEffect(() => {
     (async () => {
@@ -428,9 +449,9 @@ export default function ProfilePage() {
         const plan = r.plan ?? r.plan_generated ?? null;
         const bud = plan?.summary?.weekly_budget_eur;
         const est = plan?.summary?.estimated_total_cost_eur;
-        const act = plan?.summary?.actual_total_cost_eur;
+        const { sum: act, missing, totalTrips } = computeActualFromTrips(plan);
         const has = bud != null || est != null || act != null;
-        return { r, plan, bud, est, act, has };
+        return { r, plan, bud, est, act, missing, totalTrips, has };
       })
       .filter((x) => x.has);
 
@@ -457,8 +478,7 @@ export default function ProfilePage() {
     const payload: ProfileRow = {
       user_id: user.id,
       full_name: null,
-
-      language: null, // jazyk rieši globálne tlačidlá, tu ho netreba prepisovať
+      language: null,
 
       people_default: people.trim() ? Number(people) : null,
       weekly_budget_eur_default: budget.trim() ? Number(budget) : null,
@@ -487,63 +507,6 @@ export default function ProfilePage() {
 
   function exportWeekTXT(weekStart: string, shopping: any[]) {
     downloadText(`fudly-nakup-${weekStart}.txt`, shoppingToTXT(weekStart, shopping));
-  }
-
-  async function saveActualCost(rowId: string, weekStart: string, rawValue: string) {
-    setFinanceMsg("");
-    setFinanceSavingId(rowId);
-
-    const value = rawValue.trim();
-    let num: number | null = null;
-    if (value) {
-      const parsed = Number(value.replace(",", "."));
-      if (!Number.isFinite(parsed) || parsed < 0) {
-        setFinanceMsg("Neplatná reálna cena. Zadaj číslo (napr. 82.50).");
-        setFinanceSavingId(null);
-        return;
-      }
-      num = parsed;
-    }
-
-    const found = rows.find((r) => r.id === rowId);
-    if (!found) {
-      setFinanceMsg("Nenašiel som tento týždeň v zozname.");
-      setFinanceSavingId(null);
-      return;
-    }
-
-    const plan = deepClone((found.plan ?? found.plan_generated ?? {}) as any);
-    plan.summary = plan.summary ?? {};
-    plan.summary.actual_total_cost_eur = num;
-
-    const { data: sess } = await supabase.auth.getSession();
-    const user = sess.session?.user;
-    if (!user) {
-      window.location.href = "/login";
-      return;
-    }
-
-    const { error } = await supabase
-      .from("meal_plans")
-      .update({ plan, is_edited: true, edited_at: new Date().toISOString() })
-      .eq("user_id", user.id)
-      .eq("week_start", weekStart);
-
-    if (error) {
-      setFinanceMsg("Chyba pri ukladaní reálnej ceny: " + error.message);
-      setFinanceSavingId(null);
-      return;
-    }
-
-    setRows((prev) =>
-      prev.map((r) => {
-        if (r.id !== rowId) return r;
-        return { ...r, plan, is_edited: true, edited_at: new Date().toISOString() };
-      })
-    );
-
-    setFinanceMsg("✅ Reálna cena uložená.");
-    setFinanceSavingId(null);
   }
 
   return (
@@ -945,7 +908,9 @@ export default function ProfilePage() {
                                 )}
 
                                 {firstTrip?.items?.length > 6 ? (
-                                  <div className="mt-2 text-xs text-gray-500">Zobrazených 6 položiek. Zvyšok nájdeš v detaile týždňa.</div>
+                                  <div className="mt-2 text-xs text-gray-500">
+                                    Zobrazených 6 položiek. Zvyšok nájdeš v detaile týždňa.
+                                  </div>
                                 ) : null}
                               </div>
                             </div>
@@ -1000,9 +965,13 @@ export default function ProfilePage() {
                                     Týždeň {formatDateSK(r.week_start)} – {formatDateSK(weekEnd)}
                                   </div>
                                   <div className="mt-1 text-sm text-gray-400">
-                                    Priemer: <span className="text-white font-semibold">{typeof avg === "number" ? avg : "—"}</span> kcal/deň
+                                    Priemer:{" "}
+                                    <span className="text-white font-semibold">{typeof avg === "number" ? avg : "—"}</span>{" "}
+                                    kcal/deň
                                     {" • "}
-                                    Týždeň: <span className="text-white font-semibold">{typeof weekly === "number" ? weekly : "—"}</span> kcal
+                                    Týždeň:{" "}
+                                    <span className="text-white font-semibold">{typeof weekly === "number" ? weekly : "—"}</span>{" "}
+                                    kcal
                                   </div>
                                 </div>
                                 <div className="text-sm text-gray-400">Otvor</div>
@@ -1023,14 +992,15 @@ export default function ProfilePage() {
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <h2 className="text-xl font-semibold">Financie</h2>
-                    <p className="mt-1 text-sm text-gray-300">Budget vs odhad vs reálna cena.</p>
+                    <p className="mt-1 text-sm text-gray-300">Budget vs odhad vs reálna cena (súčet z nákupov).</p>
                   </div>
-                  <Link href="/generate" className="rounded-xl border border-gray-700 bg-black px-4 py-2 text-sm hover:bg-zinc-900">
+                  <Link
+                    href="/generate"
+                    className="rounded-xl border border-gray-700 bg-black px-4 py-2 text-sm hover:bg-zinc-900"
+                  >
                     Generovať nový týždeň
                   </Link>
                 </div>
-
-                {financeMsg ? <div className="mt-3 text-sm text-gray-200">{financeMsg}</div> : null}
 
                 {loading ? <div className="mt-4 text-sm text-gray-400">Načítavam…</div> : null}
                 {error ? <div className="mt-4 text-sm text-red-300">Chyba: {error}</div> : null}
@@ -1047,7 +1017,7 @@ export default function ProfilePage() {
                       </div>
 
                       <div className="grid grid-cols-1 gap-4">
-                        {g.items.map(({ r, plan, bud, est, act }) => {
+                        {g.items.map(({ r, bud, est, act, missing, totalTrips }) => {
                           const weekEnd = addDaysISO(r.week_start, 6);
 
                           const budgetVal = typeof bud === "number" ? bud : null;
@@ -1066,13 +1036,19 @@ export default function ProfilePage() {
                                   </div>
 
                                   <div className="mt-1 text-sm text-gray-400">
-                                    Budget: <span className="text-white font-semibold">{budgetVal != null ? `${budgetVal} €` : "—"}</span>
+                                    Budget:{" "}
+                                    <span className="text-white font-semibold">
+                                      {budgetVal != null ? `${budgetVal} €` : "—"}
+                                    </span>
                                     {" • "}
-                                    Odhad: <span className="text-white font-semibold">{estVal != null ? `${estVal} €` : "—"}</span>
+                                    Odhad:{" "}
+                                    <span className="text-white font-semibold">{estVal != null ? `${estVal} €` : "—"}</span>
                                     {diffEst != null ? (
                                       <>
                                         {" • "}vs budget:{" "}
-                                        <span className={diffEst > 0 ? "text-red-300 font-semibold" : "text-green-300 font-semibold"}>
+                                        <span
+                                          className={diffEst > 0 ? "text-red-300 font-semibold" : "text-green-300 font-semibold"}
+                                        >
                                           {diffEst > 0 ? "+" : ""}
                                           {diffEst.toFixed(2)} €
                                         </span>
@@ -1081,48 +1057,27 @@ export default function ProfilePage() {
                                   </div>
 
                                   <div className="mt-1 text-sm text-gray-400">
-                                    Reálna cena: <span className="text-white font-semibold">{actVal != null ? `${actVal} €` : "—"}</span>
+                                    Reálna cena (nákupy):{" "}
+                                    <span className="text-white font-semibold">{actVal != null ? `${actVal} €` : "—"}</span>
                                     {diffAct != null ? (
                                       <>
                                         {" • "}vs budget:{" "}
-                                        <span className={diffAct > 0 ? "text-red-300 font-semibold" : "text-green-300 font-semibold"}>
+                                        <span
+                                          className={diffAct > 0 ? "text-red-300 font-semibold" : "text-green-300 font-semibold"}
+                                        >
                                           {diffAct > 0 ? "+" : ""}
                                           {diffAct.toFixed(2)} €
                                         </span>
                                       </>
                                     ) : null}
+                                    {" • "}
+                                    <span className={missing > 0 ? "text-yellow-200" : "text-gray-400"}>
+                                      {totalTrips > 0 ? `chýba ${missing}/${totalTrips} nákupov` : "žiadne nákupy"}
+                                    </span>
                                   </div>
                                 </div>
 
                                 <div className="flex flex-col gap-2 min-w-[220px]">
-                                  <label className="block">
-                                    <div className="text-xs text-gray-500 mb-1">Doplniť reálnu cenu (€)</div>
-                                    <input
-                                      defaultValue={actVal != null ? String(actVal) : ""}
-                                      placeholder="napr. 82.50"
-                                      className="w-full rounded-xl border border-gray-700 bg-black px-3 py-2 text-sm text-white"
-                                      onKeyDown={(e) => {
-                                        if (e.key === "Enter") {
-                                          e.preventDefault();
-                                          const v = (e.target as HTMLInputElement).value;
-                                          saveActualCost(r.id, r.week_start, v);
-                                        }
-                                      }}
-                                    />
-                                  </label>
-
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const v = window.prompt("Zadaj reálnu cenu (€):", actVal != null ? String(actVal) : "");
-                                      if (v != null) saveActualCost(r.id, r.week_start, v);
-                                    }}
-                                    disabled={financeSavingId === r.id}
-                                    className="rounded-xl border border-gray-700 bg-black px-4 py-2 text-sm font-semibold hover:bg-zinc-900 disabled:opacity-40"
-                                  >
-                                    {financeSavingId === r.id ? "Ukladám..." : "Uložiť reálnu cenu"}
-                                  </button>
-
                                   <Link
                                     href={`/profile/${r.week_start}`}
                                     className="rounded-xl border border-gray-700 bg-black px-4 py-2 text-sm font-semibold hover:bg-zinc-900 text-center"
@@ -1139,7 +1094,9 @@ export default function ProfilePage() {
                   ))}
                 </div>
 
-                <div className="mt-4 text-xs text-gray-500">Tip: neskôr doplníme reálne ceny aj per nákup (trip).</div>
+                <div className="mt-4 text-xs text-gray-500">
+                  Reálnu cenu dopĺňaš len v detaile týždňa – pri jednotlivých nákupoch.
+                </div>
               </section>
             ) : null}
           </>

@@ -11,7 +11,7 @@ export default function LegalPage() {
     <main className="min-h-screen bg-black text-white p-6">
       <div className="mx-auto w-full max-w-4xl">
         <div className="mb-6">
-          <div className="text-sm text-gray-400">Fudly</div>
+          <div className="text-sm text-gray-400"></div>
           <h1 className="mt-2 text-3xl font-bold">{t.legal.title}</h1>
           <div className="mt-2 text-sm text-gray-400">
             {t.legal.updated} <span className="text-white font-semibold">{updated}</span>

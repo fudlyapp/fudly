@@ -115,7 +115,7 @@ export default function PricingPage() {
       <div className="mx-auto w-full max-w-5xl">
         <header className="mb-8 flex items-start justify-between gap-4">
           <div>
-            <div className="text-sm text-gray-400">Fudly</div>
+            <div className="text-sm text-gray-400"></div>
             <h1 className="mt-2 text-3xl font-bold">{t.pricing.title}</h1>
             <p className="mt-2 text-gray-300">{t.pricing.subtitle}</p>
 

@@ -5,6 +5,14 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
+type Recipe = {
+  title: string;
+  time_min: number;
+  portions: number;
+  ingredients: Array<{ name: string; quantity: string }>;
+  steps: string[];
+};
+
 type PlanDay = {
   day: number;
   day_name?: string;
@@ -20,21 +28,34 @@ type PlanDay = {
   total_kcal?: number;
 };
 
-type ShoppingItem = { name: string; quantity: string };
+type CategoryKey = "zelenina" | "ovocie" | "maso_ryby" | "vajcia" | "mliecne" | "pecivo" | "prilohy" | "ostatne";
+
+type ShoppingItem = {
+  name: string;
+  quantity: string;
+  category_key?: CategoryKey; // ✅ FIX: ulož kategóriu priamo, aby nové položky neskončili v "Ostatné"
+};
 
 type ShoppingTrip = {
   trip: number;
   covers_days: string;
   estimated_cost_eur?: number;
-  actual_cost_eur?: number | null; // ✅ reálna cena per trip
+  actual_cost_eur?: number | null;
   items: ShoppingItem[];
+};
+
+type PlanMeta = {
+  edited_meals?: Record<string, true>;
+  // ✅ FIX: per-trip flagy (napr. {"1":true})
+  shopping_edited_trips?: Record<string, true>;
 };
 
 type PlanJSON = {
   summary?: any;
   days: PlanDay[];
   shopping?: ShoppingTrip[];
-  recipes?: Record<string, any>;
+  recipes?: Record<string, Recipe>;
+  meta?: PlanMeta;
 };
 
 type MealPlanRow = {
@@ -99,8 +120,7 @@ function shoppingToTXT(weekStart: string, shopping: ShoppingTrip[]) {
   return lines.join("\n");
 }
 
-type CategoryKey = "zelenina" | "ovocie" | "maso_ryby" | "vajcia" | "mliecne" | "obilniny" | "ostatne";
-
+/** --- KATEGÓRIE --- */
 function normalizeItemName(raw: string) {
   const s = (raw || "").toLowerCase();
   const inParens = s.match(/\(([^)]+)\)/);
@@ -119,12 +139,15 @@ function normalizeItemName(raw: string) {
 function inferCategoryKey(name: string): CategoryKey {
   const n = normalizeItemName(name);
 
-  if (/(zelenin|paradaj|tomat|uhork|cibu|cesnak|mrkv|paprik|zemiak|spenat|špenát)/.test(n)) return "zelenina";
-  if (/(ovoc|banan|banán|jablk|citron|citrón|pomaran|mandar|jahod)/.test(n)) return "ovocie";
-  if (/(kura|kuracie|hydina|hovad|hoväd|slanina|bravc|bravč|ryb|losos|tuna|tuniak)/.test(n)) return "maso_ryby";
+  if (/(zelenin|paradaj|tomat|uhork|cibu|cesnak|mrkv|paprik|zemiak|spenat|špenát|brokoli|salat|šalát)/.test(n))
+    return "zelenina";
+  if (/(ovoc|banan|banán|jablk|citron|citrón|pomaran|mandar|jahod|hrušk|hrusk|kiwi|hrozno)/.test(n)) return "ovocie";
+  if (/(kura|kuracie|hydina|hovad|hoväd|slanina|bravc|bravč|ryb|losos|tuna|tuniak|mlet)/.test(n))
+    return "maso_ryby";
   if (/(vajc)/.test(n)) return "vajcia";
   if (/(mliek|jogurt|kefir|smot|syr|mozarella|mozzarella|parmez|eidam|bryndz|maslo)/.test(n)) return "mliecne";
-  if (/(chlieb|rožok|rozok|zeml|ryza|ryž|cestovin|spaget|špaget|vlo(č|c)k|ovsen|muka|múka)/.test(n)) return "obilniny";
+  if (/(chlieb|rožok|rozok|zeml|baget|toast|peciv|pečiv)/.test(n)) return "pecivo";
+  if (/(ryza|ryž|cestovin|spaget|špaget|vlo(č|c)k|ovsen|muka|múka|krup|bulgur|kuskus)/.test(n)) return "prilohy";
 
   return "ostatne";
 }
@@ -135,9 +158,55 @@ const CATEGORY_LABEL: Record<CategoryKey, string> = {
   maso_ryby: "Mäso a ryby",
   vajcia: "Vajcia",
   mliecne: "Mliečne",
-  obilniny: "Prílohy a obilniny",
+  pecivo: "Pečivo",
+  prilohy: "Prílohy a obilniny",
   ostatne: "Ostatné",
 };
+
+const CATEGORY_ORDER: CategoryKey[] = ["zelenina", "ovocie", "maso_ryby", "vajcia", "mliecne", "pecivo", "prilohy", "ostatne"];
+
+function recipeKey(day: number, meal: "breakfast" | "lunch" | "dinner") {
+  return `d${day}_${meal}` as const;
+}
+
+/** --- MODAL --- */
+function Modal({
+  open,
+  title,
+  children,
+  onClose,
+  actions,
+}: {
+  open: boolean;
+  title: string;
+  children: React.ReactNode;
+  onClose: () => void;
+  actions?: React.ReactNode;
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/70" onClick={onClose} />
+      <div className="relative w-full max-w-2xl rounded-2xl border border-gray-800 bg-zinc-950 p-5 shadow-2xl">
+        <div className="flex items-start justify-between gap-3">
+          <div className="text-lg font-semibold">{title}</div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-xl border border-gray-700 bg-black px-3 py-1.5 text-sm hover:bg-zinc-900"
+          >
+            Zavrieť
+          </button>
+        </div>
+
+        <div className="mt-4">{children}</div>
+
+        {actions ? <div className="mt-4 flex flex-wrap gap-2 justify-end">{actions}</div> : null}
+      </div>
+    </div>
+  );
+}
 
 export default function MealPlanDetailPage() {
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
@@ -153,6 +222,11 @@ export default function MealPlanDetailPage() {
 
   const [msg, setMsg] = useState<string>("");
   const [saving, setSaving] = useState(false);
+
+  // recipe modal
+  const [recipeOpen, setRecipeOpen] = useState(false);
+  const [recipeTitle, setRecipeTitle] = useState<string>("");
+  const [recipeBody, setRecipeBody] = useState<React.ReactNode>(null);
 
   useEffect(() => {
     (async () => {
@@ -217,8 +291,14 @@ export default function MealPlanDetailPage() {
       }
 
       const r = data as unknown as MealPlanRow;
+      const cloned = deepClone(r.plan);
+
+      cloned.meta = cloned.meta ?? {};
+      cloned.meta.edited_meals = cloned.meta.edited_meals ?? {};
+      cloned.meta.shopping_edited_trips = cloned.meta.shopping_edited_trips ?? {};
+
       setRow(r);
-      setPlan(deepClone(r.plan));
+      setPlan(cloned);
       setLoading(false);
     })();
   }, [supabase, weekStart, email]);
@@ -228,6 +308,90 @@ export default function MealPlanDetailPage() {
     window.location.href = "/login";
   }
 
+  const weekEnd = useMemo(() => {
+    if (row?.week_end) return row.week_end;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) return addDaysISO(weekStart, 6);
+    return "";
+  }, [row?.week_end, weekStart]);
+
+  const shopping = useMemo(() => plan?.shopping ?? [], [plan]);
+
+  function exportTXT() {
+    if (!shopping.length) return;
+    downloadText(`fudly-nakup-${weekStart}.txt`, shoppingToTXT(weekStart, shopping));
+  }
+
+  /** --- MEALS --- */
+  function updateMealText(dayIdx: number, meal: "breakfast" | "lunch" | "dinner", value: string) {
+    setPlan((prev) => {
+      if (!prev) return prev;
+      const next = deepClone(prev);
+      if (!Array.isArray(next.days) || !next.days[dayIdx]) return prev;
+
+      (next.days[dayIdx] as any)[meal] = value;
+
+      next.meta = next.meta ?? {};
+      next.meta.edited_meals = next.meta.edited_meals ?? {};
+      next.meta.edited_meals[recipeKey(next.days[dayIdx].day, meal)] = true;
+
+      return next;
+    });
+  }
+
+  function showRecipeFor(dayNumber: number, meal: "breakfast" | "lunch" | "dinner", mealTitle: string) {
+    const k = recipeKey(dayNumber, meal);
+    const edited = !!plan?.meta?.edited_meals?.[k];
+
+    if (edited) {
+      setRecipeTitle("Recept");
+      setRecipeBody(<div className="text-sm text-gray-200">Jedlo bolo manuálne upravené, preto recept nie je k dispozícii.</div>);
+      setRecipeOpen(true);
+      return;
+    }
+
+    const r = plan?.recipes?.[k];
+    if (!r) {
+      setRecipeTitle("Recept");
+      setRecipeBody(<div className="text-sm text-gray-200">Recept sa nenašiel (pravdepodobne nie je uložený v pláne).</div>);
+      setRecipeOpen(true);
+      return;
+    }
+
+    setRecipeTitle(r.title || mealTitle || "Recept");
+    setRecipeBody(
+      <div className="space-y-4">
+        <div className="text-sm text-gray-400">
+          Čas: <span className="text-white font-semibold">{r.time_min ?? "—"}</span> min{" "}
+          {" • "}Porcie: <span className="text-white font-semibold">{r.portions ?? "—"}</span>
+        </div>
+
+        <div>
+          <div className="font-semibold mb-2">Ingrediencie</div>
+          <div className="space-y-2">
+            {(r.ingredients || []).map((it, i) => (
+              <div key={i} className="flex items-center justify-between gap-3 rounded-lg border border-gray-800 bg-black px-3 py-2">
+                <div className="min-w-0 truncate">{it.name}</div>
+                <div className="text-sm text-gray-300 shrink-0">{it.quantity}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <div className="font-semibold mb-2">Postup</div>
+          <ol className="list-decimal pl-5 space-y-2 text-sm text-gray-200">
+            {(r.steps || []).map((s, i) => (
+              <li key={i}>{s}</li>
+            ))}
+          </ol>
+        </div>
+      </div>
+    );
+
+    setRecipeOpen(true);
+  }
+
+  /** --- KALÓRIE edit --- */
   function updateDay(idx: number, patch: Partial<PlanDay>) {
     setPlan((prev) => {
       if (!prev) return prev;
@@ -238,31 +402,29 @@ export default function MealPlanDetailPage() {
     });
   }
 
+  /** --- TRIP actual cost --- */
   function updateTripActualCost(tripIndex: number, v: string) {
     setPlan((prev) => {
       if (!prev) return prev;
       const next = deepClone(prev);
       next.shopping = Array.isArray(next.shopping) ? next.shopping : [];
-
       if (!next.shopping[tripIndex]) return prev;
 
       const t = v.trim();
       let num: number | null = null;
       if (t) {
         const parsed = Number(t.replace(",", "."));
-        if (!Number.isFinite(parsed) || parsed < 0) return prev; // necháme bez zmeny, validáciu ukážeme pri save
+        if (!Number.isFinite(parsed) || parsed < 0) return prev;
         num = parsed;
       }
 
       next.shopping[tripIndex].actual_cost_eur = num;
 
-      // prepočet sumy vyplnených tripov do summary.actual_total_cost_eur
       next.summary = next.summary ?? {};
       const sum = (next.shopping || [])
         .map((x) => (typeof x.actual_cost_eur === "number" ? x.actual_cost_eur : 0))
         .reduce((a, b) => a + b, 0);
 
-      // ak nie je vyplnený ani jeden trip, nechaj null
       const anyFilled = (next.shopping || []).some((x) => typeof x.actual_cost_eur === "number");
       next.summary.actual_total_cost_eur = anyFilled ? Number(sum.toFixed(2)) : null;
 
@@ -270,6 +432,68 @@ export default function MealPlanDetailPage() {
     });
   }
 
+  /** ✅ FIX: označ len konkrétny trip ako upravený */
+  function markTripEdited(tripIdx: number) {
+    setPlan((prev) => {
+      if (!prev) return prev;
+      const next = deepClone(prev);
+      next.meta = next.meta ?? {};
+      next.meta.shopping_edited_trips = next.meta.shopping_edited_trips ?? {};
+
+      const tripNo = next.shopping?.[tripIdx]?.trip;
+      if (tripNo != null) next.meta.shopping_edited_trips[String(tripNo)] = true;
+
+      return next;
+    });
+  }
+
+  /** --- SHOPPING edit: remove/add --- */
+  function removeShoppingItem(tripIdx: number, itemIdx: number) {
+    setPlan((prev) => {
+      if (!prev) return prev;
+      const next = deepClone(prev);
+      next.shopping = Array.isArray(next.shopping) ? next.shopping : [];
+      if (!next.shopping[tripIdx]) return prev;
+
+      next.shopping[tripIdx].items = Array.isArray(next.shopping[tripIdx].items) ? next.shopping[tripIdx].items : [];
+      next.shopping[tripIdx].items.splice(itemIdx, 1);
+
+      // ✅ len tento trip
+      next.meta = next.meta ?? {};
+      next.meta.shopping_edited_trips = next.meta.shopping_edited_trips ?? {};
+      const tripNo = next.shopping[tripIdx].trip;
+      next.meta.shopping_edited_trips[String(tripNo)] = true;
+
+      return next;
+    });
+  }
+
+  function addShoppingItem(tripIdx: number, cat: CategoryKey, name: string, qty: string) {
+    const n = name.trim();
+    const q = qty.trim();
+    if (!n) return;
+
+    setPlan((prev) => {
+      if (!prev) return prev;
+      const next = deepClone(prev);
+      next.shopping = Array.isArray(next.shopping) ? next.shopping : [];
+      if (!next.shopping[tripIdx]) return prev;
+
+      next.shopping[tripIdx].items = Array.isArray(next.shopping[tripIdx].items) ? next.shopping[tripIdx].items : [];
+
+      // ✅ FIX: ulož category_key a render sa bude riadiť tým
+      next.shopping[tripIdx].items.push({ name: n, quantity: q || "—", category_key: cat });
+
+      next.meta = next.meta ?? {};
+      next.meta.shopping_edited_trips = next.meta.shopping_edited_trips ?? {};
+      const tripNo = next.shopping[tripIdx].trip;
+      next.meta.shopping_edited_trips[String(tripNo)] = true;
+
+      return next;
+    });
+  }
+
+  /** --- SAVE --- */
   async function saveEdits() {
     setMsg("");
     if (!plan || !row) return;
@@ -286,7 +510,6 @@ export default function MealPlanDetailPage() {
       return;
     }
 
-    // validácia reálnych cien
     const trips = Array.isArray(plan.shopping) ? plan.shopping : [];
     for (const t of trips) {
       if (t.actual_cost_eur == null) continue;
@@ -322,52 +545,56 @@ export default function MealPlanDetailPage() {
     }
   }
 
-  const weekEnd = useMemo(() => {
-    if (row?.week_end) return row.week_end;
-    if (/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) return addDaysISO(weekStart, 6);
-    return "";
-  }, [row?.week_end, weekStart]);
+  /** --- SHOPPING view grouped --- */
+  const shoppingByTrip = useMemo(() => {
+    const trips = Array.isArray(shopping) ? shopping : [];
 
-  const shopping = useMemo(() => plan?.shopping ?? [], [plan]);
+    return trips.map((t) => {
+      const map = new Map<CategoryKey, Array<{ item: ShoppingItem; originalIndex: number }>>();
 
-  function exportTXT() {
-    if (!shopping.length) return;
-    downloadText(`fudly-nakup-${weekStart}.txt`, shoppingToTXT(weekStart, shopping));
-  }
+      const items = Array.isArray(t.items) ? t.items : [];
+      items.forEach((it, idx) => {
+        // ✅ FIX: ak item má category_key, použi ju. Inak fallback infer.
+        const ck = it.category_key ?? inferCategoryKey(it.name);
+        map.set(ck, [...(map.get(ck) ?? []), { item: it, originalIndex: idx }]);
+      });
 
-  const shoppingByTripAndCategory = useMemo(() => {
-    const result: Array<{
-      trip: number;
-      covers_days: string;
-      estimated_cost_eur?: number;
-      actual_cost_eur?: number | null;
-      categories: Array<{ key: CategoryKey; items: ShoppingItem[] }>;
-    }> = [];
+      const categories = CATEGORY_ORDER.filter((k) => (map.get(k) ?? []).length > 0).map((k) => ({
+        key: k,
+        items: map.get(k)!,
+      }));
 
-    for (const t of shopping || []) {
-      const map = new Map<CategoryKey, ShoppingItem[]>();
-
-      for (const it of t.items || []) {
-        const ck = inferCategoryKey(it.name);
-        map.set(ck, [...(map.get(ck) ?? []), it]);
-      }
-
-      const order: CategoryKey[] = ["zelenina", "ovocie", "maso_ryby", "vajcia", "mliecne", "obilniny", "ostatne"];
-      const categories = order
-        .filter((k) => (map.get(k) ?? []).length > 0)
-        .map((k) => ({ key: k, items: map.get(k)! }));
-
-      result.push({
+      return {
         trip: t.trip,
         covers_days: t.covers_days,
         estimated_cost_eur: t.estimated_cost_eur,
         actual_cost_eur: t.actual_cost_eur ?? null,
         categories,
-      });
-    }
-
-    return result;
+      };
+    });
   }, [shopping]);
+
+  // globálne varovanie (ak hociktorý trip bol upravený)
+  const anyShoppingEdited = useMemo(() => {
+    const m = plan?.meta?.shopping_edited_trips ?? {};
+    return Object.keys(m).length > 0;
+  }, [plan?.meta?.shopping_edited_trips]);
+
+  // per-trip upozornenie
+  function isTripEdited(tripNo: number) {
+    return !!plan?.meta?.shopping_edited_trips?.[String(tripNo)];
+  }
+
+  // add form states
+  const [addCat, setAddCat] = useState<Record<number, CategoryKey>>({});
+  const [addName, setAddName] = useState<Record<number, string>>({});
+  const [addQty, setAddQty] = useState<Record<number, string>>({});
+
+  function setTripForm(tripIdx: number, patch: Partial<{ cat: CategoryKey; name: string; qty: string }>) {
+    if (patch.cat) setAddCat((p) => ({ ...p, [tripIdx]: patch.cat! }));
+    if (patch.name !== undefined) setAddName((p) => ({ ...p, [tripIdx]: patch.name! }));
+    if (patch.qty !== undefined) setAddQty((p) => ({ ...p, [tripIdx]: patch.qty! }));
+  }
 
   return (
     <main className="min-h-screen bg-black text-white p-6">
@@ -390,36 +617,28 @@ export default function MealPlanDetailPage() {
                   Prihlásený ako <span className="text-white font-semibold">{email}</span>
                 </div>
                 <div className="flex justify-end gap-2">
-                  <Link
-                    href="/profile"
-                    className="rounded-xl border border-gray-700 bg-black px-4 py-2 text-sm hover:bg-zinc-900"
-                  >
+                  <Link href="/profile" className="rounded-xl border border-gray-700 bg-black px-4 py-2 text-sm hover:bg-zinc-900">
                     Späť do profilu
                   </Link>
-                  <Link
-                    href="/generate"
-                    className="rounded-xl border border-gray-700 bg-black px-4 py-2 text-sm hover:bg-zinc-900"
-                  >
+                  <Link href="/generate" className="rounded-xl border border-gray-700 bg-black px-4 py-2 text-sm hover:bg-zinc-900">
                     Generátor
                   </Link>
-                  <button
-                    onClick={logout}
-                    className="rounded-xl border border-gray-700 bg-black px-4 py-2 text-sm hover:bg-zinc-900"
-                  >
+                  <button onClick={logout} className="rounded-xl border border-gray-700 bg-black px-4 py-2 text-sm hover:bg-zinc-900">
                     Odhlásiť
                   </button>
                 </div>
               </div>
             ) : (
-              <Link
-                href="/login"
-                className="rounded-xl bg-white px-4 py-2 text-sm text-black font-semibold hover:bg-gray-200"
-              >
+              <Link href="/login" className="rounded-xl bg-white px-4 py-2 text-sm text-black font-semibold hover:bg-gray-200">
                 Prihlásiť sa
               </Link>
             )}
           </div>
         </header>
+
+        <Modal open={recipeOpen} title={recipeTitle} onClose={() => setRecipeOpen(false)}>
+          {recipeBody}
+        </Modal>
 
         {email && (
           <div className="rounded-2xl border border-gray-800 bg-zinc-900 p-6">
@@ -446,8 +665,8 @@ export default function MealPlanDetailPage() {
                   </div>
                 </div>
 
-                {/* EXPORT iba TXT */}
-                <div className="mt-4">
+                {/* EXPORT */}
+                <div className="mt-4 flex flex-wrap gap-2 items-center">
                   <button
                     type="button"
                     onClick={exportTXT}
@@ -456,24 +675,28 @@ export default function MealPlanDetailPage() {
                   >
                     Export TXT
                   </button>
+
+                  {anyShoppingEdited ? (
+                    <div className="text-xs text-amber-300">
+                      Nákupný zoznam bol upravený — odhady cien nemusia sedieť.
+                    </div>
+                  ) : null}
                 </div>
 
-                {/* KALÓRIE */}
+                {/* JEDÁLNIČEK */}
                 <div className="mt-6 rounded-2xl border border-gray-800 bg-black p-4">
                   <div className="flex items-baseline justify-between gap-3">
-                    <div className="text-sm font-semibold">Kalórie</div>
+                    <div className="text-sm font-semibold">Jedálniček + kalórie</div>
                     <div className="text-xs text-gray-400">
-  domácnosť:{" "}
-  <span className="text-white font-semibold">{plan.summary?.avg_daily_kcal ?? "—"}</span> kcal/deň
-  {" • "}
-  týždeň: <span className="text-white font-semibold">{plan.summary?.weekly_total_kcal ?? "—"}</span> kcal
-  {" • "}
-  na osobu:{" "}
-  <span className="text-white font-semibold">{plan.summary?.avg_daily_kcal_per_person ?? "—"}</span> kcal/deň
-  {" • "}
-  týždeň na osobu:{" "}
-  <span className="text-white font-semibold">{plan.summary?.weekly_total_kcal_per_person ?? "—"}</span> kcal
-</div>
+                      domácnosť:{" "}
+                      <span className="text-white font-semibold">{plan.summary?.avg_daily_kcal ?? "—"}</span> kcal/deň
+                      {" • "}týždeň:{" "}
+                      <span className="text-white font-semibold">{plan.summary?.weekly_total_kcal ?? "—"}</span> kcal
+                      {" • "}na osobu:{" "}
+                      <span className="text-white font-semibold">{plan.summary?.avg_daily_kcal_per_person ?? "—"}</span> kcal/deň
+                      {" • "}týždeň na osobu:{" "}
+                      <span className="text-white font-semibold">{plan.summary?.weekly_total_kcal_per_person ?? "—"}</span> kcal
+                    </div>
                   </div>
 
                   <div className="mt-3 grid grid-cols-1 gap-3">
@@ -488,112 +711,177 @@ export default function MealPlanDetailPage() {
                           </div>
                         </div>
 
-                        <div className="mt-2 grid grid-cols-1 md:grid-cols-3 gap-2 text-sm">
-                          <div className="rounded-lg border border-gray-800 bg-black p-2">
-                            <div className="text-xs text-gray-400 mb-1">Raňajky</div>
-                            <div className="text-gray-200">{d.breakfast}</div>
-                            <div className="text-xs text-gray-400 mt-1">{d.breakfast_kcal ?? "—"} kcal</div>
-                          </div>
-                          <div className="rounded-lg border border-gray-800 bg-black p-2">
-                            <div className="text-xs text-gray-400 mb-1">Obed</div>
-                            <div className="text-gray-200">{d.lunch}</div>
-                            <div className="text-xs text-gray-400 mt-1">{d.lunch_kcal ?? "—"} kcal</div>
-                          </div>
-                          <div className="rounded-lg border border-gray-800 bg-black p-2">
-                            <div className="text-xs text-gray-400 mb-1">Večera</div>
-                            <div className="text-gray-200">{d.dinner}</div>
-                            <div className="text-xs text-gray-400 mt-1">{d.dinner_kcal ?? "—"} kcal</div>
-                          </div>
+                        <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2">
+                          <MealBox
+                            label="Raňajky"
+                            value={d.breakfast}
+                            kcal={d.breakfast_kcal}
+                            onChange={(v) => updateMealText(idx, "breakfast", v)}
+                            onShowRecipe={() => showRecipeFor(d.day, "breakfast", d.breakfast)}
+                            edited={!!plan.meta?.edited_meals?.[recipeKey(d.day, "breakfast")]}
+                          />
+                          <MealBox
+                            label="Obed"
+                            value={d.lunch}
+                            kcal={d.lunch_kcal}
+                            onChange={(v) => updateMealText(idx, "lunch", v)}
+                            onShowRecipe={() => showRecipeFor(d.day, "lunch", d.lunch)}
+                            edited={!!plan.meta?.edited_meals?.[recipeKey(d.day, "lunch")]}
+                          />
+                          <MealBox
+                            label="Večera"
+                            value={d.dinner}
+                            kcal={d.dinner_kcal}
+                            onChange={(v) => updateMealText(idx, "dinner", v)}
+                            onShowRecipe={() => showRecipeFor(d.day, "dinner", d.dinner)}
+                            edited={!!plan.meta?.edited_meals?.[recipeKey(d.day, "dinner")]}
+                          />
                         </div>
 
                         <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2">
-                          <SmallNumber
-                            label="R kcal"
-                            value={d.breakfast_kcal}
-                            onChange={(v) => updateDay(idx, { breakfast_kcal: v })}
-                          />
-                          <SmallNumber
-                            label="O kcal"
-                            value={d.lunch_kcal}
-                            onChange={(v) => updateDay(idx, { lunch_kcal: v })}
-                          />
-                          <SmallNumber
-                            label="V kcal"
-                            value={d.dinner_kcal}
-                            onChange={(v) => updateDay(idx, { dinner_kcal: v })}
-                          />
+                          <SmallNumber label="R kcal" value={d.breakfast_kcal} onChange={(v) => updateDay(idx, { breakfast_kcal: v })} />
+                          <SmallNumber label="O kcal" value={d.lunch_kcal} onChange={(v) => updateDay(idx, { lunch_kcal: v })} />
+                          <SmallNumber label="V kcal" value={d.dinner_kcal} onChange={(v) => updateDay(idx, { dinner_kcal: v })} />
                           <SmallNumber label="Spolu" value={d.total_kcal} onChange={(v) => updateDay(idx, { total_kcal: v })} />
                         </div>
+
+                        {d.note ? <div className="mt-3 text-xs text-gray-500">{d.note}</div> : null}
                       </div>
                     ))}
                   </div>
                 </div>
 
-                {/* NÁKUPY PODĽA KATEGÓRIÍ – BEZ OBRÁZKOV/IKON */}
+                {/* NÁKUPY */}
                 <div className="mt-8 rounded-2xl border border-gray-800 bg-black p-4">
-                  <div className="text-lg font-semibold mb-4">Nákupy podľa kategórií</div>
+                  <div className="flex items-baseline justify-between gap-3">
+                    <div className="text-lg font-semibold">Nákupy podľa kategórií</div>
+                    <div className="text-xs text-gray-400">Tip: zmeny si nezabudni uložiť hore cez “Uložiť zmeny”.</div>
+                  </div>
 
-                  {shoppingByTripAndCategory.length ? (
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                      {shoppingByTripAndCategory.map((t, tripIdx) => (
-                        <div key={t.trip} className="rounded-2xl border border-gray-800 bg-zinc-950 p-4">
-                          <div className="flex items-baseline justify-between gap-3">
-                            <div className="text-lg font-semibold">Nákup {t.trip}</div>
-                            <div className="text-xs text-gray-400">
-                              dni {t.covers_days}
-                              {t.estimated_cost_eur != null ? (
-                                <>
-                                  {" • "}odhad: <span className="text-white font-semibold">{t.estimated_cost_eur}</span> €
-                                </>
-                              ) : null}
-                            </div>
-                          </div>
+                  {shoppingByTrip.length ? (
+                    <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      {shoppingByTrip.map((t, tripIdx) => {
+                        const editedThisTrip = isTripEdited(t.trip);
 
-                          {/* Reálna cena pre tento trip */}
-                          <div className="mt-3 rounded-xl border border-gray-800 bg-black p-3">
-                            <div className="text-xs text-gray-500 mb-1">Reálna cena (€) – tento nákup</div>
-                            <input
-                              value={
-                                typeof (plan.shopping?.[tripIdx]?.actual_cost_eur) === "number"
-                                  ? String(plan.shopping?.[tripIdx]?.actual_cost_eur)
-                                  : ""
-                              }
-                              onChange={(e) => updateTripActualCost(tripIdx, e.target.value)}
-                              placeholder="napr. 32.50"
-                              className="w-full rounded-xl border border-gray-700 bg-black px-3 py-2 text-sm text-white"
-                              inputMode="decimal"
-                            />
-                            <div className="mt-1 text-xs text-gray-500">
-                              Tip: po úprave klikni hore na “Uložiť zmeny”.
-                            </div>
-                          </div>
-
-                          <div className="mt-4 space-y-3">
-                            {t.categories.map((c) => (
-                              <div key={c.key} className="rounded-xl border border-gray-800 bg-black p-3">
-                                <div className="font-semibold">{CATEGORY_LABEL[c.key]}</div>
-
-                                <div className="mt-2 space-y-2">
-                                  {c.items.map((it, i) => (
-                                    <div
-                                      key={i}
-                                      className="flex items-center justify-between gap-3 rounded-lg border border-gray-800 bg-zinc-950 px-3 py-2"
-                                    >
-                                      <div className="min-w-0">
-                                        <span className="truncate block">{it.name}</span>
-                                      </div>
-                                      <div className="text-sm text-gray-300 shrink-0">{it.quantity}</div>
-                                    </div>
-                                  ))}
-                                </div>
+                        return (
+                          <div key={t.trip} className="rounded-2xl border border-gray-800 bg-zinc-950 p-4">
+                            <div className="flex items-baseline justify-between gap-3">
+                              <div className="text-lg font-semibold">Nákup {t.trip}</div>
+                              <div className="text-xs text-gray-400">
+                                dni {t.covers_days}
+                                {t.estimated_cost_eur != null ? (
+                                  <>
+                                    {" • "}odhad:{" "}
+                                    <span className="text-white font-semibold">{t.estimated_cost_eur}</span> €
+                                  </>
+                                ) : null}
+                                {editedThisTrip ? <span className="text-amber-300"> • zoznam upravený – odhad nezohľadňuje zmeny</span> : null}
                               </div>
-                            ))}
+                            </div>
+
+                            <div className="mt-3 rounded-xl border border-gray-800 bg-black p-3">
+                              <div className="text-xs text-gray-500 mb-1">Reálna cena (€) – tento nákup</div>
+                              <input
+                                value={typeof plan.shopping?.[tripIdx]?.actual_cost_eur === "number" ? String(plan.shopping?.[tripIdx]?.actual_cost_eur) : ""}
+                                onChange={(e) => updateTripActualCost(tripIdx, e.target.value)}
+                                placeholder="napr. 32.50"
+                                className="w-full rounded-xl border border-gray-700 bg-black px-3 py-2 text-sm text-white"
+                                inputMode="decimal"
+                              />
+                            </div>
+
+                            <div className="mt-4 space-y-3">
+                              {t.categories.map((c) => (
+                                <CategoryBox
+                                  key={c.key}
+                                  title={CATEGORY_LABEL[c.key]}
+                                  onAdd={() => {
+                                    const name = window.prompt(`Pridať položku – ${CATEGORY_LABEL[c.key]}: názov`, "");
+                                    if (!name) return;
+                                    const qty = window.prompt("Množstvo (napr. 2 ks / 500 g / 1 l)", "") ?? "";
+                                    addShoppingItem(tripIdx, c.key, name, qty); // ✅ teraz sa uloží category_key=c.key
+                                  }}
+                                >
+                                  <div className="mt-2 space-y-2">
+                                    {c.items.map(({ item, originalIndex }) => (
+                                      <div
+                                        key={originalIndex}
+                                        className="flex items-center justify-between gap-3 rounded-lg border border-gray-800 bg-zinc-950 px-3 py-2"
+                                      >
+                                        <div className="min-w-0">
+                                          <span className="truncate block">{item.name}</span>
+                                        </div>
+
+                                        <div className="flex items-center gap-2 shrink-0">
+                                          <div className="text-sm text-gray-300">{item.quantity}</div>
+                                          <button
+                                            type="button"
+                                            onClick={() => removeShoppingItem(tripIdx, originalIndex)}
+                                            className="rounded-lg border border-gray-700 bg-black px-2 py-1 text-xs hover:bg-zinc-900"
+                                            title="Odstrániť"
+                                          >
+                                            −
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </CategoryBox>
+                              ))}
+                            </div>
+
+                            <div className="mt-4 rounded-2xl border border-gray-800 bg-black p-3">
+                              <div className="text-sm font-semibold">Pridať položku</div>
+                              <div className="mt-2 grid grid-cols-1 gap-2">
+                                <select
+                                  value={addCat[tripIdx] ?? "zelenina"}
+                                  onChange={(e) => setTripForm(tripIdx, { cat: e.target.value as CategoryKey })}
+                                  className="w-full rounded-xl border border-gray-700 bg-black px-3 py-2 text-sm text-white"
+                                >
+                                  {CATEGORY_ORDER.map((k) => (
+                                    <option key={k} value={k}>
+                                      {CATEGORY_LABEL[k]}
+                                    </option>
+                                  ))}
+                                </select>
+
+                                <input
+                                  value={addName[tripIdx] ?? ""}
+                                  onChange={(e) => setTripForm(tripIdx, { name: e.target.value })}
+                                  placeholder="Názov (napr. Kiwi)"
+                                  className="w-full rounded-xl border border-gray-700 bg-black px-3 py-2 text-sm text-white"
+                                />
+
+                                <input
+                                  value={addQty[tripIdx] ?? ""}
+                                  onChange={(e) => setTripForm(tripIdx, { qty: e.target.value })}
+                                  placeholder="Množstvo (napr. 3 ks / 1 kg / 500 ml)"
+                                  className="w-full rounded-xl border border-gray-700 bg-black px-3 py-2 text-sm text-white"
+                                />
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const cat = addCat[tripIdx] ?? "zelenina";
+                                    const name = addName[tripIdx] ?? "";
+                                    const qty = addQty[tripIdx] ?? "";
+                                    addShoppingItem(tripIdx, cat, name, qty); // ✅ uloží správnu kategóriu
+                                    setTripForm(tripIdx, { name: "", qty: "" });
+                                  }}
+                                  className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-gray-200"
+                                >
+                                  + Pridať
+                                </button>
+
+                                <div className="text-xs text-gray-500">Pozn.: ceny neprepočítavame — pri upravenom zozname odhad nemusí sedieť.</div>
+                              </div>
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   ) : (
-                    <div className="text-sm text-gray-400">Tento plán nemá uložené nákupy.</div>
+                    <div className="mt-3 text-sm text-gray-400">Tento plán nemá uložené nákupy.</div>
                   )}
                 </div>
               </>
@@ -605,15 +893,55 @@ export default function MealPlanDetailPage() {
   );
 }
 
-function SmallNumber({
+function MealBox({
   label,
   value,
+  kcal,
   onChange,
+  onShowRecipe,
+  edited,
 }: {
   label: string;
-  value?: number;
-  onChange: (v: number | undefined) => void;
+  value: string;
+  kcal?: number;
+  onChange: (v: string) => void;
+  onShowRecipe: () => void;
+  edited: boolean;
 }) {
+  return (
+    <div className="rounded-lg border border-gray-800 bg-black p-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-xs text-gray-400">{label}</div>
+        <div className="text-[11px] text-gray-500">{kcal ?? "—"} kcal</div>
+      </div>
+
+      <input value={value} onChange={(e) => onChange(e.target.value)} className="mt-2 w-full rounded-xl border border-gray-700 bg-black px-3 py-2 text-sm text-white" />
+
+      <div className="mt-2 flex items-center justify-between gap-2">
+        {edited ? <div className="text-[11px] text-amber-300">Upravené – recept nebude dostupný</div> : <div />}
+        <button type="button" onClick={onShowRecipe} className="rounded-full border border-gray-700 bg-black px-3 py-1.5 text-xs text-gray-200 hover:bg-zinc-900">
+          Zobraziť recept
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function CategoryBox({ title, children, onAdd }: { title: string; children: React.ReactNode; onAdd: () => void }) {
+  return (
+    <div className="rounded-xl border border-gray-800 bg-black p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="font-semibold">{title}</div>
+        <button type="button" onClick={onAdd} className="rounded-lg border border-gray-700 bg-black px-2 py-1 text-xs hover:bg-zinc-900" title="Pridať položku do tejto kategórie">
+          +
+        </button>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function SmallNumber({ label, value, onChange }: { label: string; value?: number; onChange: (v: number | undefined) => void }) {
   return (
     <label className="block">
       <div className="text-xs text-gray-500 mb-1">{label}</div>

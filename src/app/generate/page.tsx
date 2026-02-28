@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { useT } from "@/lib/i18n/useT";
+import Modal from "@/components/Modal";
 
 type Recipe = {
   title: string;
@@ -46,8 +47,6 @@ type ApiResponse = { kind: "json"; plan: PlanJSON } | { kind: "text"; text: stri
 type ProfileRow = {
   user_id: string;
   full_name: string | null;
-
-  language: string | null;
 
   people_default: number | null;
   weekly_budget_eur_default: number | null;
@@ -134,7 +133,6 @@ type StyleOption = {
   plusOnly?: boolean;
 };
 
-// hodnoty nechávam SK kvôli backendu/inputu
 const STYLE_OPTIONS: StyleOption[] = [
   { value: "lacné", label: "Lacné", emoji: "💰", desc: "čo najnižšia cena" },
   { value: "rychle", label: "Rýchle", emoji: "⚡", desc: "max 20–30 min" },
@@ -161,9 +159,7 @@ function normalizePlan(plan: PlanJSON): PlanJSON {
 
   if (next.recipes && typeof next.recipes === "object") {
     const fixed: Record<string, Recipe> = {};
-    for (const [k, v] of Object.entries(next.recipes)) {
-      fixed[normalizeRecipeKey(k)] = v as Recipe;
-    }
+    for (const [k, v] of Object.entries(next.recipes)) fixed[normalizeRecipeKey(k)] = v as Recipe;
     next.recipes = fixed;
   }
 
@@ -183,11 +179,10 @@ function hasAllRecipes(plan: PlanJSON | null) {
   return expectedRecipeKeys().every((k) => have.has(k));
 }
 
+// TODO: napojíš na reálne subscriptions (aktuálne máš trial/basic v backende, tu je placeholder)
 function getActiveTier() {
-  // TODO: napojiť na Stripe/subscriptions.
   return "basic" as "basic" | "plus";
 }
-
 function GENERATION_LIMIT_FOR_TIER(tier: "basic" | "plus") {
   return tier === "plus" ? 5 : 3;
 }
@@ -227,8 +222,16 @@ export default function GeneratorPage() {
   const [existingRow, setExistingRow] = useState<MealPlanRowLite | null>(null);
   const [existingLoading, setExistingLoading] = useState(false);
 
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [confirmMsg, setConfirmMsg] = useState("");
+  const [modal, setModal] = useState<{
+    open: boolean;
+    title: string;
+    message?: string;
+    actions?: any[];
+  }>({ open: false, title: "" });
+
+  function showModal(title: string, message?: string, actions?: any[]) {
+    setModal({ open: true, title, message, actions });
+  }
 
   useEffect(() => {
     (async () => {
@@ -288,7 +291,10 @@ export default function GeneratorPage() {
     return typeof n === "number" && Number.isFinite(n) ? n : 0;
   }, [existingRow]);
 
-  const remainingGenerations = useMemo(() => Math.max(0, generationLimit - usedGenerations), [generationLimit, usedGenerations]);
+  const remainingGenerations = useMemo(
+    () => Math.max(0, generationLimit - usedGenerations),
+    [generationLimit, usedGenerations]
+  );
 
   async function loadSavedFromProfile() {
     setPrefMsg("");
@@ -305,7 +311,7 @@ export default function GeneratorPage() {
     const { data, error } = await supabase
       .from("profiles")
       .select(
-        "user_id, full_name, language, people_default, weekly_budget_eur_default, shopping_trips_default, repeat_days_default, style_default, intolerances, avoid, have, favorites"
+        "user_id, full_name, people_default, weekly_budget_eur_default, shopping_trips_default, repeat_days_default, style_default, intolerances, avoid, have, favorites"
       )
       .eq("user_id", user.id)
       .maybeSingle();
@@ -358,7 +364,6 @@ export default function GeneratorPage() {
     const payload: ProfileRow = {
       user_id: user.id,
       full_name: null,
-      language: lang,
 
       people_default: people.trim() ? Number(people) : null,
       weekly_budget_eur_default: budget.trim() ? Number(budget) : null,
@@ -389,19 +394,19 @@ export default function GeneratorPage() {
     window.location.href = "/login";
   }
 
-  function openOverwriteModal() {
-    setConfirmMsg(t.generator.overwriteTitle(weekLabel));
-    setConfirmOpen(true);
-  }
-
   async function keepExistingPlan() {
     const p = (existingRow?.plan ?? existingRow?.plan_generated) as PlanJSON | null;
     if (p) {
       setPlan(normalizePlan(p));
       setTextResult("");
+      showModal("OK", "Nechal som existujúci plán. Nájdeš ho aj v Profile.", [
+        { label: "Otvoriť Profil", href: "/profile", variant: "primary" },
+        { label: "Zavrieť", onClick: () => {}, variant: "secondary" },
+      ]);
     } else {
       setPlan(null);
       setTextResult(t.generator.emptySavedPlan);
+      showModal("Plán je prázdny", t.generator.emptySavedPlan, [{ label: "Zavrieť", onClick: () => {}, variant: "secondary" }]);
     }
   }
 
@@ -422,20 +427,34 @@ export default function GeneratorPage() {
     const currentCount = existingRow?.generation_count ?? 0;
     if (currentCount >= generationLimit) {
       setLoading(false);
-      setTextResult(t.generator.limitReached(generationLimit));
+      showModal(
+        "Limit generovaní",
+        t.generator.limitReached(generationLimit),
+        [
+          { label: "Cenník", href: "/pricing", variant: "primary" },
+          { label: "OK", onClick: () => {}, variant: "secondary" },
+        ]
+      );
       return;
     }
 
     const styleMeta = STYLE_OPTIONS.find((x) => x.value === style);
     if (styleMeta?.plusOnly && tier !== "plus") {
       setLoading(false);
-      setTextResult(t.generator.plusOnlyStyle(styleMeta.label));
+      showModal(
+        "Dostupné iba v PLUS",
+        t.generator.plusOnlyStyle(styleMeta.label),
+        [
+          { label: "Pozrieť Cenník", href: "/pricing", variant: "primary" },
+          { label: "OK", onClick: () => {}, variant: "secondary" },
+        ]
+      );
       return;
     }
 
     const inputPayload = {
       weekStart,
-      language: lang, // sk/en/ua
+      language: lang, // ✅ toto tu chýbalo
       people,
       budget,
       intolerances,
@@ -451,7 +470,7 @@ export default function GeneratorPage() {
       const { data: ss } = await supabase.auth.getSession();
       const accessToken = ss.session?.access_token;
       if (!accessToken) {
-        setTextResult(t.generator.notLoggedIn);
+        showModal("Nie si prihlásený", t.generator.notLoggedIn, [{ label: "Prihlásiť", href: "/login", variant: "primary" }]);
         return;
       }
 
@@ -464,7 +483,8 @@ export default function GeneratorPage() {
       const data: ApiResponse = await res.json();
 
       if (!res.ok) {
-        setTextResult(t.generator.serverError(JSON.stringify((data as any).error ?? data, null, 2)));
+        const errText = JSON.stringify((data as any).error ?? data, null, 2);
+        showModal("Chyba servera", t.generator.serverError(errText), [{ label: "OK", onClick: () => {}, variant: "secondary" }]);
         return;
       }
 
@@ -472,8 +492,10 @@ export default function GeneratorPage() {
         const normalized = normalizePlan(data.plan);
 
         if (!hasAllRecipes(normalized)) {
-          // toto môžeš neskôr tiež preložiť – zatiaľ nechávam ako server-problém
-          setTextResult(t.common.errorPrefix + " missing recipes, try again.");
+          showModal("Chyba receptov", "Server vrátil plán bez kompletných receptov. Skús znova.", [
+            { label: "Skúsiť znova", onClick: () => generateAndAutoSave(), variant: "primary" },
+            { label: "OK", onClick: () => {}, variant: "secondary" },
+          ]);
           return;
         }
 
@@ -498,8 +520,11 @@ export default function GeneratorPage() {
         );
 
         if (error) {
-          setTextResult(t.generator.generatedButSaveFailed(error.message));
           setPlan(normalized);
+          showModal("Plán vygenerovaný, ale neuložený", t.generator.generatedButSaveFailed(error.message), [
+            { label: "Profil", href: "/profile", variant: "primary" },
+            { label: "OK", onClick: () => {}, variant: "secondary" },
+          ]);
           return;
         }
 
@@ -509,13 +534,19 @@ export default function GeneratorPage() {
         });
 
         setPlan(normalized);
+
+        showModal("Hotovo ✅", "Jedálniček bol vygenerovaný a uložený.", [
+          { label: "Otvoriť Profil", href: "/profile", variant: "primary" },
+          { label: "Zavrieť", onClick: () => {}, variant: "secondary" },
+        ]);
       } else if ("kind" in data && data.kind === "text") {
         setTextResult(data.text);
+        showModal("Výstup servera", data.text, [{ label: "OK", onClick: () => {}, variant: "secondary" }]);
       } else {
-        setTextResult(t.generator.unexpectedServer);
+        showModal("Neočakávaná odpoveď", t.generator.unexpectedServer, [{ label: "OK", onClick: () => {}, variant: "secondary" }]);
       }
     } catch (err: any) {
-      setTextResult(t.generator.serverError(err?.message ?? "unknown"));
+      showModal("Chyba", t.generator.serverError(err?.message ?? "unknown"), [{ label: "OK", onClick: () => {}, variant: "secondary" }]);
     } finally {
       setLoading(false);
     }
@@ -526,7 +557,14 @@ export default function GeneratorPage() {
     if (!isValid) return;
 
     if (existingRow) {
-      openOverwriteModal();
+      showModal(
+        "Plán už existuje",
+        `Na tento týždeň už máš uložený jedálniček.\n\nChceš ho prepísať novým?\n\n${weekLabel}`,
+        [
+          { label: "Nechať existujúci", onClick: () => keepExistingPlan(), variant: "secondary" },
+          { label: "Prepísať", onClick: () => generateAndAutoSave(), variant: "primary" },
+        ]
+      );
       return;
     }
 
@@ -546,7 +584,6 @@ export default function GeneratorPage() {
       <div className="mx-auto w-full max-w-5xl">
         <header className="mb-6 flex items-start justify-between gap-4">
           <div>
-            <div className="text-sm text-gray-400">Fudly</div>
             <h1 className="mt-2 text-3xl font-bold">{t.generator.title}</h1>
             <div className="mt-2 text-sm text-gray-400">{t.generator.subtitle}</div>
           </div>
@@ -633,7 +670,7 @@ export default function GeneratorPage() {
                   );
                 })}
               </select>
-              {tier !== "plus" ? <div className="mt-1 text-xs text-gray-500">Fit / Tradičné / Exotické budú v Plus členstve.</div> : null}
+              {tier !== "plus" ? <div className="mt-1 text-xs text-gray-500">Fit / Tradičné / Exotické sú v Plus členstve.</div> : null}
             </Field>
 
             <Field label={t.generator.trips}>
@@ -769,40 +806,18 @@ export default function GeneratorPage() {
             {prefMsg ? <div className="text-sm text-gray-200">{prefMsg}</div> : null}
             {textResult ? <pre className="whitespace-pre-wrap text-sm text-gray-200">{textResult}</pre> : null}
 
-            {/* Overwrite modal - zatiaľ len jednoduchá verzia, aby si to mal funkčné */}
-            {confirmOpen ? (
-              <div className="rounded-2xl border border-gray-800 bg-black/60 p-4">
-                <div className="text-sm text-gray-200 whitespace-pre-wrap">{confirmMsg}</div>
-                <div className="mt-3 flex gap-2">
-                  <button
-                    type="button"
-                    className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-gray-200"
-                    onClick={async () => {
-                      setConfirmOpen(false);
-                      await generateAndAutoSave();
-                    }}
-                  >
-                    {t.generator.generate}
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded-xl border border-gray-700 bg-black px-4 py-2 text-sm hover:bg-zinc-900"
-                    onClick={async () => {
-                      setConfirmOpen(false);
-                      await keepExistingPlan();
-                    }}
-                  >
-                    {t.common.close}
-                  </button>
-                </div>
-              </div>
-            ) : null}
+            {plan ? <div className="mt-2 text-sm text-gray-400">OK (plán vygenerovaný - nájdeš ho v profile)</div> : null}
           </div>
         </form>
-
-        {/* TODO: tu si dopojíš render plánu, recepty, atď. */}
-        {plan ? <div className="mt-6 text-sm text-gray-400">OK (plan loaded)</div> : null}
       </div>
+
+      <Modal
+        open={modal.open}
+        title={modal.title}
+        message={modal.message}
+        actions={modal.actions}
+        onClose={() => setModal((p) => ({ ...p, open: false }))}
+      />
     </main>
   );
 }

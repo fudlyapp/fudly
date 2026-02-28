@@ -1,9 +1,10 @@
+// src/app/api/generate/route.ts
 import { NextResponse } from "next/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 type Body = {
   weekStart?: string; // YYYY-MM-DD (pondelok)
-  language?: string; // sk|en|uk
+  language?: string; // sk|en|ua
 
   people: string;
   budget: string;
@@ -67,16 +68,12 @@ async function ensureSubscriptionOrTrial(supabase: ReturnType<typeof createSupab
     .eq("user_id", userId)
     .maybeSingle();
 
-  if (error) {
-    throw new Error("SUBSCRIPTION_READ_FAILED: " + error.message);
-  }
-
+  if (error) throw new Error("SUBSCRIPTION_READ_FAILED: " + error.message);
   if (subRow) return subRow;
 
   const now = new Date();
   const trialEnd = addDays(now, TRIAL_DAYS).toISOString();
 
-  // vytvor riadok pre trial (basic)
   const { data: created, error: upErr } = await supabase
     .from("subscriptions")
     .upsert(
@@ -92,9 +89,7 @@ async function ensureSubscriptionOrTrial(supabase: ReturnType<typeof createSupab
     .select("plan,status,current_period_end,trial_end")
     .maybeSingle();
 
-  if (upErr) {
-    throw new Error("SUBSCRIPTION_TRIAL_CREATE_FAILED: " + upErr.message);
-  }
+  if (upErr) throw new Error("SUBSCRIPTION_TRIAL_CREATE_FAILED: " + upErr.message);
 
   return created ?? { plan: "basic", status: "trialing", current_period_end: null, trial_end: trialEnd };
 }
@@ -150,9 +145,9 @@ function addDaysISO(iso: string, add: number) {
 
 const DAY_NAMES_SK = ["Pondelok", "Utorok", "Streda", "Štvrtok", "Piatok", "Sobota", "Nedeľa"];
 const DAY_NAMES_EN = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-const DAY_NAMES_UK = ["Понеділок", "Вівторок", "Середа", "Четвер", "П’ятниця", "Субота", "Неділя"];
+const DAY_NAMES_UA = ["Понеділок", "Вівторок", "Середа", "Четвер", "П’ятниця", "Субота", "Неділя"];
 
-function styleHintFromValue(style: string, lang: "sk" | "en" | "uk") {
+function styleHintFromValue(style: string, lang: "sk" | "en" | "ua") {
   if (lang === "en") {
     switch (style) {
       case "rychle":
@@ -173,7 +168,7 @@ function styleHintFromValue(style: string, lang: "sk" | "en" | "uk") {
     }
   }
 
-  if (lang === "uk") {
+  if (lang === "ua") {
     switch (style) {
       case "rychle":
         return "Надавай перевагу дуже швидким стравам (макс 20–30 хв).";
@@ -244,7 +239,6 @@ function normalizePlan(plan: any) {
   }
 
   if (Array.isArray(next.days)) next.days = next.days.slice(0, 7);
-
   return next;
 }
 
@@ -256,6 +250,92 @@ function ensurePerPersonCalories(summary: any) {
   summary.avg_daily_kcal_per_person = people ? Math.round(avg / people) : null;
   summary.weekly_total_kcal_per_person = people ? Math.round(weekly / people) : null;
   return summary;
+}
+
+function mealNameForKey(plan: any, key: string): string {
+  const m = key.match(/^d(\d)_(breakfast|lunch|dinner)$/);
+  if (!m) return "";
+  const dayIdx = Number(m[1]) - 1;
+  const meal = m[2];
+  const day = Array.isArray(plan?.days) ? plan.days[dayIdx] : null;
+  const name = String(day?.[meal] ?? "").trim();
+  return name;
+}
+
+/**
+ * Ak chýbajú recepty, dovyžiada len chýbajúce kľúče a doplní do plan.recipes.
+ * Vráti aktualizovaný plan.
+ */
+async function repairMissingRecipes(params: {
+  apiKey: string;
+  plan: any;
+  missingKeys: string[];
+  people: number;
+  lang: "sk" | "en" | "ua";
+}) {
+  const { apiKey, plan, missingKeys, people, lang } = params;
+
+  const languageRule =
+    lang === "en" ? "Write everything in English."
+    : lang === "ua" ? "Пиши все українською."
+    : "Všetko píš po slovensky.";
+
+  const missingWithNames = missingKeys.map((k) => ({
+    key: k,
+    meal_name: mealNameForKey(plan, k),
+  }));
+
+  const prompt = `
+Return ONLY valid JSON (no other text).
+${languageRule}
+
+We already have a weekly plan with days (breakfast/lunch/dinner). Some recipe keys are missing.
+Generate ONLY the missing recipes. Each recipe MUST match the meal name.
+
+People/portions: ${people}
+
+Missing list (key + meal_name):
+${JSON.stringify(missingWithNames, null, 2)}
+
+Rules:
+- Return JSON schema EXACTLY:
+{
+  "recipes": {
+    "d1_breakfast": {
+      "title": string,
+      "time_min": number,
+      "portions": number,
+      "ingredients": [{ "name": string, "quantity": string }],
+      "steps": string[]
+    }
+  }
+}
+- Include ONLY missing keys (no extras).
+- title should be the meal_name (or very close).
+- portions should equal ${people} (or realistic servings for ${people}).
+`.trim();
+
+  const r = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ model: "gpt-4.1-mini", input: prompt }),
+  });
+
+  const data = await r.json();
+  if (!r.ok) throw new Error("REPAIR_RECIPES_FAILED: " + JSON.stringify(data));
+
+  const text = extractText(data);
+  const parsedRaw = safeParseJSON(text);
+  if (!parsedRaw?.recipes || typeof parsedRaw.recipes !== "object") {
+    throw new Error("REPAIR_RECIPES_BAD_JSON");
+  }
+
+  const next = normalizePlan(plan);
+  next.recipes = next.recipes && typeof next.recipes === "object" ? next.recipes : {};
+  for (const [k, v] of Object.entries(parsedRaw.recipes)) {
+    next.recipes[normalizeRecipeKey(k)] = v;
+  }
+  return next;
 }
 
 export async function POST(req: Request) {
@@ -280,27 +360,29 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Neplatný weekStart" }, { status: 400 });
     }
 
+    // ✅ prijmi sk|en|ua (a ak by prišlo uk, zmapuj na ua)
     const langRaw = (body.language || "sk").trim().toLowerCase();
-    const lang: "sk" | "en" | "uk" = langRaw === "en" ? "en" : langRaw === "uk" ? "uk" : "sk";
+    const lang: "sk" | "en" | "ua" =
+      langRaw === "en" ? "en" : langRaw === "ua" ? "ua" : langRaw === "uk" ? "ua" : "sk";
 
     // ✅ PAYWALL + AUTO TRIAL
     const subRow = await ensureSubscriptionOrTrial(supabase, userId);
 
-    const plan = ((subRow?.plan as Plan) || "basic") as Plan;
+    const planTier = ((subRow?.plan as Plan) || "basic") as Plan;
     const status = ((subRow?.status as Status) || "inactive") as Status;
 
     const now = new Date();
-    const limits = planLimits(plan);
+    const limits = planLimits(planTier);
     const canGenerate = isActiveLike(status, now, subRow?.current_period_end ?? null, subRow?.trial_end ?? null);
 
     if (!canGenerate) {
-      return NextResponse.json({ error: { code: "SUBSCRIPTION_INACTIVE", plan, status } }, { status: 402 });
+      return NextResponse.json({ error: { code: "SUBSCRIPTION_INACTIVE", plan: planTier, status } }, { status: 402 });
     }
 
     // style gate
     const style = (body.style || "lacné").trim();
     if (!limits.allowed_styles.includes(style)) {
-      return NextResponse.json({ error: { code: "STYLE_NOT_ALLOWED", style, plan } }, { status: 403 });
+      return NextResponse.json({ error: { code: "STYLE_NOT_ALLOWED", style, plan: planTier } }, { status: 403 });
     }
 
     // weekly usage gate
@@ -318,29 +400,32 @@ export async function POST(req: Request) {
     const used = usageRow?.count ?? 0;
     if (used >= limits.weekly_limit) {
       return NextResponse.json(
-        { error: { code: "WEEKLY_LIMIT_REACHED", used, limit: limits.weekly_limit, plan } },
+        { error: { code: "WEEKLY_LIMIT_REACHED", used, limit: limits.weekly_limit, plan: planTier } },
         { status: 429 }
       );
     }
 
     // input
-    const people = body.people?.trim() || "1";
-    const budget = body.budget?.trim() || "0";
+    const peopleStr = body.people?.trim() || "1";
+    const budgetStr = body.budget?.trim() || "0";
     const intolerances = (body.intolerances || "").trim();
     const avoid = (body.avoid || "").trim();
     const have = (body.have || "").trim();
     const favorites = (body.favorites || "").trim();
 
+    const peopleNum = Math.min(6, Math.max(1, Number(peopleStr) || 1));
+    const budgetNum = Math.min(1000, Math.max(1, Number(budgetStr) || 1));
+
     const shoppingTrips = Math.min(4, Math.max(1, Number(body.shoppingTrips || 2)));
     const repeatDays = Math.min(3, Math.max(1, Number(body.repeatDays || 2)));
 
     const styleHint = styleHintFromValue(style, lang);
-    const dayNames = lang === "en" ? DAY_NAMES_EN : lang === "uk" ? DAY_NAMES_UK : DAY_NAMES_SK;
+    const dayNames = lang === "en" ? DAY_NAMES_EN : lang === "ua" ? DAY_NAMES_UA : DAY_NAMES_SK;
     const datesBlock = dayNames.map((name, i) => `- day ${i + 1}: ${name}, date: ${addDaysISO(weekStart, i)}`).join("\n");
 
     const languageRule =
       lang === "en" ? "Write everything in English."
-      : lang === "uk" ? "Пиши все українською."
+      : lang === "ua" ? "Пиши все українською."
       : "Všetko píš po slovensky.";
 
     const prompt = `
@@ -351,8 +436,8 @@ Create a 7-day meal plan (breakfast/lunch/dinner).
 Goal: save time and money.
 
 Parameters:
-- people: ${people}
-- weekly_budget_eur: ${budget}
+- people: ${peopleNum}
+- weekly_budget_eur: ${budgetNum}
 - shopping_trips_per_week: ${shoppingTrips}
 - repeat_days_max: ${repeatDays}
 
@@ -440,7 +525,7 @@ Counts:
 - days must be exactly 7 (day 1..7)
 - shopping must be exactly ${shoppingTrips} trips
 - recipes must include ALL 21 keys (d1_breakfast..d7_dinner)
-`;
+`.trim();
 
     const r = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
@@ -455,17 +540,35 @@ Counts:
     const parsedRaw = safeParseJSON(text);
     if (!parsedRaw) return NextResponse.json({ kind: "text", text }, { status: 200 });
 
-    const parsed = normalizePlan(parsedRaw);
+    let parsed = normalizePlan(parsedRaw);
 
-    const recipes = parsed?.recipes && typeof parsed.recipes === "object" ? parsed.recipes : null;
-    const missing = requiredRecipeKeys().filter((k) => !recipes?.[k]);
-    if (missing.length) {
-      return NextResponse.json({ error: { code: "MISSING_RECIPES", missing } }, { status: 500 });
+    // summary fix
+    if (!parsed.summary) parsed.summary = {};
+    parsed.summary.people = coerceNumber(parsed.summary.people, peopleNum);
+    parsed.summary = ensurePerPersonCalories(parsed.summary);
+
+    // ✅ AUTO-REPAIR receptov (max 2 pokusy)
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const recipes = parsed?.recipes && typeof parsed.recipes === "object" ? parsed.recipes : null;
+      const missing = requiredRecipeKeys().filter((k) => !recipes?.[k]);
+
+      if (!missing.length) break;
+
+      parsed = await repairMissingRecipes({
+        apiKey,
+        plan: parsed,
+        missingKeys: missing,
+        people: peopleNum,
+        lang,
+      });
     }
 
-    if (!parsed.summary) parsed.summary = {};
-    parsed.summary.people = coerceNumber(parsed.summary.people, Number(people) || 1);
-    parsed.summary = ensurePerPersonCalories(parsed.summary);
+    // finálna validácia
+    const recipesFinal = parsed?.recipes && typeof parsed.recipes === "object" ? parsed.recipes : null;
+    const missingFinal = requiredRecipeKeys().filter((k) => !recipesFinal?.[k]);
+    if (missingFinal.length) {
+      return NextResponse.json({ error: { code: "MISSING_RECIPES", missing: missingFinal } }, { status: 500 });
+    }
 
     // ✅ usage navýšime až po úspešnej validácii
     const { error: upErr } = await supabase.from("generation_usage").upsert(

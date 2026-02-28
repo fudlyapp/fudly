@@ -58,7 +58,7 @@ export function LangProvider({ children }: { children: React.ReactNode }) {
     const user = sess.session?.user;
     if (!user) return;
 
-    await supabase.from("profiles").upsert({ user_id: user.id, language: l }, { onConflict: "user_id" });
+    
   };
 
   const value = useMemo<Ctx>(

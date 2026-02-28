@@ -62,7 +62,7 @@ export default function ContactPage() {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 className="w-full rounded-xl border border-gray-700 bg-black px-3 py-2 text-white"
-                placeholder="Michal"
+                placeholder="Tvoje meno"
               />
             </label>
 
@@ -74,7 +74,7 @@ export default function ContactPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full rounded-xl border border-gray-700 bg-black px-3 py-2 text-white"
-                placeholder="michal@email.com"
+                placeholder="Tvoj e-mail"
               />
             </label>
 
@@ -86,7 +86,7 @@ export default function ContactPage() {
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
                 className="min-h-[140px] w-full rounded-xl border border-gray-700 bg-black px-3 py-2 text-white"
-                placeholder="Napíš správu…"
+                placeholder="Text..."
               />
             </label>
 

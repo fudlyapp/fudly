@@ -34,7 +34,7 @@ body {
   background-repeat: no-repeat;
   background-position: center;
   background-size: 1400px 1400px; /* uprav podľa chuti */
-  opacity: 0.6; /* 0.08–0.14 je najčastejšie sweet spot */
+  opacity: 0.14; /* 0.08–0.14 je najčastejšie sweet spot */
   filter: blur(0.2px);
 }
 @media (max-width: 768px) {

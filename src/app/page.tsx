@@ -1,196 +1,122 @@
-// src/app/page.tsx
 "use client";
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import { useT } from "@/lib/i18n/useT";
-import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
-export default function HomePage() {
-  const { t } = useT();
-  const supabase = useMemo(() => createSupabaseBrowserClient(), []);
-  const [email, setEmail] = useState<string | null>(null);
+type Feature = {
+  title: string;
+  desc: string;
+};
 
-  useEffect(() => {
-    (async () => {
-      const { data } = await supabase.auth.getSession();
-      setEmail(data.session?.user?.email ?? null);
-    })();
+const FEATURES: Feature[] = [
+  { title: "Jedálničky", desc: "Raňajky • obed • večera na celý týždeň." },
+  { title: "Nákupné zoznamy", desc: "Rozdelené podľa nákupov a kategórií." },
+  { title: "Recepty", desc: "Stručné recepty pre všetkých 21 jedál." },
+  { title: "Sledovanie kalórií", desc: "Kcal na jedlo aj súčet za deň/týždeň." },
+  { title: "Finančný prehľad", desc: "Budget vs odhad vs reálna cena nákupov." },
+];
 
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
-      setEmail(session?.user?.email ?? null);
-    });
-
-    return () => sub.subscription.unsubscribe();
-  }, [supabase]);
-
+function FeatureCard({ title, desc }: Feature) {
   return (
-    <main className="min-h-[calc(100vh-73px)] text-white">
-      <div className="relative overflow-hidden">
-        {/* base background */}
-        <div className="pointer-events-none absolute inset-0 bg-black" />
-
-        {/* full-page watermark */}
-        <div className="fudly-watermark" />
-
-        {/* subtle gradients on top of watermark (nech to vyzera premium) */}
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(900px_500px_at_20%_10%,rgba(255,255,255,0.08),transparent_60%)]" />
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(900px_500px_at_80%_30%,rgba(255,255,255,0.06),transparent_60%)]" />
-
-        <div className="relative mx-auto w-full max-w-6xl px-6 py-16 md:py-20">
-          {/* HERO */}
-          <section className="rounded-[32px] border border-gray-800 bg-zinc-950/55 p-8 shadow-2xl backdrop-blur md:p-12">
-            <div className="grid grid-cols-1 gap-10 md:grid-cols-2 md:items-center">
-              {/* left */}
-              <div>
-                <div className="inline-flex flex-wrap items-center gap-2 rounded-full border border-gray-800 bg-black/40 px-3 py-1 text-xs text-gray-300">
-                  <span className="h-1.5 w-1.5 rounded-full bg-white/70" />
-                  <span>14 dní zadarmo</span>
-                  <span className="text-gray-600">•</span>
-                  {email ? (
-                    <span>
-                      {t.profile.loggedAs}: <span className="text-white">{email}</span>
-                    </span>
-                  ) : (
-                    <span>{t.home.tagline}</span>
-                  )}
-                </div>
-
-                <h1 className="mt-5 text-4xl font-extrabold tracking-tight md:text-6xl">
-                  {t.home.title}
-                </h1>
-
-                <p className="mt-4 text-lg text-gray-200 md:text-2xl">
-                  {t.home.subtitle}
-                </p>
-
-                <p className="mt-3 text-sm text-gray-500">
-                  {t.home.tagline}
-                </p>
-
-                <div className="mt-8 flex flex-wrap gap-3">
-                  <Link
-                    href={email ? "/generate" : "/login?mode=signup"}
-                    className="rounded-xl bg-white px-6 py-3 text-sm font-semibold text-black hover:bg-gray-200"
-                  >
-                    {email ? t.nav.generator : "Vyskúšať zadarmo (14 dní)"}
-                  </Link>
-
-                  <Link
-                    href="/pricing"
-                    className="rounded-xl border border-gray-700 bg-black px-6 py-3 text-sm font-semibold hover:bg-zinc-900"
-                  >
-                    {t.nav.pricing}
-                  </Link>
-
-                  {email ? (
-                    <Link
-                      href="/profile"
-                      className="rounded-xl border border-gray-700 bg-black px-6 py-3 text-sm font-semibold hover:bg-zinc-900"
-                    >
-                      {t.nav.profile}
-                    </Link>
-                  ) : null}
-                </div>
-
-                <div className="mt-8 flex flex-wrap gap-2 text-xs text-gray-400">
-                  <span className="rounded-full border border-gray-800 bg-black/40 px-3 py-1">✅ Jedálniček</span>
-                  <span className="rounded-full border border-gray-800 bg-black/40 px-3 py-1">🛒 Nákupy</span>
-                  <span className="rounded-full border border-gray-800 bg-black/40 px-3 py-1">🔥 Kalórie</span>
-                  <span className="rounded-full border border-gray-800 bg-black/40 px-3 py-1">✨ 14 dní zdarma</span>
-                </div>
-              </div>
-
-              {/* right card */}
-              <div className="relative">
-                <div className="absolute -inset-6 rounded-[36px] bg-[radial-gradient(300px_200px_at_30%_30%,rgba(255,255,255,0.08),transparent_60%)] blur-2xl" />
-                <div className="relative rounded-[28px] border border-gray-800 bg-black/50 p-6 shadow-xl">
-                  <div className="flex items-center gap-4">
-                    <div className="h-14 w-14 rounded-2xl border border-gray-800 bg-black p-3">
-                      <Image src="/fudly_white.png" alt="Fudly" width={56} height={56} unoptimized />
-                    </div>
-                    <div>
-                      <div className="text-sm text-gray-400">Fudly</div>
-                      <div className="text-lg font-semibold text-white">
-                        14 dní zadarmo • 2 kompletné týždenné jedálničky a nákupné zoznamy
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mt-6 grid grid-cols-1 gap-3">
-                    <MiniCard title={t.home.f1Title} desc={t.home.f1Desc} icon="🍽️" />
-                    <MiniCard title={t.home.f2Title} desc={t.home.f2Desc} icon="🛒" />
-                    <MiniCard title={t.home.f3Title} desc={t.home.f3Desc} icon="✨" />
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          {/* HOW IT WORKS */}
-          <section className="mt-10 grid grid-cols-1 gap-4 md:grid-cols-3">
-            <StepCard n="01" title="Nastav preferencie" desc="Počet ľudí, budget, štýl, intolerancie a čo máš doma." />
-            <StepCard n="02" title="Vygeneruj týždeň" desc="Raňajky, obed, večera + recepty a nákupy." />
-            <StepCard n="03" title="Bez starostí" desc="Uložené v profile, prehľadné a pripravené na ďalší týždeň." />
-          </section>
-
-          {/* CTA bottom */}
-          <section className="mt-10 rounded-[28px] border border-gray-800 bg-zinc-950/55 p-6 shadow-xl backdrop-blur md:p-8">
-            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-              <div>
-                <div className="text-xl font-semibold">Vyskúšaj Fudly na 14 dní zadarmo</div>
-                <div className="mt-1 text-sm text-gray-400">
-                  Bez záväzkov. Zrušíš kedykoľvek.
-                </div>
-              </div>
-
-              <div className="flex flex-wrap gap-3">
-                <Link
-                  href={email ? "/generate" : "/login?mode=signup"}
-                  className="rounded-xl bg-white px-6 py-3 text-sm font-semibold text-black hover:bg-gray-200"
-                >
-                  {email ? t.nav.generator : "Vytvoriť účet"}
-                </Link>
-                <Link
-                  href="/pricing"
-                  className="rounded-xl border border-gray-700 bg-black px-6 py-3 text-sm font-semibold hover:bg-zinc-900"
-                >
-                  {t.nav.pricing}
-                </Link>
-              </div>
-            </div>
-          </section>
-
-          <div className="mt-10 pb-10 text-center text-xs text-gray-600">
-            © {new Date().getFullYear()} Fudly
-          </div>
-        </div>
-      </div>
-    </main>
-  );
-}
-
-function MiniCard({ icon, title, desc }: { icon: string; title: string; desc: string }) {
-  return (
-    <div className="rounded-2xl border border-gray-800 bg-black/40 p-4">
-      <div className="flex items-start gap-3">
-        <div className="mt-0.5 text-lg">{icon}</div>
-        <div>
-          <div className="text-sm font-semibold text-white">{title}</div>
-          <div className="mt-1 text-sm text-gray-400">{desc}</div>
-        </div>
-      </div>
+    <div className="rounded-2xl border border-gray-800 bg-black p-5 hover:bg-zinc-950 transition">
+      <div className="text-lg font-semibold">{title}</div>
+      <div className="mt-1 text-sm text-gray-400">{desc}</div>
     </div>
   );
 }
 
 function StepCard({ n, title, desc }: { n: string; title: string; desc: string }) {
   return (
-    <div className="rounded-3xl border border-gray-800 bg-black/35 p-6 shadow-lg">
-      <div className="text-xs text-gray-500">{n}</div>
-      <div className="mt-2 text-lg font-semibold text-white">{title}</div>
+    <div className="rounded-2xl border border-gray-800 bg-black p-6">
+      <div className="text-xs text-gray-500">Krok {n}</div>
+      <div className="mt-2 text-lg font-semibold">{title}</div>
       <div className="mt-2 text-sm text-gray-400">{desc}</div>
     </div>
+  );
+}
+
+export default function HomePage() {
+  return (
+    <main className="min-h-screen bg-black text-white">
+      <div className="mx-auto w-full max-w-6xl px-6 py-14">
+        {/* HERO */}
+        <section className="flex flex-col items-center text-center">
+          <div className="w-full flex flex-col items-center justify-center">
+            <div className="relative h-48 w-48 md:h-56 md:w-56">
+              {/* Použi biele logo na tmavom pozadí */}
+              <Image
+                src="/logo_white.png"
+                alt="Fudly"
+                fill
+                priority
+                className="object-contain"
+              />
+            </div>
+
+            <h1 className="mt-6 text-5xl md:text-6xl font-bold tracking-tight">Fudly</h1>
+            <p className="mt-4 max-w-2xl text-gray-300 text-base md:text-lg">
+              Týždenný plán hotový na jedno kliknutie – typicky do <span className="text-white font-semibold">2–3 minút</span>.
+              Jedlá, recepty, nákupy, kalórie aj prehľad výdavkov – všetko v profile.
+            </p>
+
+            <div className="mt-8">
+              <Link
+                href="/login"
+                className="inline-flex items-center justify-center rounded-2xl bg-white px-7 py-4 text-black font-semibold hover:bg-gray-200 transition text-base"
+              >
+                Vyskúšaj na 14 dní zadarmo
+              </Link>
+              <div className="mt-2 text-xs text-gray-500">
+                Registrácia trvá pár sekúnd.
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* FEATURE BANNERS */}
+        <section className="mt-12">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {FEATURES.map((f) => (
+              <FeatureCard key={f.title} {...f} />
+            ))}
+          </div>
+        </section>
+
+        {/* 3 KROKY */}
+        <section className="mt-14">
+          <div className="flex items-end justify-between gap-4">
+            <div>
+              <h2 className="text-2xl font-semibold">Ako to funguje</h2>
+              <p className="mt-2 text-sm text-gray-400">
+                Jednoduchý flow: nastavíš preferencie → vygeneruješ týždeň → všetko máš uložené.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+            <StepCard
+              n="1"
+              title="Nastav preferencie"
+              desc="Počet ľudí, budget, intolerancie, obľúbené a štýl jedál."
+            />
+            <StepCard
+              n="2"
+              title="Vygeneruj týždenný plán"
+              desc="Raňajky, obedy, večere + recepty, kalórie a nákupné zoznamy."
+            />
+            <StepCard
+              n="3"
+              title="Všetko bezpečne uložené v profile"
+              desc="Vieš upravovať, dopĺňať reálne ceny nákupov a sledovať prehľady."
+            />
+          </div>
+        </section>
+
+        {/* FOOTER */}
+        <footer className="mt-16 border-t border-gray-900 pt-8 text-center text-xs text-gray-500">
+          © {new Date().getFullYear()} Fudly
+        </footer>
+      </div>
+    </main>
   );
 }
