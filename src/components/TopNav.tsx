@@ -4,143 +4,146 @@
 import Link from "next/link";
 import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
-import LangSwitcher from "@/components/LangSwitcher";
-import { useT } from "@/lib/i18n/useT";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import ThemeToggle from "@/components/ThemeToggle";
 
-type AuthState = {
-  loading: boolean;
-  email: string | null;
-};
+const SHOW_LANGUAGE_SWITCH = false; // dočasne skryté
+
+function NavLink({ href, label }: { href: string; label: string }) {
+  return (
+    <Link
+      href={href}
+      className="
+        rounded-full px-4 py-2 text-sm font-semibold transition border
+        bg-white text-black border-gray-300 hover:bg-gray-100
+        dark:bg-black dark:text-gray-200 dark:border-gray-700 dark:hover:bg-zinc-900
+      "
+    >
+      {label}
+    </Link>
+  );
+}
+
+function PrimaryNavLink({ href, label }: { href: string; label: string }) {
+  return (
+    <Link
+      href={href}
+      className="
+        rounded-full px-5 py-2.5 text-sm font-semibold transition border shadow-sm
+        bg-black text-white border-black hover:bg-gray-800 hover:shadow
+        dark:bg-white dark:text-black dark:border-white dark:hover:bg-gray-200
+      "
+    >
+      {label}
+    </Link>
+  );
+}
 
 export default function TopNav() {
-  const { t, lang } = useT();
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
-  const [auth, setAuth] = useState<AuthState>({ loading: true, email: null });
+  const [email, setEmail] = useState<string | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
 
   useEffect(() => {
-    let mounted = true;
-
-    async function load() {
+    (async () => {
+      setAuthLoading(true);
       const { data } = await supabase.auth.getSession();
-      const email = data.session?.user?.email ?? null;
-      if (mounted) setAuth({ loading: false, email });
-    }
+      setEmail(data.session?.user?.email ?? null);
+      setAuthLoading(false);
+    })();
 
-    load();
-
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
-      const email = session?.user?.email ?? null;
-      setAuth({ loading: false, email });
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+      setEmail(session?.user?.email ?? null);
+      setAuthLoading(false);
     });
 
-    return () => {
-      mounted = false;
-      sub.subscription.unsubscribe();
-    };
+    return () => sub.subscription.unsubscribe();
   }, [supabase]);
+
+  const isLoggedIn = !!email;
 
   async function logout() {
     await supabase.auth.signOut();
-    window.location.href = "/";
+    window.location.href = "/login";
   }
 
-  // keď používaš tmavý header, držíme biele logo
-  const logoSrc = "/fudly_white.png";
-
   return (
-    <header className="border-b border-gray-800 bg-black/60 backdrop-blur">
-      <div className="mx-auto w-full max-w-5xl px-6 py-4 flex items-center justify-between gap-4">
-        <div className="flex items-center gap-6 min-w-0">
-          <Link href="/" className="flex items-center gap-3 font-semibold tracking-wide min-w-0">
-            <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-gray-800 bg-black">
-              <Image src="/fudly_white.png" alt="Fudly" width={22} height={22} priority unoptimized />
-            </span>
-            <span className="truncate">Fudly</span>
-          </Link>
+    <div className="sticky top-0 z-50 border-b border-gray-200 bg-white/80 backdrop-blur dark:border-gray-800 dark:bg-black/70">
+      <div className="mx-auto w-full max-w-6xl px-6 py-3 flex items-center justify-between gap-4">
+        {/* LOGO + názov */}
+        <Link href="/" className="flex items-center gap-3">
+          <Image
+            src="/logo_black.png"
+            alt="Fudly"
+            width={44}
+            height={44}
+            className="w-11 h-11 block dark:hidden"
+            priority
+          />
+          <Image
+            src="/logo_white.png"
+            alt="Fudly"
+            width={44}
+            height={44}
+            className="w-11 h-11 hidden dark:block"
+            priority
+          />
+          <div className="font-semibold text-lg">Fudly</div>
+        </Link>
 
-          <nav className="hidden md:flex items-center gap-4 text-sm text-gray-300">
-            <Link className="hover:text-white" href="/generate">
-              {t.nav.generator}
-            </Link>
-            <Link className="hover:text-white" href="/pricing">
-              {t.nav.pricing}
-            </Link>
-            <Link className="hover:text-white" href="/profile">
-              {t.nav.profile}
-            </Link>
-            <Link className="hover:text-white" href="/contact">
-              {t.nav.contact}
-            </Link>
-            <Link className="hover:text-white" href="/legal">
-              {t.nav.legal}
-            </Link>
-          </nav>
-        </div>
-
+        {/* MENU */}
         <div className="flex items-center gap-2">
-          {/* auth buttons */}
-          {auth.loading ? null : auth.email ? (
-            <>
-              <Link
-                href="/profile"
-                className="hidden sm:inline-flex rounded-xl border border-gray-700 bg-black px-3 py-2 text-sm hover:bg-zinc-900"
-              >
-                {t.nav.profile}
-              </Link>
-              <button
-                type="button"
-                onClick={logout}
-                className="hidden sm:inline-flex rounded-xl border border-gray-700 bg-black px-3 py-2 text-sm hover:bg-zinc-900"
-              >
-                {t.nav.logout}
-              </button>
-            </>
+          {authLoading ? (
+            <div className="text-xs text-gray-500 px-3 dark:text-gray-400">…</div>
           ) : (
             <>
-              <Link
-                href="/login"
-                className="hidden sm:inline-flex rounded-xl border border-gray-700 bg-black px-3 py-2 text-sm hover:bg-zinc-900"
-              >
-                {t.nav.login}
-              </Link>
-              <Link
-                href="/login?mode=signup"
-                className="hidden sm:inline-flex rounded-xl bg-white px-3 py-2 text-sm font-semibold text-black hover:bg-gray-200"
-              >
-                {/* toto si doplníme do dictu ak chceš, zatiaľ fallback */}
-                {lang === "en" ? "Sign up" : lang === "ua" ? "Реєстрація" : "Vytvoriť účet"}
-              </Link>
+              {isLoggedIn ? (
+                <>
+                  <NavLink href="/generate" label="Generátor" />
+                  <NavLink href="/pricing" label="Členstvá" />
+                  <NavLink href="/contact" label="Kontakt" />
+                  <NavLink href="/docs" label="Dokumenty" />
+
+                  <div className="w-3" />
+
+                  <NavLink href="/profile" label="Profil" />
+
+                  {/* CTA: Odhlásiť sa (inverted oproti ostatným) */}
+                  <button
+                    onClick={logout}
+                    className="
+                      rounded-full px-5 py-2.5 text-sm font-semibold transition border shadow-sm
+                      bg-black text-white border-black hover:bg-gray-800
+                      dark:bg-white dark:text-black dark:border-white dark:hover:bg-gray-200
+                    "
+                    type="button"
+                  >
+                    Odhlásiť sa
+                  </button>
+                </>
+              ) : (
+                <>
+                  <NavLink href="/pricing" label="Členstvá" />
+                  <NavLink href="/contact" label="Kontakt" />
+
+                  {/* CTA: Prihlásiť sa */}
+                  <PrimaryNavLink href="/login" label="Prihlásiť sa | Vytvoriť účet" />
+                </>
+              )}
+
+              {SHOW_LANGUAGE_SWITCH ? (
+                <div className="ml-2 rounded-full border border-gray-300 bg-white px-3 py-2 text-xs text-gray-700 dark:border-gray-700 dark:bg-black dark:text-gray-300">
+                  Jazyk
+                </div>
+              ) : null}
+
+              <div className="ml-1">
+                <ThemeToggle />
+              </div>
             </>
-          )}
-
-          <LangSwitcher />
-        </div>
-      </div>
-
-      {/* mobile nav */}
-      <div className="md:hidden border-t border-gray-900">
-        <div className="mx-auto w-full max-w-5xl px-6 py-3 flex items-center justify-between text-sm text-gray-300">
-          <Link className="hover:text-white" href="/generate">
-            {t.nav.generator}
-          </Link>
-          <Link className="hover:text-white" href="/pricing">
-            {t.nav.pricing}
-          </Link>
-          <Link className="hover:text-white" href="/profile">
-            {t.nav.profile}
-          </Link>
-          {!auth.loading && !auth.email ? (
-            <Link className="hover:text-white" href="/login">
-              {t.nav.login}
-            </Link>
-          ) : (
-            <button type="button" onClick={logout} className="hover:text-white">
-              {t.nav.logout}
-            </button>
           )}
         </div>
       </div>
-    </header>
+    </div>
   );
 }

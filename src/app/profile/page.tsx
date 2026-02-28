@@ -105,9 +105,7 @@ function shoppingToTXT(weekStart: string, shopping: any[]) {
     lines.push(
       `Nákup ${t.trip} (dni ${t.covers_days}) – odhad: ${t.estimated_cost_eur ?? "—"} € – reálna: ${t.actual_cost_eur ?? "—"} €`
     );
-    for (const it of t.items || []) {
-      lines.push(`- ${it.name} — ${it.quantity}`);
-    }
+    for (const it of t.items || []) lines.push(`- ${it.name} — ${it.quantity}`);
     lines.push("");
   }
   return lines.join("\n");
@@ -186,16 +184,14 @@ function TabButton({
       onClick={onClick}
       className={[
         "rounded-full px-4 py-2 text-sm font-semibold transition border",
-        active ? "bg-white text-black border-white" : "bg-black text-gray-200 border-gray-700 hover:bg-zinc-900",
+        active
+          ? "bg-black text-white border-black dark:bg-white dark:text-black dark:border-white"
+          : "bg-transparent border-gray-300 text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-zinc-900",
       ].join(" ")}
     >
       {children}
     </button>
   );
-}
-
-function deepClone<T>(x: T): T {
-  return JSON.parse(JSON.stringify(x));
 }
 
 function computeActualFromTrips(plan: any) {
@@ -266,7 +262,6 @@ export default function ProfilePage() {
     return () => sub.subscription.unsubscribe();
   }, [supabase]);
 
-  // uložené plány
   useEffect(() => {
     (async () => {
       setError("");
@@ -293,7 +288,6 @@ export default function ProfilePage() {
     })();
   }, [supabase, email]);
 
-  // načítanie profilu (predvolené)
   useEffect(() => {
     (async () => {
       setPrefMsg("");
@@ -344,11 +338,6 @@ export default function ProfilePage() {
       setPrefLoading(false);
     })();
   }, [supabase, email]);
-
-  async function logout() {
-    await supabase.auth.signOut();
-    window.location.href = "/login";
-  }
 
   const years = useMemo(() => {
     const set = new Set<string>();
@@ -505,62 +494,26 @@ export default function ProfilePage() {
     setPrefLoading(false);
   }
 
-  function exportWeekTXT(weekStart: string, shopping: any[]) {
-    downloadText(`fudly-nakup-${weekStart}.txt`, shoppingToTXT(weekStart, shopping));
-  }
-
   return (
-    <main className="min-h-screen bg-black text-white p-6">
+    <main className="min-h-screen p-6 page-invert-bg">
       <div className="mx-auto w-full max-w-5xl">
-        <header className="mb-6 flex items-start justify-between gap-4">
-          <div>
-            <div className="text-sm text-gray-400">Fudly</div>
-            <h1 className="mt-2 text-3xl font-bold">{t.nav.profile}</h1>
-            <p className="mt-2 text-gray-300">Prehľad: predvolené, jedálničky, nákupy, kalórie a financie.</p>
-          </div>
+        <header className="mb-6">
+          <h1 className="mt-2 text-3xl font-bold">{t.nav.profile}</h1>
+          <p className="mt-2 muted">Prehľad: predvolené, jedálničky, nákupy, kalórie a financie.</p>
 
-          <div className="text-right">
-            {authLoading ? (
-              <div className="text-sm text-gray-400">Kontrolujem prihlásenie…</div>
-            ) : email ? (
-              <div className="space-y-2">
-                <div className="text-sm text-gray-300">
-                  Prihlásený ako <span className="text-white font-semibold">{email}</span>
-                </div>
-
-                <div className="flex justify-end gap-2">
-                  <Link
-                    href="/generate"
-                    className="rounded-xl border border-gray-700 bg-black px-4 py-2 text-sm hover:bg-zinc-900"
-                  >
-                    {t.nav.generator}
-                  </Link>
-                  <button
-                    onClick={logout}
-                    className="rounded-xl border border-gray-700 bg-black px-4 py-2 text-sm hover:bg-zinc-900"
-                  >
-                    {t.nav.logout}
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <Link
-                href="/login"
-                className="rounded-xl bg-white px-4 py-2 text-sm text-black font-semibold hover:bg-gray-200"
-              >
-                Prihlásiť sa
-              </Link>
-            )}
-          </div>
+          {authLoading ? (
+            <div className="mt-3 text-sm muted-2">Kontrolujem prihlásenie…</div>
+          ) : email ? (
+            <div className="mt-3 text-sm muted">
+              Prihlásený ako <span className="font-semibold">{email}</span>
+            </div>
+          ) : null}
         </header>
 
         {!email && !authLoading && (
-          <div className="rounded-2xl border border-gray-800 bg-zinc-900 p-6">
-            <div className="text-gray-200">Najprv sa prihlás.</div>
-            <Link
-              href="/login"
-              className="mt-4 inline-block rounded-xl bg-white px-4 py-2 text-black font-semibold hover:bg-gray-200"
-            >
+          <div className="rounded-3xl p-6 surface-same-as-nav surface-border">
+            <div className="muted">Najprv sa prihlás.</div>
+            <Link href="/login" className="mt-4 inline-flex btn-primary px-4 py-2 text-sm">
               Prihlásiť sa
             </Link>
           </div>
@@ -594,7 +547,7 @@ export default function ProfilePage() {
                     setYearFilter(e.target.value);
                     setMonthFilter("all");
                   }}
-                  className="rounded-xl border border-gray-700 bg-black px-3 py-2 text-sm text-white"
+                  className="input-surface text-sm w-auto"
                 >
                   <option value="all">Všetky roky</option>
                   {years.map((y) => (
@@ -607,7 +560,7 @@ export default function ProfilePage() {
                 <select
                   value={monthFilter}
                   onChange={(e) => setMonthFilter(e.target.value)}
-                  className="rounded-xl border border-gray-700 bg-black px-3 py-2 text-sm text-white"
+                  className="input-surface text-sm w-auto"
                   disabled={yearFilter === "all"}
                   title={yearFilter === "all" ? "Najprv vyber rok" : ""}
                 >
@@ -624,51 +577,32 @@ export default function ProfilePage() {
               </div>
             )}
 
-            {/* DEFAULTS */}
             {tab === "defaults" ? (
-              <section className="rounded-2xl border border-gray-800 bg-zinc-900 p-6">
+              <section className="rounded-3xl p-6 surface-same-as-nav surface-border">
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <h2 className="text-xl font-semibold">Predvolené</h2>
-                    <p className="mt-1 text-sm text-gray-300">Toto sa načíta v Generátore cez „Načítať uložené“.</p>
+                    <p className="mt-1 text-sm muted">Toto sa načíta v Generátore cez „Načítať uložené“.</p>
                   </div>
 
-                  <button
-                    onClick={saveDefaults}
-                    disabled={prefLoading}
-                    className="rounded-xl bg-white px-5 py-3 text-black font-semibold hover:bg-gray-200 transition disabled:opacity-40"
-                  >
+                  <button onClick={saveDefaults} disabled={prefLoading} className="btn-primary">
                     {prefLoading ? "Ukladám..." : "Uložiť predvolené"}
                   </button>
                 </div>
 
-                {prefMsg ? <div className="mt-3 text-sm text-gray-200">{prefMsg}</div> : null}
+                {prefMsg ? <div className="mt-3 text-sm muted">{prefMsg}</div> : null}
 
                 <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
                   <Field label="Počet ľudí">
-                    <input
-                      value={people}
-                      onChange={(e) => setPeople(e.target.value)}
-                      className="w-full rounded-xl border border-gray-700 bg-black px-3 py-2 text-white"
-                      placeholder="2"
-                    />
+                    <input value={people} onChange={(e) => setPeople(e.target.value)} className="input-surface" placeholder="2" />
                   </Field>
 
                   <Field label="Budget / týždeň (€)">
-                    <input
-                      value={budget}
-                      onChange={(e) => setBudget(e.target.value)}
-                      className="w-full rounded-xl border border-gray-700 bg-black px-3 py-2 text-white"
-                      placeholder="80"
-                    />
+                    <input value={budget} onChange={(e) => setBudget(e.target.value)} className="input-surface" placeholder="80" />
                   </Field>
 
                   <Field label="Preferovaný štýl">
-                    <select
-                      value={style}
-                      onChange={(e) => setStyle(e.target.value)}
-                      className="w-full rounded-xl border border-gray-700 bg-black px-3 py-2 text-white"
-                    >
+                    <select value={style} onChange={(e) => setStyle(e.target.value)} className="input-surface">
                       {STYLE_OPTIONS.map((s) => (
                         <option key={s.value} value={s.value}>
                           {s.emoji} {s.label} — {s.desc}
@@ -680,11 +614,7 @@ export default function ProfilePage() {
 
                 <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
                   <Field label="Nákupy / týždeň">
-                    <select
-                      value={shoppingTrips}
-                      onChange={(e) => setShoppingTrips(e.target.value)}
-                      className="w-full rounded-xl border border-gray-700 bg-black px-3 py-2 text-white"
-                    >
+                    <select value={shoppingTrips} onChange={(e) => setShoppingTrips(e.target.value)} className="input-surface">
                       <option value="1">1×</option>
                       <option value="2">2×</option>
                       <option value="3">3×</option>
@@ -693,73 +623,46 @@ export default function ProfilePage() {
                   </Field>
 
                   <Field label="Varenie na viac dní">
-                    <select
-                      value={repeatDays}
-                      onChange={(e) => setRepeatDays(e.target.value)}
-                      className="w-full rounded-xl border border-gray-700 bg-black px-3 py-2 text-white"
-                    >
-                      <option value="1">1 deň</option>
-                      <option value="2">2 dni</option>
-                      <option value="3">3 dni</option>
+                    <select value={repeatDays} onChange={(e) => setRepeatDays(e.target.value)} className="input-surface">
+                      <option value="1 deň">1 deň</option>
+                      <option value="2 dni">2 dni</option>
+                      <option value="3 dni">3 dni</option>
                     </select>
                   </Field>
                 </div>
 
                 <div className="mt-4 grid grid-cols-1 gap-4">
                   <Field label="Intolerancie (tvrdý zákaz)">
-                    <input
-                      value={intolerances}
-                      onChange={(e) => setIntolerances(e.target.value)}
-                      className="w-full rounded-xl border border-gray-700 bg-black px-3 py-2 text-white"
-                      placeholder="laktóza, arašidy"
-                    />
+                    <input value={intolerances} onChange={(e) => setIntolerances(e.target.value)} className="input-surface" placeholder="laktóza, arašidy" />
                   </Field>
 
                   <Field label="Vyhnúť sa">
-                    <input
-                      value={avoid}
-                      onChange={(e) => setAvoid(e.target.value)}
-                      className="w-full rounded-xl border border-gray-700 bg-black px-3 py-2 text-white"
-                      placeholder="huby, brokolica"
-                    />
+                    <input value={avoid} onChange={(e) => setAvoid(e.target.value)} className="input-surface" placeholder="huby, brokolica" />
                   </Field>
 
                   <Field label="Mám doma (použi)">
-                    <input
-                      value={have}
-                      onChange={(e) => setHave(e.target.value)}
-                      className="w-full rounded-xl border border-gray-700 bg-black px-3 py-2 text-white"
-                      placeholder="ryža, vajcia"
-                    />
+                    <input value={have} onChange={(e) => setHave(e.target.value)} className="input-surface" placeholder="ryža, vajcia" />
                   </Field>
 
                   <Field label="Obľúbené">
-                    <input
-                      value={favorites}
-                      onChange={(e) => setFavorites(e.target.value)}
-                      className="w-full rounded-xl border border-gray-700 bg-black px-3 py-2 text-white"
-                      placeholder="cestoviny, kura"
-                    />
+                    <input value={favorites} onChange={(e) => setFavorites(e.target.value)} className="input-surface" placeholder="cestoviny, kura" />
                   </Field>
                 </div>
 
-                {!profileRow ? (
-                  <div className="mt-4 text-xs text-gray-500">Zatiaľ nemáš uložené predvolené – vyplň a ulož.</div>
-                ) : null}
+                {!profileRow ? <div className="mt-4 text-xs muted-2">Zatiaľ nemáš uložené predvolené – vyplň a ulož.</div> : null}
               </section>
             ) : null}
 
-            {/* PLANS */}
             {tab === "plans" ? (
-              <section className="rounded-2xl border border-gray-800 bg-zinc-900 p-6">
+              <section className="rounded-3xl p-6 surface-same-as-nav surface-border">
                 <h2 className="text-xl font-semibold">Uložené jedálničky</h2>
-                <p className="mt-1 text-sm text-gray-300">Filtrovanie podľa roka a mesiaca.</p>
+                <p className="mt-1 text-sm muted">Filtrovanie podľa roka a mesiaca.</p>
 
-                {loading ? <div className="mt-4 text-sm text-gray-400">Načítavam…</div> : null}
-                {error ? <div className="mt-4 text-sm text-red-300">Chyba: {error}</div> : null}
+                {loading ? <div className="mt-4 text-sm muted-2">Načítavam…</div> : null}
+                {error ? <div className="mt-4 text-sm text-red-500">Chyba: {error}</div> : null}
 
                 {!loading && !error && rows.length === 0 ? (
-                  <div className="mt-4 text-gray-300">
+                  <div className="mt-4 muted">
                     Zatiaľ nemáš uložený žiadny jedálniček. Choď do{" "}
                     <Link className="underline" href="/generate">
                       Generátora
@@ -771,7 +674,7 @@ export default function ProfilePage() {
                 <div className="mt-4 space-y-6">
                   {groupedPlans.map((g) => (
                     <div key={g.ym}>
-                      <div className="text-sm text-gray-400 mb-3">
+                      <div className="text-sm muted-2 mb-3">
                         {g.ym === "Neznámy" ? "Neznámy dátum" : `Mesiac: ${ymLabel(g.ym)}`}
                       </div>
 
@@ -786,19 +689,19 @@ export default function ProfilePage() {
                             <Link
                               key={r.id}
                               href={`/profile/${r.week_start}`}
-                              className="block rounded-2xl border border-gray-800 bg-black p-4 hover:bg-zinc-950 transition"
+                              className="block rounded-2xl p-4 page-invert-bg border border-gray-200 dark:border-gray-800 hover:opacity-[0.98] transition"
                             >
                               <div className="flex items-start justify-between gap-4">
                                 <div>
                                   <div className="text-lg font-semibold">
                                     Týždeň {formatDateSK(r.week_start)} – {formatDateSK(weekEnd)}
                                   </div>
-                                  <div className="mt-1 text-sm text-gray-400">
-                                    {r.is_edited ? "Upravené" : "Generované"}{" "}
-                                    {bud ? `• Budget: ${bud} €` : ""} {est ? `• Odhad: ${est} €` : ""}
+                                  <div className="mt-1 text-sm muted-2">
+                                    {r.is_edited ? "Upravené" : "Generované"} {bud ? `• Budget: ${bud} €` : ""}{" "}
+                                    {est ? `• Odhad: ${est} €` : ""}
                                   </div>
                                 </div>
-                                <div className="text-sm text-gray-400">Otvor</div>
+                                <div className="text-sm muted-2">Otvor</div>
                               </div>
                             </Link>
                           );
@@ -810,30 +713,29 @@ export default function ProfilePage() {
               </section>
             ) : null}
 
-            {/* SHOPPING */}
             {tab === "shopping" ? (
-              <section className="rounded-2xl border border-gray-800 bg-zinc-900 p-6">
+              <section className="rounded-3xl p-6 surface-same-as-nav surface-border">
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <h2 className="text-xl font-semibold">Uložené nákupy</h2>
-                    <p className="mt-1 text-sm text-gray-300">Filtrovanie + export zatiaľ iba TXT.</p>
+                    <p className="mt-1 text-sm muted">Filtrovanie + export zatiaľ iba TXT.</p>
                   </div>
-                  <Link href="/generate" className="rounded-xl border border-gray-700 bg-black px-4 py-2 text-sm hover:bg-zinc-900">
+                  <Link href="/generate" className="rounded-xl border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-zinc-900 transition">
                     Generovať nový týždeň
                   </Link>
                 </div>
 
-                {loading ? <div className="mt-4 text-sm text-gray-400">Načítavam…</div> : null}
-                {error ? <div className="mt-4 text-sm text-red-300">Chyba: {error}</div> : null}
+                {loading ? <div className="mt-4 text-sm muted-2">Načítavam…</div> : null}
+                {error ? <div className="mt-4 text-sm text-red-500">Chyba: {error}</div> : null}
 
                 {!loading && !error && shoppingWeeksFiltered.length === 0 ? (
-                  <div className="mt-4 text-gray-300">Zatiaľ nemáš žiadne uložené nákupy pre tento filter.</div>
+                  <div className="mt-4 muted">Zatiaľ nemáš žiadne uložené nákupy pre tento filter.</div>
                 ) : null}
 
                 <div className="mt-4 space-y-6">
                   {shoppingWeeksFiltered.map((g) => (
                     <div key={g.ym}>
-                      <div className="text-sm text-gray-400 mb-3">
+                      <div className="text-sm muted-2 mb-3">
                         {g.ym === "Neznámy" ? "Neznámy dátum" : `Mesiac: ${ymLabel(g.ym)}`}
                       </div>
 
@@ -846,13 +748,13 @@ export default function ProfilePage() {
                           const previewItems = Array.isArray(firstTrip?.items) ? firstTrip.items.slice(0, 6) : [];
 
                           return (
-                            <div key={r.id} className="rounded-2xl border border-gray-800 bg-black p-4">
+                            <div key={r.id} className="rounded-2xl p-4 page-invert-bg border border-gray-200 dark:border-gray-800">
                               <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
                                 <div>
                                   <div className="text-lg font-semibold">
                                     Týždeň {formatDateSK(r.week_start)} – {formatDateSK(weekEnd)}
                                   </div>
-                                  <div className="mt-1 text-sm text-gray-400">
+                                  <div className="mt-1 text-sm muted-2">
                                     {typeof total === "number" ? `Celkový odhad: ${total} €` : "Celkový odhad: —"}
                                     {" • "}nákupov: {Array.isArray(shopping) ? shopping.length : 0}
                                   </div>
@@ -861,56 +763,51 @@ export default function ProfilePage() {
                                 <div className="flex flex-wrap gap-2">
                                   <button
                                     type="button"
-                                    onClick={() => exportWeekTXT(r.week_start, shopping)}
-                                    className="rounded-full border border-gray-700 bg-black px-3 py-1.5 text-xs text-gray-200 hover:bg-zinc-900"
+                                    onClick={() => downloadText(`fudly-nakup-${r.week_start}.txt`, shoppingToTXT(r.week_start, shopping))}
+                                    className="rounded-full border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-xs font-semibold hover:bg-gray-100 dark:hover:bg-zinc-900 transition"
                                   >
                                     Export TXT
                                   </button>
                                   <Link
                                     href={`/profile/${r.week_start}`}
-                                    className="rounded-full border border-gray-700 bg-black px-3 py-1.5 text-xs text-gray-200 hover:bg-zinc-900"
+                                    className="rounded-full border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-xs font-semibold hover:bg-gray-100 dark:hover:bg-zinc-900 transition"
                                   >
                                     Otvoriť detail
                                   </Link>
                                 </div>
                               </div>
 
-                              <div className="mt-4 rounded-xl border border-gray-800 bg-zinc-950 p-3">
+                              <div className="mt-4 rounded-xl p-3 surface-same-as-nav surface-border">
                                 <div className="flex items-baseline justify-between gap-3">
-                                  <div className="font-semibold">
-                                    🧺 Preview: {firstTrip ? `Nákup ${firstTrip.trip}` : "—"}
-                                  </div>
-                                  <div className="text-xs text-gray-400">
+                                  <div className="font-semibold">🧺 Preview: {firstTrip ? `Nákup ${firstTrip.trip}` : "—"}</div>
+                                  <div className="text-xs muted-2">
                                     {firstTrip?.covers_days ? `dni: ${firstTrip.covers_days}` : ""}
                                     {firstTrip?.estimated_cost_eur != null ? (
                                       <>
-                                        {" • "}odhad:{" "}
-                                        <span className="text-white font-semibold">{firstTrip.estimated_cost_eur} €</span>
+                                        {" • "}odhad: <span className="font-semibold">{firstTrip.estimated_cost_eur} €</span>
                                       </>
                                     ) : null}
                                   </div>
                                 </div>
 
                                 {previewItems.length ? (
-                                  <ul className="mt-2 space-y-1 text-sm text-gray-200">
+                                  <ul className="mt-2 space-y-1 text-sm muted">
                                     {previewItems.map((it: any, i: number) => (
                                       <li key={i} className="flex items-center justify-between gap-3">
                                         <span className="flex items-center gap-2 min-w-0">
                                           <span className="shrink-0">{iconForIngredient(it.name)}</span>
                                           <span className="truncate">{it.name}</span>
                                         </span>
-                                        <span className="text-gray-400 shrink-0">{it.quantity}</span>
+                                        <span className="muted-2 shrink-0">{it.quantity}</span>
                                       </li>
                                     ))}
                                   </ul>
                                 ) : (
-                                  <div className="mt-2 text-sm text-gray-400">Žiadne položky.</div>
+                                  <div className="mt-2 text-sm muted-2">Žiadne položky.</div>
                                 )}
 
                                 {firstTrip?.items?.length > 6 ? (
-                                  <div className="mt-2 text-xs text-gray-500">
-                                    Zobrazených 6 položiek. Zvyšok nájdeš v detaile týždňa.
-                                  </div>
+                                  <div className="mt-2 text-xs muted-2">Zobrazených 6 položiek. Zvyšok nájdeš v detaile týždňa.</div>
                                 ) : null}
                               </div>
                             </div>
@@ -923,30 +820,22 @@ export default function ProfilePage() {
               </section>
             ) : null}
 
-            {/* CALORIES */}
             {tab === "calories" ? (
-              <section className="rounded-2xl border border-gray-800 bg-zinc-900 p-6">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <h2 className="text-xl font-semibold">Kalórie</h2>
-                    <p className="mt-1 text-sm text-gray-300">Priemer kcal/deň + súčet týždňa.</p>
-                  </div>
-                  <Link href="/generate" className="rounded-xl border border-gray-700 bg-black px-4 py-2 text-sm hover:bg-zinc-900">
-                    Generovať nový týždeň
-                  </Link>
-                </div>
+              <section className="rounded-3xl p-6 surface-same-as-nav surface-border">
+                <h2 className="text-xl font-semibold">Kalórie</h2>
+                <p className="mt-1 text-sm muted">Priemer kcal/deň + súčet týždňa.</p>
 
-                {loading ? <div className="mt-4 text-sm text-gray-400">Načítavam…</div> : null}
-                {error ? <div className="mt-4 text-sm text-red-300">Chyba: {error}</div> : null}
+                {loading ? <div className="mt-4 text-sm muted-2">Načítavam…</div> : null}
+                {error ? <div className="mt-4 text-sm text-red-500">Chyba: {error}</div> : null}
 
                 {!loading && !error && caloriesWeeksFiltered.length === 0 ? (
-                  <div className="mt-4 text-gray-300">Pre tento filter nemáš uložené kalórie.</div>
+                  <div className="mt-4 muted">Pre tento filter nemáš uložené kalórie.</div>
                 ) : null}
 
                 <div className="mt-4 space-y-6">
                   {caloriesWeeksFiltered.map((g) => (
                     <div key={g.ym}>
-                      <div className="text-sm text-gray-400 mb-3">
+                      <div className="text-sm muted-2 mb-3">
                         {g.ym === "Neznámy" ? "Neznámy dátum" : `Mesiac: ${ymLabel(g.ym)}`}
                       </div>
 
@@ -957,24 +846,20 @@ export default function ProfilePage() {
                             <Link
                               key={r.id}
                               href={`/profile/${r.week_start}`}
-                              className="block rounded-2xl border border-gray-800 bg-black p-4 hover:bg-zinc-950 transition"
+                              className="block rounded-2xl p-4 page-invert-bg border border-gray-200 dark:border-gray-800 hover:opacity-[0.98] transition"
                             >
                               <div className="flex items-start justify-between gap-4">
                                 <div>
                                   <div className="text-lg font-semibold">
                                     Týždeň {formatDateSK(r.week_start)} – {formatDateSK(weekEnd)}
                                   </div>
-                                  <div className="mt-1 text-sm text-gray-400">
-                                    Priemer:{" "}
-                                    <span className="text-white font-semibold">{typeof avg === "number" ? avg : "—"}</span>{" "}
-                                    kcal/deň
+                                  <div className="mt-1 text-sm muted-2">
+                                    Priemer: <span className="font-semibold">{typeof avg === "number" ? avg : "—"}</span> kcal/deň
                                     {" • "}
-                                    Týždeň:{" "}
-                                    <span className="text-white font-semibold">{typeof weekly === "number" ? weekly : "—"}</span>{" "}
-                                    kcal
+                                    Týždeň: <span className="font-semibold">{typeof weekly === "number" ? weekly : "—"}</span> kcal
                                   </div>
                                 </div>
-                                <div className="text-sm text-gray-400">Otvor</div>
+                                <div className="text-sm muted-2">Otvor</div>
                               </div>
                             </Link>
                           );
@@ -986,33 +871,22 @@ export default function ProfilePage() {
               </section>
             ) : null}
 
-            {/* FINANCE */}
             {tab === "finance" ? (
-              <section className="rounded-2xl border border-gray-800 bg-zinc-900 p-6">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <h2 className="text-xl font-semibold">Financie</h2>
-                    <p className="mt-1 text-sm text-gray-300">Budget vs odhad vs reálna cena (súčet z nákupov).</p>
-                  </div>
-                  <Link
-                    href="/generate"
-                    className="rounded-xl border border-gray-700 bg-black px-4 py-2 text-sm hover:bg-zinc-900"
-                  >
-                    Generovať nový týždeň
-                  </Link>
-                </div>
+              <section className="rounded-3xl p-6 surface-same-as-nav surface-border">
+                <h2 className="text-xl font-semibold">Financie</h2>
+                <p className="mt-1 text-sm muted">Budget vs odhad vs reálna cena (súčet z nákupov).</p>
 
-                {loading ? <div className="mt-4 text-sm text-gray-400">Načítavam…</div> : null}
-                {error ? <div className="mt-4 text-sm text-red-300">Chyba: {error}</div> : null}
+                {loading ? <div className="mt-4 text-sm muted-2">Načítavam…</div> : null}
+                {error ? <div className="mt-4 text-sm text-red-500">Chyba: {error}</div> : null}
 
                 {!loading && !error && financeWeeksFiltered.length === 0 ? (
-                  <div className="mt-4 text-gray-300">Zatiaľ nemáš dáta pre financie v tomto filtri.</div>
+                  <div className="mt-4 muted">Zatiaľ nemáš dáta pre financie v tomto filtri.</div>
                 ) : null}
 
                 <div className="mt-4 space-y-6">
                   {financeWeeksFiltered.map((g) => (
                     <div key={g.ym}>
-                      <div className="text-sm text-gray-400 mb-3">
+                      <div className="text-sm muted-2 mb-3">
                         {g.ym === "Neznámy" ? "Neznámy dátum" : `Mesiac: ${ymLabel(g.ym)}`}
                       </div>
 
@@ -1028,27 +902,21 @@ export default function ProfilePage() {
                           const diffAct = budgetVal != null && actVal != null ? actVal - budgetVal : null;
 
                           return (
-                            <div key={r.id} className="rounded-2xl border border-gray-800 bg-black p-4">
+                            <div key={r.id} className="rounded-2xl p-4 page-invert-bg border border-gray-200 dark:border-gray-800">
                               <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
                                 <div>
                                   <div className="text-lg font-semibold">
                                     Týždeň {formatDateSK(r.week_start)} – {formatDateSK(weekEnd)}
                                   </div>
 
-                                  <div className="mt-1 text-sm text-gray-400">
-                                    Budget:{" "}
-                                    <span className="text-white font-semibold">
-                                      {budgetVal != null ? `${budgetVal} €` : "—"}
-                                    </span>
+                                  <div className="mt-1 text-sm muted-2">
+                                    Budget: <span className="font-semibold">{budgetVal != null ? `${budgetVal} €` : "—"}</span>
                                     {" • "}
-                                    Odhad:{" "}
-                                    <span className="text-white font-semibold">{estVal != null ? `${estVal} €` : "—"}</span>
+                                    Odhad: <span className="font-semibold">{estVal != null ? `${estVal} €` : "—"}</span>
                                     {diffEst != null ? (
                                       <>
                                         {" • "}vs budget:{" "}
-                                        <span
-                                          className={diffEst > 0 ? "text-red-300 font-semibold" : "text-green-300 font-semibold"}
-                                        >
+                                        <span className={diffEst > 0 ? "text-red-500 font-semibold" : "text-green-600 font-semibold"}>
                                           {diffEst > 0 ? "+" : ""}
                                           {diffEst.toFixed(2)} €
                                         </span>
@@ -1056,22 +924,19 @@ export default function ProfilePage() {
                                     ) : null}
                                   </div>
 
-                                  <div className="mt-1 text-sm text-gray-400">
-                                    Reálna cena (nákupy):{" "}
-                                    <span className="text-white font-semibold">{actVal != null ? `${actVal} €` : "—"}</span>
+                                  <div className="mt-1 text-sm muted-2">
+                                    Reálna cena (nákupy): <span className="font-semibold">{actVal != null ? `${actVal} €` : "—"}</span>
                                     {diffAct != null ? (
                                       <>
                                         {" • "}vs budget:{" "}
-                                        <span
-                                          className={diffAct > 0 ? "text-red-300 font-semibold" : "text-green-300 font-semibold"}
-                                        >
+                                        <span className={diffAct > 0 ? "text-red-500 font-semibold" : "text-green-600 font-semibold"}>
                                           {diffAct > 0 ? "+" : ""}
                                           {diffAct.toFixed(2)} €
                                         </span>
                                       </>
                                     ) : null}
                                     {" • "}
-                                    <span className={missing > 0 ? "text-yellow-200" : "text-gray-400"}>
+                                    <span className={missing > 0 ? "text-yellow-600 dark:text-yellow-300" : "muted-2"}>
                                       {totalTrips > 0 ? `chýba ${missing}/${totalTrips} nákupov` : "žiadne nákupy"}
                                     </span>
                                   </div>
@@ -1080,7 +945,7 @@ export default function ProfilePage() {
                                 <div className="flex flex-col gap-2 min-w-[220px]">
                                   <Link
                                     href={`/profile/${r.week_start}`}
-                                    className="rounded-xl border border-gray-700 bg-black px-4 py-2 text-sm font-semibold hover:bg-zinc-900 text-center"
+                                    className="rounded-xl border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-semibold hover:bg-gray-100 dark:hover:bg-zinc-900 text-center transition"
                                   >
                                     Otvoriť detail
                                   </Link>
@@ -1094,9 +959,7 @@ export default function ProfilePage() {
                   ))}
                 </div>
 
-                <div className="mt-4 text-xs text-gray-500">
-                  Reálnu cenu dopĺňaš len v detaile týždňa – pri jednotlivých nákupoch.
-                </div>
+                <div className="mt-4 text-xs muted-2">Reálnu cenu dopĺňaš v detaile týždňa – pri jednotlivých nákupoch.</div>
               </section>
             ) : null}
           </>
@@ -1110,7 +973,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   return (
     <label className="block">
       <div className="mb-1 flex items-baseline justify-between gap-3">
-        <span className="text-sm text-gray-300">{label}</span>
+        <span className="text-sm muted">{label}</span>
       </div>
       {children}
     </label>

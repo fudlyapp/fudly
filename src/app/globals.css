@@ -42,4 +42,43 @@ body {
     background-size: 900px 900px;
     opacity: 0.08;
   }
+  @layer utilities {
+  /* Pozadie stránky = opak TopNav (opak témy) */
+  .page-invert-bg {
+    @apply bg-black text-white dark:bg-white dark:text-black;
+  }
+
+  /* Obsahový “surface” = rovnaké ako TopNav (rovnaké ako téma) */
+  .surface-same-as-nav {
+    @apply bg-white text-black dark:bg-black dark:text-white;
+  }
+
+  /* Border / jemné tieňe pre surface */
+  .surface-border {
+    @apply border border-gray-200 dark:border-gray-800 shadow-sm;
+  }
+
+  /* Muted text (vždy čitateľný) */
+  .muted {
+    @apply text-gray-700 dark:text-gray-300;
+  }
+
+  .muted-2 {
+    @apply text-gray-600 dark:text-gray-400;
+  }
+
+  /* Inputy vo “surface” */
+  .input-surface {
+    @apply w-full rounded-xl border px-3 py-2
+      border-gray-300 bg-white text-black placeholder-gray-400
+      dark:border-gray-700 dark:bg-black dark:text-white dark:placeholder-gray-500;
+  }
+
+  /* Primary button (invert podľa surface) */
+  .btn-primary {
+    @apply rounded-xl px-5 py-3 font-semibold transition disabled:opacity-50
+      bg-black text-white hover:bg-gray-800
+      dark:bg-white dark:text-black dark:hover:bg-gray-200;
+  }
+}
 }

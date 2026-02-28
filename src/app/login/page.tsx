@@ -1,10 +1,13 @@
+// src/app/login/page.tsx
 import { Suspense } from "react";
 import LoginClient from "./LoginClient";
 
 export default function Page() {
   return (
-    <Suspense fallback={null}>
-      <LoginClient />
-    </Suspense>
+    <div className="min-h-screen page-invert-bg">
+      <Suspense fallback={null}>
+        <LoginClient />
+      </Suspense>
+    </div>
   );
 }

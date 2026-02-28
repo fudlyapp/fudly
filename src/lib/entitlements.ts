@@ -1,3 +1,4 @@
+//src/lib/entitlements.ts
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
 export type Entitlements = {

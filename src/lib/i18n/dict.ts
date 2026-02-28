@@ -295,7 +295,7 @@ export const DICT = {
     },
 
     pricing: {
-      title: "Cenník",
+      title: "Dostupné balíčky",
       subtitle: "Členstvá a čo obsahujú.",
       subscribe: "Predplatiť",
       manage: "Spravovať",
@@ -303,7 +303,7 @@ export const DICT = {
       basic: {
         title: "Basic",
         subtitle: "Platené členstvo • 3 generovania / týždeň",
-        note: "Kalórie a štýly Fit/Tradičné/Exotické budú v Plus.",
+        note: "",
         features: [
           "Generovanie jedálničkov + nákupov",
           "Uložené plány a nákupy v profile",
@@ -315,7 +315,7 @@ export const DICT = {
       plus: {
         title: "Plus",
         subtitle: "Platené členstvo • 5 generovaní / týždeň",
-        note: "Platby a aktiváciu členstva doplníme v ďalšej fáze.",
+        note: "",
         features: ["Všetko z Basic", "Kalórie (prehľad + filtrovanie)", "Štýly: Fit, Tradičné, Exotické", "Vyšší limit generovania"],
       },
 

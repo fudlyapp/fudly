@@ -1,13 +1,14 @@
+// src/components/TopNavGate.tsx
 "use client";
 
-import { usePathname } from "next/navigation";
-import TopNav from "@/components/TopNav";
+import TopNav from "./TopNav";
 
-export default function TopNavGate() {
-  const pathname = usePathname();
-
-  // Na homepage nechceme nič okrem hero sekcie
-  if (pathname === "/") return null;
-
-  return <TopNav />;
+export default function TopNavGate({ children }: { children?: React.ReactNode }) {
+  // Momentálne len wrapper kvôli spätnej kompatibilite
+  return (
+    <>
+      <TopNav />
+      {children ?? null}
+    </>
+  );
 }

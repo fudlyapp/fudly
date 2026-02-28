@@ -1,4 +1,4 @@
-// src/app/legal/page.tsx
+// src/app/docs/page.tsx
 "use client";
 
 import { useT } from "@/lib/i18n/useT";
@@ -8,19 +8,18 @@ export default function LegalPage() {
   const updated = new Date().toISOString().slice(0, 10);
 
   return (
-    <main className="min-h-screen bg-black text-white p-6">
+    <main className="min-h-screen p-6 page-invert-bg">
       <div className="mx-auto w-full max-w-4xl">
         <div className="mb-6">
-          <div className="text-sm text-gray-400"></div>
           <h1 className="mt-2 text-3xl font-bold">{t.legal.title}</h1>
-          <div className="mt-2 text-sm text-gray-400">
-            {t.legal.updated} <span className="text-white font-semibold">{updated}</span>
+          <div className="mt-2 text-sm muted-2">
+            {t.legal.updated} <span className="font-semibold">{updated}</span>
           </div>
         </div>
 
         <div className="space-y-4">
           <Section title={t.legal.sections.termsTitle}>
-            <p className="text-sm text-gray-200">{t.legal.terms.intro}</p>
+            <p className="text-sm muted">{t.legal.terms.intro}</p>
 
             <Bullets title="Služba" items={t.legal.terms.service} />
             <Bullets title="Účet" items={t.legal.terms.account} />
@@ -29,18 +28,18 @@ export default function LegalPage() {
           </Section>
 
           <Section title={t.legal.sections.privacyTitle}>
-            <p className="text-sm text-gray-200">{t.legal.privacy.intro}</p>
+            <p className="text-sm muted">{t.legal.privacy.intro}</p>
 
             <Bullets title="Aké údaje" items={t.legal.privacy.data} />
             <Bullets title="Na čo" items={t.legal.privacy.purpose} />
             <Bullets title="Uchovávanie" items={t.legal.privacy.retention} />
             <Bullets title="Tvoje práva" items={t.legal.privacy.rights} />
 
-            <div className="mt-3 text-sm text-gray-300">{t.legal.privacy.contact}</div>
+            <div className="mt-3 text-sm muted">{t.legal.privacy.contact}</div>
           </Section>
 
           <Section title={t.legal.sections.refundTitle}>
-            <p className="text-sm text-gray-200">{t.legal.refund.intro}</p>
+            <p className="text-sm muted">{t.legal.refund.intro}</p>
 
             <Bullets title="Zrušenie" items={t.legal.refund.cancel} />
             <Bullets title="Refundácie" items={t.legal.refund.refunds} />
@@ -54,7 +53,7 @@ export default function LegalPage() {
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-2xl border border-gray-800 bg-zinc-900 p-6">
+    <section className="rounded-3xl p-6 surface-same-as-nav surface-border">
       <h2 className="text-xl font-semibold">{title}</h2>
       <div className="mt-4 space-y-3">{children}</div>
     </section>
@@ -64,8 +63,8 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 function Bullets({ title, items }: { title: string; items: string[] }) {
   return (
     <div className="mt-3">
-      <div className="text-sm font-semibold text-gray-100">{title}</div>
-      <ul className="mt-2 space-y-1 text-sm text-gray-200">
+      <div className="text-sm font-semibold muted">{title}</div>
+      <ul className="mt-2 space-y-1 text-sm muted">
         {items.map((x, i) => (
           <li key={i}>• {x}</li>
         ))}

@@ -1,3 +1,4 @@
+//src/lib/labels.ts
 export function pluralizeSk(n: number, one: string, few: string, many: string) {
   const abs = Math.abs(n);
   if (abs === 1) return one;

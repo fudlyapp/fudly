@@ -1,28 +1,29 @@
+// src/app/layout.tsx
 import "./globals.css";
-import type { Metadata } from "next";
 import { LangProvider } from "@/lib/i18n/useT";
-import TopNavGate from "@/components/TopNavGate";
+import TopNav from "@/components/TopNav";
 
-export const metadata: Metadata = {
-  title: {
-    default: "Fudly",
-    template: "%s • Fudly",
-  },
-  description: "Fudly – AI jedálničky a nákupy",
-
-  icons: {
-    icon: "/favicon.ico",          // hlavná ikonka
-    shortcut: "/favicon.ico",
-    apple: "/logo_white.png",      // apple touch
-  },
-};
+const themeScript = `
+(function () {
+  try {
+    var t = localStorage.getItem('theme');
+    var systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    var dark = (t === 'dark') || (t === null && systemDark);
+    if (dark) document.documentElement.classList.add('dark');
+    else document.documentElement.classList.remove('dark');
+  } catch (e) {}
+})();
+`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="sk" suppressHydrationWarning>
-      <body className="bg-black text-white">
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+      </head>
+      <body className="bg-white text-black dark:bg-black dark:text-white">
         <LangProvider>
-          <TopNavGate />
+          <TopNav />
           {children}
         </LangProvider>
       </body>

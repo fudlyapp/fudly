@@ -1,3 +1,4 @@
+// src/app/login/LoginClient.tsx
 "use client";
 
 import { useEffect, useState } from "react";
@@ -36,12 +37,10 @@ export default function LoginClient() {
       if (mode === "signup") {
         const { error } = await supabase.auth.signUp({ email, password });
         if (error) throw error;
-
         setMessage(t.auth.signupSuccess);
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
-
         window.location.href = "/generate";
       }
     } catch (err: any) {
@@ -51,26 +50,30 @@ export default function LoginClient() {
     }
   }
 
+  const tabBase =
+    "rounded-xl px-3 py-2 text-sm border font-semibold transition";
+  const tabActive =
+    "bg-black text-white border-black hover:bg-gray-800 dark:bg-white dark:text-black dark:border-white dark:hover:bg-gray-200";
+  const tabInactive =
+    "bg-transparent border-gray-300 text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-zinc-900";
+
   return (
-    <main className="min-h-screen bg-zinc-950 text-zinc-100 flex items-center justify-center p-6">
-      <div className="w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-900/60 p-6 shadow-xl">
+    <main className="min-h-screen page-invert-bg flex items-center justify-center p-6">
+      <div className="w-full max-w-md rounded-3xl p-6 surface-same-as-nav surface-border">
         <div className="mb-6">
-          <Link href="/" className="text-zinc-400 hover:text-zinc-200 text-sm">
+          <Link href="/" className="text-sm muted hover:opacity-80 transition">
             ← {t.common.back}
           </Link>
+
           <h1 className="mt-3 text-2xl font-semibold">{t.auth.title}</h1>
-          <p className="text-zinc-400 text-sm mt-1">{t.auth.subtitle}</p>
+          <p className="mt-1 text-sm muted">{t.auth.subtitle}</p>
         </div>
 
         <div className="mb-4 grid grid-cols-2 gap-2">
           <button
             type="button"
             onClick={() => setMode("login")}
-            className={`rounded-xl px-3 py-2 text-sm border ${
-              mode === "login"
-                ? "bg-zinc-100 text-zinc-950 border-zinc-100"
-                : "bg-transparent text-zinc-200 border-zinc-800 hover:border-zinc-700"
-            }`}
+            className={`${tabBase} ${mode === "login" ? tabActive : tabInactive}`}
           >
             {t.auth.loginTab}
           </button>
@@ -78,11 +81,7 @@ export default function LoginClient() {
           <button
             type="button"
             onClick={() => setMode("signup")}
-            className={`rounded-xl px-3 py-2 text-sm border ${
-              mode === "signup"
-                ? "bg-zinc-100 text-zinc-950 border-zinc-100"
-                : "bg-transparent text-zinc-200 border-zinc-800 hover:border-zinc-700"
-            }`}
+            className={`${tabBase} ${mode === "signup" ? tabActive : tabInactive}`}
           >
             {t.auth.signupTab}
           </button>
@@ -90,9 +89,9 @@ export default function LoginClient() {
 
         <form onSubmit={handleSubmit} className="space-y-3">
           <div>
-            <label className="block text-xs text-zinc-400 mb-1">{t.auth.emailLabel}</label>
+            <label className="block text-xs muted mb-1">{t.auth.emailLabel}</label>
             <input
-              className="w-full rounded-xl bg-zinc-950 border border-zinc-800 px-3 py-2 text-zinc-100 placeholder-zinc-600 outline-none focus:border-zinc-600"
+              className="input-surface outline-none focus:ring-2 focus:ring-black/10 dark:focus:ring-white/10"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder={t.auth.emailPlaceholder}
@@ -102,9 +101,9 @@ export default function LoginClient() {
           </div>
 
           <div>
-            <label className="block text-xs text-zinc-400 mb-1">{t.auth.passwordLabel}</label>
+            <label className="block text-xs muted mb-1">{t.auth.passwordLabel}</label>
             <input
-              className="w-full rounded-xl bg-zinc-950 border border-zinc-800 px-3 py-2 text-zinc-100 placeholder-zinc-600 outline-none focus:border-zinc-600"
+              className="input-surface outline-none focus:ring-2 focus:ring-black/10 dark:focus:ring-white/10"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder={t.auth.passwordPlaceholder}
@@ -113,20 +112,28 @@ export default function LoginClient() {
             />
           </div>
 
-          <button
-            disabled={loading}
-            className="w-full rounded-xl bg-zinc-100 text-zinc-950 px-4 py-2 font-medium hover:bg-white disabled:opacity-60"
-            type="submit"
-          >
+          <button disabled={loading} className="w-full btn-primary" type="submit">
             {loading ? t.common.loading : mode === "signup" ? t.auth.signupCta : t.auth.loginCta}
           </button>
         </form>
 
         {message && (
-          <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-200">
+          <div className="mt-4 rounded-2xl p-3 page-invert-bg border border-gray-200 dark:border-gray-800 text-sm">
             {message}
           </div>
         )}
+
+        <div className="mt-6 text-xs muted-2">
+          Tip: môžeš otvoriť priamo{" "}
+          <Link className="underline" href="/login?mode=signup">
+            registráciu
+          </Link>{" "}
+          alebo{" "}
+          <Link className="underline" href="/login?mode=login">
+            prihlásenie
+          </Link>
+          .
+        </div>
       </div>
     </main>
   );

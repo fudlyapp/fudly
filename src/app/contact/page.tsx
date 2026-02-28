@@ -1,11 +1,11 @@
-// src/app/contact/page.tsx
+//src/app/contact/page.tsx
 "use client";
 
 import { useState } from "react";
 import { useT } from "@/lib/i18n/useT";
 
 export default function ContactPage() {
-  const { t, lang: hookLang } = useT() as any;
+  const { t, lang } = useT() as any;
 
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -13,20 +13,21 @@ export default function ContactPage() {
   const [sending, setSending] = useState(false);
   const [info, setInfo] = useState<string>("");
 
-  function getLang(): "sk" | "en" | "uk" {
-    const l =
-      (hookLang as string | undefined) ||
-      (typeof document !== "undefined" ? document.documentElement.lang : "") ||
-      "sk";
+  const requiredLabel = t?.common?.required ?? "Povinné";
+  const title = t?.contact?.title ?? "Kontakt";
+  const subtitle = t?.contact?.subtitle ?? "Napíš nám a ozveme sa čo najskôr.";
+  const sendLabel = t?.contact?.send ?? "Odoslať";
+  const sendingLabel = t?.contact?.sending ?? "Odosielam…";
+  const success = t?.contact?.success ?? "✅ Správa bola odoslaná.";
+  const fail = t?.contact?.fail ?? "❌ Nepodarilo sa odoslať správu.";
 
-    if (l === "en" || l === "uk" || l === "sk") return l;
-    return "sk";
+  function getLang(): string {
+    return (lang as string) || (typeof document !== "undefined" ? document.documentElement.lang : "sk") || "sk";
   }
 
   async function submit() {
     setInfo("");
     setSending(true);
-
     try {
       const r = await fetch("/api/contact", {
         method: "POST",
@@ -34,59 +35,67 @@ export default function ContactPage() {
         body: JSON.stringify({ name, email, message, lang: getLang() }),
       });
 
-      const j = await r.json();
+      let j: any = null;
+      try {
+        j = await r.json();
+      } catch {}
+
       if (!r.ok) throw new Error(j?.error ?? "Send failed");
 
-      setInfo(t.contact.success);
+      setInfo(success);
       setName("");
       setEmail("");
       setMessage("");
     } catch (e: any) {
-      setInfo(`${t.contact.fail} (${e?.message ?? "error"})`);
+      setInfo(`${fail}${e?.message ? ` (${e.message})` : ""}`);
     } finally {
       setSending(false);
     }
   }
 
   return (
-    <main className="min-h-screen bg-black text-white p-6">
+    <main className="min-h-screen p-6 page-invert-bg">
       <div className="mx-auto w-full max-w-3xl">
-        <div className="rounded-3xl border border-gray-800 bg-zinc-950/60 p-8">
-          <h1 className="text-3xl font-bold">{t.contact.title}</h1>
-          <p className="mt-2 text-gray-300">{t.contact.subtitle}</p>
+        <div className="rounded-3xl p-8 surface-same-as-nav surface-border">
+          <h1 className="text-3xl font-bold">{title}</h1>
+          <p className="mt-2 muted">{subtitle}</p>
 
           <div className="mt-6 grid grid-cols-1 gap-4">
             <label className="block">
-              <div className="text-sm text-gray-300 mb-1">{t.contact.name}</div>
+              <div className="text-sm mb-1 muted">
+                {t?.contact?.name ?? "Meno"}
+              </div>
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="w-full rounded-xl border border-gray-700 bg-black px-3 py-2 text-white"
-                placeholder="Tvoje meno"
+                className="input-surface"
+                placeholder={t?.contact?.name_placeholder ?? "Tvoje meno"}
               />
             </label>
 
             <label className="block">
-              <div className="text-sm text-gray-300 mb-1">
-                {t.contact.email} <span className="text-gray-500">({t.common.required})</span>
+              <div className="text-sm mb-1 muted">
+                {t?.contact?.email ?? "Email"}{" "}
+                <span className="muted-2">({requiredLabel})</span>
               </div>
               <input
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full rounded-xl border border-gray-700 bg-black px-3 py-2 text-white"
-                placeholder="Tvoj e-mail"
+                className="input-surface"
+                placeholder={t?.contact?.email_placeholder ?? "Tvoj e-mail"}
               />
             </label>
 
             <label className="block">
-              <div className="text-sm text-gray-300 mb-1">
-                {t.contact.message} <span className="text-gray-500">({t.common.required})</span>
+              <div className="text-sm mb-1 muted">
+                {t?.contact?.message ?? "Správa"}{" "}
+                <span className="muted-2">({requiredLabel})</span>
               </div>
               <textarea
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
-                className="min-h-[140px] w-full rounded-xl border border-gray-700 bg-black px-3 py-2 text-white"
-                placeholder="Text..."
+                className="input-surface min-h-[140px]"
+                placeholder={t?.contact?.message_placeholder ?? "Text…"}
               />
             </label>
 
@@ -94,12 +103,12 @@ export default function ContactPage() {
               type="button"
               onClick={submit}
               disabled={sending || !email.trim() || !message.trim()}
-              className="rounded-xl bg-white px-5 py-3 text-black font-semibold hover:bg-gray-200 disabled:opacity-40"
+              className="btn-primary"
             >
-              {sending ? t.common.loading : t.contact.send}
+              {sending ? sendingLabel : sendLabel}
             </button>
 
-            {info ? <div className="text-sm text-gray-200">{info}</div> : null}
+            {info ? <div className="text-sm muted">{info}</div> : null}
           </div>
         </div>
       </div>
