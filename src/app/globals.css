@@ -24,61 +24,71 @@ body {
   .text-balance {
     text-wrap: balance;
   }
-}
-/* Full-page watermark */
-.fudly-watermark {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background-image: url("/fudly_white.png");
-  background-repeat: no-repeat;
-  background-position: center;
-  background-size: 1400px 1400px; /* uprav podľa chuti */
-  opacity: 0.14; /* 0.08–0.14 je najčastejšie sweet spot */
-  filter: blur(0.2px);
-}
-@media (max-width: 768px) {
+
+  /* Full-page watermark */
   .fudly-watermark {
-    background-size: 900px 900px;
-    opacity: 0.08;
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-image: url("/fudly_white.png");
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: 1400px 1400px; /* uprav podľa chuti */
+    opacity: 0.14; /* 0.08–0.14 */
+    filter: blur(0.2px);
   }
-  @layer utilities {
-  /* Pozadie stránky = opak TopNav (opak témy) */
+
+  /* Pozadie stránky = opak TopNav (invert) */
   .page-invert-bg {
     @apply bg-black text-white dark:bg-white dark:text-black;
   }
 
-  /* Obsahový “surface” = rovnaké ako TopNav (rovnaké ako téma) */
+  /* Obsahový “surface” = rovnaké ako TopNav */
   .surface-same-as-nav {
     @apply bg-white text-black dark:bg-black dark:text-white;
   }
 
-  /* Border / jemné tieňe pre surface */
   .surface-border {
     @apply border border-gray-200 dark:border-gray-800 shadow-sm;
   }
 
-  /* Muted text (vždy čitateľný) */
+  /* Muted texty – čitateľné aj na bielom */
   .muted {
-    @apply text-gray-700 dark:text-gray-300;
+    @apply text-gray-300 dark:text-gray-700;
   }
 
   .muted-2 {
-    @apply text-gray-600 dark:text-gray-400;
+    @apply text-gray-400 dark:text-gray-600;
   }
 
-  /* Inputy vo “surface” */
   .input-surface {
     @apply w-full rounded-xl border px-3 py-2
       border-gray-300 bg-white text-black placeholder-gray-400
       dark:border-gray-700 dark:bg-black dark:text-white dark:placeholder-gray-500;
   }
 
-  /* Primary button (invert podľa surface) */
   .btn-primary {
     @apply rounded-xl px-5 py-3 font-semibold transition disabled:opacity-50
       bg-black text-white hover:bg-gray-800
       dark:bg-white dark:text-black dark:hover:bg-gray-200;
   }
+}
+
+/* watermark: mobilné doladenie */
+@media (max-width: 768px) {
+  .fudly-watermark {
+    background-size: 900px 900px;
+    opacity: 0.08;
+  }
+html,
+body {
+  overflow-x: hidden;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 }

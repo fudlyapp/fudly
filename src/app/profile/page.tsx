@@ -1,7 +1,7 @@
 // src/app/profile/page.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { useT } from "@/lib/i18n/useT";
@@ -183,7 +183,7 @@ function TabButton({
       type="button"
       onClick={onClick}
       className={[
-        "rounded-full px-4 py-2 text-sm font-semibold transition border",
+        "rounded-full px-4 py-2 text-sm font-semibold transition border whitespace-nowrap",
         active
           ? "bg-black text-white border-black dark:bg-white dark:text-black dark:border-white"
           : "bg-transparent border-gray-300 text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-zinc-900",
@@ -495,8 +495,8 @@ export default function ProfilePage() {
   }
 
   return (
-    <main className="min-h-screen p-6 page-invert-bg">
-      <div className="mx-auto w-full max-w-5xl">
+    <main className="min-h-screen px-4 sm:px-6 py-6 page-invert-bg overflow-x-hidden">
+      <div className="mx-auto w-full max-w-5xl min-w-0">
         <header className="mb-6">
           <h1 className="mt-2 text-3xl font-bold">{t.nav.profile}</h1>
           <p className="mt-2 muted">Prehľad: predvolené, jedálničky, nákupy, kalórie a financie.</p>
@@ -513,7 +513,7 @@ export default function ProfilePage() {
         {!email && !authLoading && (
           <div className="rounded-3xl p-6 surface-same-as-nav surface-border">
             <div className="muted">Najprv sa prihlás.</div>
-            <Link href="/login" className="mt-4 inline-flex btn-primary px-4 py-2 text-sm">
+            <Link href="/login" className="mt-4 inline-flex btn-primary px-4 py-2 text-sm w-full sm:w-auto justify-center">
               Prihlásiť sa
             </Link>
           </div>
@@ -521,33 +521,36 @@ export default function ProfilePage() {
 
         {email && (
           <>
-            <div className="mb-6 flex flex-wrap gap-2">
-              <TabButton active={tab === "plans"} onClick={() => setTab("plans")}>
-                Uložené jedálničky
-              </TabButton>
-              <TabButton active={tab === "shopping"} onClick={() => setTab("shopping")}>
-                Uložené nákupy
-              </TabButton>
-              <TabButton active={tab === "calories"} onClick={() => setTab("calories")}>
-                Kalórie
-              </TabButton>
-              <TabButton active={tab === "finance"} onClick={() => setTab("finance")}>
-                Financie
-              </TabButton>
-              <TabButton active={tab === "defaults"} onClick={() => setTab("defaults")}>
-                Predvolené
-              </TabButton>
+            {/* Tabs – mobile scroll */}
+            <div className="mb-6 -mx-4 px-4 overflow-x-auto no-scrollbar">
+              <div className="flex gap-2 min-w-max">
+                <TabButton active={tab === "plans"} onClick={() => setTab("plans")}>
+                  Uložené jedálničky
+                </TabButton>
+                <TabButton active={tab === "shopping"} onClick={() => setTab("shopping")}>
+                  Uložené nákupy
+                </TabButton>
+                <TabButton active={tab === "calories"} onClick={() => setTab("calories")}>
+                  Kalórie
+                </TabButton>
+                <TabButton active={tab === "finance"} onClick={() => setTab("finance")}>
+                  Financie
+                </TabButton>
+                <TabButton active={tab === "defaults"} onClick={() => setTab("defaults")}>
+                  Predvolené
+                </TabButton>
+              </div>
             </div>
 
             {(tab === "plans" || tab === "shopping" || tab === "calories" || tab === "finance") && (
-              <div className="mb-4 flex flex-wrap items-center gap-2">
+              <div className="mb-4 flex flex-col sm:flex-row sm:items-center gap-2 min-w-0">
                 <select
                   value={yearFilter}
                   onChange={(e) => {
                     setYearFilter(e.target.value);
                     setMonthFilter("all");
                   }}
-                  className="input-surface text-sm w-auto"
+                  className="input-surface text-sm w-full sm:w-auto"
                 >
                   <option value="all">Všetky roky</option>
                   {years.map((y) => (
@@ -560,7 +563,7 @@ export default function ProfilePage() {
                 <select
                   value={monthFilter}
                   onChange={(e) => setMonthFilter(e.target.value)}
-                  className="input-surface text-sm w-auto"
+                  className="input-surface text-sm w-full sm:w-auto"
                   disabled={yearFilter === "all"}
                   title={yearFilter === "all" ? "Najprv vyber rok" : ""}
                 >
@@ -579,13 +582,17 @@ export default function ProfilePage() {
 
             {tab === "defaults" ? (
               <section className="rounded-3xl p-6 surface-same-as-nav surface-border">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
+                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+                  <div className="min-w-0">
                     <h2 className="text-xl font-semibold">Predvolené</h2>
                     <p className="mt-1 text-sm muted">Toto sa načíta v Generátore cez „Načítať uložené“.</p>
                   </div>
 
-                  <button onClick={saveDefaults} disabled={prefLoading} className="btn-primary">
+                  <button
+                    onClick={saveDefaults}
+                    disabled={prefLoading}
+                    className="btn-primary w-full sm:w-auto"
+                  >
                     {prefLoading ? "Ukladám..." : "Uložiť predvolené"}
                   </button>
                 </div>
@@ -692,7 +699,7 @@ export default function ProfilePage() {
                               className="block rounded-2xl p-4 page-invert-bg border border-gray-200 dark:border-gray-800 hover:opacity-[0.98] transition"
                             >
                               <div className="flex items-start justify-between gap-4">
-                                <div>
+                                <div className="min-w-0">
                                   <div className="text-lg font-semibold">
                                     Týždeň {formatDateSK(r.week_start)} – {formatDateSK(weekEnd)}
                                   </div>
@@ -701,7 +708,7 @@ export default function ProfilePage() {
                                     {est ? `• Odhad: ${est} €` : ""}
                                   </div>
                                 </div>
-                                <div className="text-sm muted-2">Otvor</div>
+                                <div className="text-sm muted-2 shrink-0">Otvor</div>
                               </div>
                             </Link>
                           );
@@ -715,12 +722,15 @@ export default function ProfilePage() {
 
             {tab === "shopping" ? (
               <section className="rounded-3xl p-6 surface-same-as-nav surface-border">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
+                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+                  <div className="min-w-0">
                     <h2 className="text-xl font-semibold">Uložené nákupy</h2>
                     <p className="mt-1 text-sm muted">Filtrovanie + export zatiaľ iba TXT.</p>
                   </div>
-                  <Link href="/generate" className="rounded-xl border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-zinc-900 transition">
+                  <Link
+                    href="/generate"
+                    className="rounded-xl border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-zinc-900 transition w-full sm:w-auto text-center"
+                  >
                     Generovať nový týždeň
                   </Link>
                 </div>
@@ -750,7 +760,7 @@ export default function ProfilePage() {
                           return (
                             <div key={r.id} className="rounded-2xl p-4 page-invert-bg border border-gray-200 dark:border-gray-800">
                               <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-                                <div>
+                                <div className="min-w-0">
                                   <div className="text-lg font-semibold">
                                     Týždeň {formatDateSK(r.week_start)} – {formatDateSK(weekEnd)}
                                   </div>
@@ -760,17 +770,19 @@ export default function ProfilePage() {
                                   </div>
                                 </div>
 
-                                <div className="flex flex-wrap gap-2">
+                                <div className="flex flex-col sm:flex-row flex-wrap gap-2">
                                   <button
                                     type="button"
-                                    onClick={() => downloadText(`fudly-nakup-${r.week_start}.txt`, shoppingToTXT(r.week_start, shopping))}
-                                    className="rounded-full border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-xs font-semibold hover:bg-gray-100 dark:hover:bg-zinc-900 transition"
+                                    onClick={() =>
+                                      downloadText(`fudly-nakup-${r.week_start}.txt`, shoppingToTXT(r.week_start, shopping))
+                                    }
+                                    className="rounded-full border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-xs font-semibold hover:bg-gray-100 dark:hover:bg-zinc-900 transition w-full sm:w-auto"
                                   >
                                     Export TXT
                                   </button>
                                   <Link
                                     href={`/profile/${r.week_start}`}
-                                    className="rounded-full border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-xs font-semibold hover:bg-gray-100 dark:hover:bg-zinc-900 transition"
+                                    className="rounded-full border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-xs font-semibold hover:bg-gray-100 dark:hover:bg-zinc-900 transition w-full sm:w-auto text-center"
                                   >
                                     Otvoriť detail
                                   </Link>
@@ -849,7 +861,7 @@ export default function ProfilePage() {
                               className="block rounded-2xl p-4 page-invert-bg border border-gray-200 dark:border-gray-800 hover:opacity-[0.98] transition"
                             >
                               <div className="flex items-start justify-between gap-4">
-                                <div>
+                                <div className="min-w-0">
                                   <div className="text-lg font-semibold">
                                     Týždeň {formatDateSK(r.week_start)} – {formatDateSK(weekEnd)}
                                   </div>
@@ -859,7 +871,7 @@ export default function ProfilePage() {
                                     Týždeň: <span className="font-semibold">{typeof weekly === "number" ? weekly : "—"}</span> kcal
                                   </div>
                                 </div>
-                                <div className="text-sm muted-2">Otvor</div>
+                                <div className="text-sm muted-2 shrink-0">Otvor</div>
                               </div>
                             </Link>
                           );
@@ -904,7 +916,7 @@ export default function ProfilePage() {
                           return (
                             <div key={r.id} className="rounded-2xl p-4 page-invert-bg border border-gray-200 dark:border-gray-800">
                               <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-                                <div>
+                                <div className="min-w-0">
                                   <div className="text-lg font-semibold">
                                     Týždeň {formatDateSK(r.week_start)} – {formatDateSK(weekEnd)}
                                   </div>
@@ -942,10 +954,10 @@ export default function ProfilePage() {
                                   </div>
                                 </div>
 
-                                <div className="flex flex-col gap-2 min-w-[220px]">
+                                <div className="flex flex-col gap-2 min-w-0 sm:min-w-[220px]">
                                   <Link
                                     href={`/profile/${r.week_start}`}
-                                    className="rounded-xl border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-semibold hover:bg-gray-100 dark:hover:bg-zinc-900 text-center transition"
+                                    className="rounded-xl border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-semibold hover:bg-gray-100 dark:hover:bg-zinc-900 text-center transition w-full sm:w-auto"
                                   >
                                     Otvoriť detail
                                   </Link>
