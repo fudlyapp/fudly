@@ -20,27 +20,16 @@ function planLimits(plan: Plan) {
   };
 }
 
-/**
- * Aktívne je:
- * - active: buď bez period_end, alebo period_end v budúcnosti
- * - trialing: trial_end v budúcnosti
- */
-function isActiveLike(status: Status, now: Date, currentPeriodEnd?: string | null, trialEnd?: string | null) {
+function isActiveLike(status: Status, now: Date, currentPeriodEnd?: string | null, trialUntil?: string | null) {
   if (status === "active") {
     if (!currentPeriodEnd) return true;
     return new Date(currentPeriodEnd).getTime() > now.getTime();
   }
   if (status === "trialing") {
-    if (!trialEnd) return false;
-    return new Date(trialEnd).getTime() > now.getTime();
+    if (!trialUntil) return false;
+    return new Date(trialUntil).getTime() > now.getTime();
   }
   return false;
-}
-
-function addDays(date: Date, days: number) {
-  const d = new Date(date);
-  d.setDate(d.getDate() + days);
-  return d.toISOString();
 }
 
 export async function GET(req: Request) {
@@ -57,30 +46,47 @@ export async function GET(req: Request) {
     const userId = userRes.user.id;
     const now = new Date();
 
-    // 1) načítaj subscription, ak nie je -> urob fallback trial 14 dní
     const { data: subRow, error: subErr } = await supabase
       .from("subscriptions")
-      .select("plan,status,current_period_end,trial_end")
+      .select("plan,status,current_period_end,trial_until,stripe_customer_id,stripe_subscription_id")
       .eq("user_id", userId)
       .maybeSingle();
 
-    // Ak tabuľka ešte neexistuje alebo je problém, nezhodíme appku.
-    // Fallback: trial 14 dní od dnes.
-    const safeNoRowTrialEnd = addDays(now, 14);
+    if (subErr) {
+      return NextResponse.json({ error: subErr.message }, { status: 500 });
+    }
 
-    const plan: Plan = (subRow?.plan as Plan) || "basic";
+    // ak nič nemá -> paywall
+    if (!subRow) {
+      const limits = planLimits("basic");
+      return NextResponse.json({
+        plan: "basic",
+        status: "inactive",
+        can_generate: false,
+        weekly_limit: limits.weekly_limit,
+        used: 0,
+        remaining: limits.weekly_limit,
+        calories_enabled: limits.calories_enabled,
+        allowed_styles: limits.allowed_styles,
+        trial_until: null,
+        current_period_end: null,
+        has_stripe_link: false,
+      });
+    }
 
-    // Dôležité: ak nie je subRow, nedávaj inactive – daj trialing (aby appka fungovala bez Stripe)
-    const status: Status = (subRow?.status as Status) || "trialing";
+    const plan: Plan = (subRow.plan as Plan) || "basic";
+    const status: Status = (subRow.status as Status) || "inactive";
+    const current_period_end = subRow.current_period_end ?? null;
+    const trial_until = subRow.trial_until ?? null;
 
-    const current_period_end = subRow?.current_period_end ?? null;
-    const trial_end = subRow?.trial_end ?? (subRow ? null : safeNoRowTrialEnd);
+    const has_stripe_link = !!(subRow.stripe_customer_id || subRow.stripe_subscription_id);
 
     const limits = planLimits(plan);
+    const activeLike = isActiveLike(status, now, current_period_end, trial_until);
 
-    const can_generate = isActiveLike(status, now, current_period_end, trial_end);
+    const can_generate = activeLike && has_stripe_link;
 
-    // 2) usage pre week_start (ak príde v query)
+    // usage (voliteľné)
     const url = new URL(req.url);
     const week_start = url.searchParams.get("week_start");
 
@@ -107,10 +113,9 @@ export async function GET(req: Request) {
       remaining,
       calories_enabled: limits.calories_enabled,
       allowed_styles: limits.allowed_styles,
-
-      // extra info pre UI (užitočné na pricing obrazovke)
-      trial_end,
+      trial_until,
       current_period_end,
+      has_stripe_link,
     });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message ?? "Unknown error" }, { status: 500 });

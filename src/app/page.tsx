@@ -200,7 +200,7 @@ shadow-lg shadow-amber-600/40
             <PricingCard
               title="Basic"
               subtitle="Pre rýchly štart"
-              price="7 € + DPH"
+              price="9 €"
               period="mesačne"
               ctaLabel="Začať zdarma (14 dní)"
               ctaHref="/login"
@@ -211,7 +211,7 @@ shadow-lg shadow-amber-600/40
               badge="Odporúčané"
               title="Plus"
               subtitle="Pre maximum pohodlia"
-              price="10 € + DPH"
+              price="13 €"
               period="mesačne"
               ctaLabel="Začať zdarma (14 dní)"
               ctaHref="/login"

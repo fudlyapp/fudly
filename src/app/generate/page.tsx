@@ -17,12 +17,11 @@ type Recipe = {
 type PlanDay = {
   day: number;
   day_name?: string;
-  date?: string; // YYYY-MM-DD
+  date?: string;
   breakfast: string;
   lunch: string;
   dinner: string;
   note: string;
-
   breakfast_kcal?: number;
   lunch_kcal?: number;
   dinner_kcal?: number;
@@ -67,9 +66,23 @@ type ProfileRow = {
 type MealPlanRowLite = {
   id: string;
   week_start: string;
-  generation_count: number | null; // (staré) — UI používa, ale server má generation_usage
+  generation_count: number | null;
   plan: any;
   plan_generated: any;
+};
+
+type Entitlements = {
+  plan: "basic" | "plus";
+  status: string;
+  can_generate: boolean;
+  weekly_limit: number;
+  used: number;
+  remaining: number;
+  calories_enabled: boolean;
+  allowed_styles: string[];
+  trial_until: string | null;
+  current_period_end: string | null;
+  has_stripe_link: boolean;
 };
 
 function pad2(n: number) {
@@ -85,7 +98,7 @@ function addDaysISO(iso: string, add: number) {
 }
 function mondayOfWeekISO(date: Date) {
   const d = new Date(date);
-  const day = d.getDay(); // 0=Sun..6=Sat
+  const day = d.getDay();
   const diffToMonday = (day + 6) % 7;
   d.setDate(d.getDate() - diffToMonday);
   return toISODate(d);
@@ -175,14 +188,6 @@ function hasAllRecipes(plan: PlanJSON | null) {
   return expectedRecipeKeys().every((k) => have.has(k));
 }
 
-function getActiveTier() {
-  // TODO: napojiť na Stripe/subscriptions (aktuálne placeholder)
-  return "basic" as "basic" | "plus";
-}
-function GENERATION_LIMIT_FOR_TIER(tier: "basic" | "plus") {
-  return tier === "plus" ? 5 : 3;
-}
-
 type BannerState =
   | null
   | {
@@ -191,7 +196,7 @@ type BannerState =
       message: string;
       detail?: string;
       canRetry?: boolean;
-      showProfileLink?: boolean; // ✅ nové
+      showProfileLink?: boolean;
     };
 
 function safeStringify(obj: any) {
@@ -217,8 +222,8 @@ function deriveErrorMessage(status: number, api: any) {
 
   if (status === 402 && code === "SUBSCRIPTION_INACTIVE") {
     return {
-      title: "Predplatné nie je aktívne",
-      message: "Vyzerá to, že nemáš aktívne predplatné / trial. Skús sa odhlásiť a prihlásiť alebo otvor Členstvá.",
+      title: "Na generovanie potrebuješ členstvo",
+      message: "Najprv si vyber plán a spusti 14-dňový trial v Členstvách.",
       canRetry: false,
     };
   }
@@ -256,7 +261,6 @@ function deriveErrorMessage(status: number, api: any) {
   };
 }
 
-/** ---------- Modal (center) ---------- */
 function CenterModal({
   open,
   onClose,
@@ -294,16 +298,6 @@ export default function GeneratorPage() {
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
   const { t } = useT();
 
-  const tier = getActiveTier();
-
-  const generationLimitRaw = GENERATION_LIMIT_FOR_TIER(tier);
-  const generationLimitSafe =
-    typeof generationLimitRaw === "number" && Number.isFinite(generationLimitRaw)
-      ? generationLimitRaw
-      : tier === "plus"
-        ? 5
-        : 3;
-
   const [authLoading, setAuthLoading] = useState(true);
   const [userEmail, setUserEmail] = useState<string | null>(null);
 
@@ -332,13 +326,36 @@ export default function GeneratorPage() {
   const [existingRow, setExistingRow] = useState<MealPlanRowLite | null>(null);
   const [existingLoading, setExistingLoading] = useState(false);
 
-  // ✅ Overwrite modal (center)
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmMsg, setConfirmMsg] = useState("");
 
-  // ✅ Result modal (center) — používame aj na chyby/info/success
   const [banner, setBanner] = useState<BannerState>(null);
   const [lastPayload, setLastPayload] = useState<any>(null);
+
+  // ✅ ENTITLEMENTS (zdroj pravdy)
+  const [entLoading, setEntLoading] = useState(false);
+  const [ent, setEnt] = useState<Entitlements | null>(null);
+
+  async function fetchEntitlementsForWeek(ws: string) {
+    const { data: ss } = await supabase.auth.getSession();
+    const token = ss.session?.access_token;
+    if (!token) {
+      setEnt(null);
+      return;
+    }
+
+    setEntLoading(true);
+    try {
+      const res = await fetch(`/api/entitlements?week_start=${encodeURIComponent(ws)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json().catch(() => null);
+      if (res.ok && data) setEnt(data as Entitlements);
+      else setEnt(null);
+    } finally {
+      setEntLoading(false);
+    }
+  }
 
   useEffect(() => {
     (async () => {
@@ -346,15 +363,33 @@ export default function GeneratorPage() {
       const { data } = await supabase.auth.getSession();
       setUserEmail(data.session?.user?.email ?? null);
       setAuthLoading(false);
+
+      // po nabehnutí session načítaj entitlements
+      if (data.session?.access_token) {
+        await fetchEntitlementsForWeek(weekStart);
+      }
     })();
 
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+    const { data: sub } = supabase.auth.onAuthStateChange(async (_e, session) => {
       setUserEmail(session?.user?.email ?? null);
       setAuthLoading(false);
+
+      if (session?.access_token) await fetchEntitlementsForWeek(weekStart);
+      else setEnt(null);
     });
 
     return () => sub.subscription.unsubscribe();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supabase]);
+
+  useEffect(() => {
+    if (!userEmail) return;
+    fetchEntitlementsForWeek(weekStart);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [weekStart, userEmail]);
+
+  const tier = (ent?.plan ?? "basic") as "basic" | "plus";
+  const generationLimitSafe = ent?.weekly_limit ?? (tier === "plus" ? 5 : 3);
 
   const weekLabel = useMemo(() => {
     const found = weekOptions.find((o) => o.value === weekStart);
@@ -367,6 +402,7 @@ export default function GeneratorPage() {
     return !!weekStart && Number.isFinite(p) && p >= 1 && p <= 6 && Number.isFinite(b) && b >= 1 && b <= 1000;
   }, [people, budget, weekStart]);
 
+  // načítanie uloženého týždňa (tvoje pôvodné)
   useEffect(() => {
     (async () => {
       setExistingRow(null);
@@ -394,14 +430,18 @@ export default function GeneratorPage() {
   }, [supabase, userEmail, weekStart]);
 
   const usedGenerations = useMemo(() => {
+    // serverové usage z entitlements je pravda
+    if (typeof ent?.used === "number") return ent.used;
     const n = existingRow?.generation_count ?? 0;
     return typeof n === "number" && Number.isFinite(n) ? n : 0;
-  }, [existingRow]);
+  }, [existingRow, ent]);
 
-  const remainingGenerations = useMemo(
-    () => Math.max(0, generationLimitSafe - usedGenerations),
-    [generationLimitSafe, usedGenerations]
-  );
+  const remainingGenerations = useMemo(() => {
+    if (typeof ent?.remaining === "number") return ent.remaining;
+    return Math.max(0, generationLimitSafe - usedGenerations);
+  }, [generationLimitSafe, usedGenerations, ent]);
+
+  const paywalled = !!userEmail && !!ent && ent.can_generate === false;
 
   async function loadSavedFromProfile() {
     setBanner(null);
@@ -546,6 +586,12 @@ export default function GeneratorPage() {
   }
 
   async function generateAndAutoSave(payloadOverride?: any) {
+    // ✅ paywall guard
+    if (paywalled) {
+      window.location.href = "/pricing";
+      return;
+    }
+
     setLoading(true);
     setTextResult("");
     setPrefMsg("");
@@ -555,7 +601,7 @@ export default function GeneratorPage() {
     const user = s.session?.user;
     if (!user) {
       setLoading(false);
-      window.location.href = "/login";
+      window.location.href = "/login?mode=login&next=" + encodeURIComponent("/generate");
       return;
     }
 
@@ -591,13 +637,24 @@ export default function GeneratorPage() {
 
       if (!out.ok) {
         const { title, message, canRetry } = deriveErrorMessage(out.status, out.data);
+
+        // ak je to paywall, ponúkni link na pricing
+        const showPricing = out.status === 402 && out.data?.error?.code === "SUBSCRIPTION_INACTIVE";
+
         setBanner({
           variant: "error",
           title,
           message,
           detail: out.data ? safeStringify(out.data) : `HTTP ${out.status}`,
           canRetry,
+          showProfileLink: false,
         });
+
+        if (showPricing) {
+          // jemný redirect hint (bez auto redirectu, user si klikne)
+          // UI tlačidlo aj tak dole nebude “Vygenerovať”
+        }
+
         return;
       }
 
@@ -617,7 +674,6 @@ export default function GeneratorPage() {
           return;
         }
 
-        // ✅ UI odráta až po úspešnom uložení do DB
         const weekEnd = addDaysISO(inputPayload.weekStart, 6);
         const currentCount = existingRow?.generation_count ?? 0;
         const nextCount = currentCount + 1;
@@ -644,8 +700,7 @@ export default function GeneratorPage() {
           setBanner({
             variant: "error",
             title: "Plán vygenerovaný, ale nepodarilo sa uložiť",
-            message:
-              "Skús prosím refresh alebo generuj znova. (Generovanie už prebehlo, ale uloženie do DB zlyhalo.)",
+            message: "Skús prosím refresh alebo generuj znova.",
             detail: error.message,
             canRetry: true,
           });
@@ -665,23 +720,16 @@ export default function GeneratorPage() {
 
         setPlan(normalized);
 
-        if ((data as any)?.warning?.code === "USAGE_WRITE_FAILED") {
-          setBanner({
-            variant: "info",
-            title: "Plán je hotový",
-            message:
-              "Poznámka: nepodarilo sa zapísať usage na serveri. Pre používateľa to nič nemení, ale pozri logy.",
-            detail: safeStringify((data as any).warning),
-            showProfileLink: true,
-          });
-        } else {
-          setBanner({
-            variant: "success",
-            title: "✅ Jedálniček je vygenerovaný",
-            message: "Nájdeš ho v Profile. Môžeš ho tam upraviť, pozrieť recepty aj nákupy.",
-            showProfileLink: true,
-          });
-        }
+        setBanner({
+          variant: "success",
+          title: "✅ Jedálniček je vygenerovaný",
+          message: "Nájdeš ho v Profile. Môžeš ho tam upraviť, pozrieť recepty aj nákupy.",
+          showProfileLink: true,
+        });
+
+        // refresh entitlements (used/remaining)
+        await fetchEntitlementsForWeek(weekStart);
+
         return;
       }
 
@@ -689,8 +737,7 @@ export default function GeneratorPage() {
         setBanner({
           variant: "error",
           title: "Generovanie sa nepodarilo",
-          message:
-            "AI vrátila nečitateľný výstup. Skús to prosím znova o chvíľu. Zostávajúci počet generovaní ostáva nezmenený.",
+          message: "AI vrátila nečitateľný výstup. Skús to prosím znova.",
           detail: data.text,
           canRetry: true,
         });
@@ -700,7 +747,7 @@ export default function GeneratorPage() {
       setBanner({
         variant: "error",
         title: "Neočakávaná odpoveď",
-        message: "Server vrátil nečakaný formát. Skús to znova. Zostávajúci počet generovaní ostáva nezmenený.",
+        message: "Server vrátil nečakaný formát. Skús to znova.",
         detail: safeStringify(data),
         canRetry: true,
       });
@@ -708,8 +755,7 @@ export default function GeneratorPage() {
       setBanner({
         variant: "error",
         title: "Generovanie sa nepodarilo",
-        message:
-          "Nastala chyba v prehliadači alebo sieti. Skús to znova. Zostávajúci počet generovaní ostáva nezmenený.",
+        message: "Nastala chyba v prehliadači alebo sieti. Skús to znova.",
         detail: err?.message ?? "unknown",
         canRetry: true,
       });
@@ -722,7 +768,11 @@ export default function GeneratorPage() {
     e.preventDefault();
     if (!isValid) return;
 
-    // ✅ ak existuje plán pre týždeň => modal do stredu
+    if (paywalled) {
+      window.location.href = "/pricing";
+      return;
+    }
+
     if (existingRow) {
       openOverwriteModal();
       return;
@@ -735,9 +785,11 @@ export default function GeneratorPage() {
     if (!isValid) return false;
     if (!userEmail) return true;
     if (existingLoading) return false;
-    if (remainingGenerations <= 0) return false; // UI gate
+    if (entLoading) return false;
+    if (paywalled) return false;
+    if (remainingGenerations <= 0) return false;
     return true;
-  }, [isValid, userEmail, existingLoading, remainingGenerations]);
+  }, [isValid, userEmail, existingLoading, remainingGenerations, entLoading, paywalled]);
 
   const secondaryPill =
     "rounded-full border px-3 py-1.5 text-xs font-semibold transition disabled:opacity-40 " +
@@ -756,12 +808,21 @@ export default function GeneratorPage() {
           {authLoading ? <div className="mt-2 text-xs muted-2">Kontrolujem prihlásenie…</div> : null}
         </header>
 
-        {/* ✅ RESULT MODAL (success/info/error) */}
-        <CenterModal
-          open={!!banner}
-          onClose={() => setBanner(null)}
-          title={banner?.title ?? ""}
-        >
+        {paywalled ? (
+          <div className="mb-6 rounded-3xl p-6 surface-same-as-nav surface-border">
+            <div className="text-lg font-bold">Na generovanie potrebuješ členstvo</div>
+            <div className="mt-2 text-sm muted">
+              Najprv si vyber plán a spusti 14-dňový trial.
+            </div>
+            <div className="mt-4">
+              <Link href="/pricing" className="btn-primary inline-block px-5 py-3">
+                Otvoriť členstvá
+              </Link>
+            </div>
+          </div>
+        ) : null}
+
+        <CenterModal open={!!banner} onClose={() => setBanner(null)} title={banner?.title ?? ""}>
           {banner ? (
             <div className="space-y-4">
               <div className="text-sm muted whitespace-pre-wrap">{banner.message}</div>
@@ -807,12 +868,7 @@ export default function GeneratorPage() {
           ) : null}
         </CenterModal>
 
-        {/* ✅ OVERWRITE MODAL */}
-        <CenterModal
-          open={confirmOpen}
-          onClose={() => setConfirmOpen(false)}
-          title="Týždeň už máš vygenerovaný"
-        >
+        <CenterModal open={confirmOpen} onClose={() => setConfirmOpen(false)} title="Týždeň už máš vygenerovaný">
           <div className="space-y-4">
             <div className="text-sm muted whitespace-pre-wrap">{confirmMsg}</div>
 
@@ -933,7 +989,8 @@ export default function GeneratorPage() {
                     {userEmail ? (
                       <>
                         {" • "}
-                        {t.generator.generations}: <span className="font-semibold">{usedGenerations}/{generationLimitSafe}</span> ({t.generator.remaining}{" "}
+                        {t.generator.generations}:{" "}
+                        <span className="font-semibold">{usedGenerations}/{generationLimitSafe}</span> ({t.generator.remaining}{" "}
                         <span className="font-semibold">{remainingGenerations}</span>)
                       </>
                     ) : null}
@@ -945,26 +1002,31 @@ export default function GeneratorPage() {
 
               <div className="flex flex-wrap items-center gap-3">
                 <div className="flex flex-wrap items-center gap-2">
-                  <button type="button" onClick={loadSavedFromProfile} disabled={prefLoading} className={secondaryPill}>
+                  <button type="button" onClick={loadSavedFromProfile} disabled={prefLoading || paywalled} className={secondaryPill}>
                     {prefLoading ? t.common.loading : t.generator.loadSaved}
                   </button>
 
-                  <button type="button" onClick={saveDefaultsToProfile} disabled={prefLoading} className={secondaryPill}>
+                  <button type="button" onClick={saveDefaultsToProfile} disabled={prefLoading || paywalled} className={secondaryPill}>
                     {prefLoading ? t.common.loading : t.generator.saveAsDefault}
                   </button>
                 </div>
 
                 {userEmail ? (
-                  <button
-                    disabled={loading || !canGenerate}
-                    className="btn-primary disabled:cursor-not-allowed"
-                    title={remainingGenerations <= 0 ? t.generator.generateCtaHint(generationLimitSafe) : t.generator.generateCtaHintOk}
-                    type="submit"
-                  >
-                    {loading ? t.generator.generating : t.generator.generate}
-                  </button>
+                  paywalled ? (
+                    <Link href="/pricing" className="btn-primary px-5 py-3 text-sm font-semibold">
+                      Vybrať členstvo
+                    </Link>
+                  ) : (
+                    <button
+                      disabled={loading || !canGenerate}
+                      className="btn-primary disabled:cursor-not-allowed"
+                      type="submit"
+                    >
+                      {loading ? t.generator.generating : t.generator.generate}
+                    </button>
+                  )
                 ) : (
-                  <button type="button" onClick={() => (window.location.href = "/login")} className="btn-primary">
+                  <button type="button" onClick={() => (window.location.href = "/login?mode=login&next=" + encodeURIComponent("/generate"))} className="btn-primary">
                     {t.generator.loginToGenerate}
                   </button>
                 )}
@@ -974,10 +1036,7 @@ export default function GeneratorPage() {
             <div className={fineText}>{t.generator.planningTip}</div>
 
             {prefMsg ? <div className={`text-sm ${infoText}`}>{prefMsg}</div> : null}
-
             {textResult ? <pre className="whitespace-pre-wrap text-sm muted">{textResult}</pre> : null}
-
-            {/* plán si nechávame v state, ale UI text už nedávame “dole” – rieši to success modal */}
             {plan ? <div className="hidden" /> : null}
           </div>
         </form>

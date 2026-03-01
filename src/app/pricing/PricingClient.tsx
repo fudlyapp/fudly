@@ -8,6 +8,20 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 type Tier = "basic" | "plus";
 type SubStatus = "none" | "basic" | "plus";
 
+type Entitlements = {
+  plan: "basic" | "plus";
+  status: string;
+  can_generate: boolean;
+  weekly_limit: number;
+  used: number;
+  remaining: number;
+  calories_enabled: boolean;
+  allowed_styles: string[];
+  trial_until: string | null;
+  current_period_end: string | null;
+  has_stripe_link: boolean;
+};
+
 const CHECKOUT_ENDPOINT = "/api/stripe/create_checkout_session";
 const PORTAL_ENDPOINT = "/api/stripe/portal";
 
@@ -83,24 +97,12 @@ function Card({
   );
 }
 
-/**
- * Robustne určenie stavu predplatného z tabuľky `subscriptions`.
- * Ak máš iné názvy stĺpcov, uprav iba túto funkciu.
- */
-function normalizeSubStatus(row: any): SubStatus {
-  if (!row) return "none";
-
-  const status = String(row.status ?? row.subscription_status ?? "").toLowerCase();
-  const active = status === "active" || status === "trialing";
-
-  const planRaw = String(row.plan ?? row.tier ?? row.current_plan ?? "").toLowerCase();
-  const hasPlan = planRaw === "basic" || planRaw === "plus";
-
-  if (!active && !hasPlan) return "none";
-  if (planRaw === "plus") return "plus";
-  if (planRaw === "basic") return "basic";
-
-  return "none";
+function normalizeSubStatusFromEnt(ent: Entitlements | null): SubStatus {
+  if (!ent) return "none";
+  // ako platné berieme len to, čo server reálne dovolí (konzistentné s /api/generate)
+  if (!ent.can_generate) return "none";
+  if (!ent.has_stripe_link) return "none";
+  return ent.plan === "plus" ? "plus" : "basic";
 }
 
 export default function PricingClient() {
@@ -110,7 +112,9 @@ export default function PricingClient() {
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [loggedIn, setLoggedIn] = useState(false);
 
+  const [ent, setEnt] = useState<Entitlements | null>(null);
   const [subStatus, setSubStatus] = useState<SubStatus>("none");
+
   const [busy, setBusy] = useState<null | "basic" | "plus" | "portal">(null);
 
   const [msg, setMsg] = useState<{ type: "success" | "error" | "info"; text: string } | null>(null);
@@ -123,7 +127,7 @@ export default function PricingClient() {
     if (success === "1") {
       setMsg({
         type: "success",
-        text: "✅ Platba prebehla. Predplatné sa aktivuje po potvrdení od Stripe.",
+        text: "✅ Platba prebehla. Predplatné sa aktivuje po potvrdení od Stripe. Ak sa stav neprepne hneď, obnov stránku o pár sekúnd.",
       });
     } else if (canceled === "1") {
       setMsg({ type: "info", text: "Platba bola zrušená. Ak chceš, skús to znova." });
@@ -155,57 +159,87 @@ export default function PricingClient() {
     };
   }, [supabase]);
 
-  // (C) načítaj subscription status len ak je user prihlásený
-  useEffect(() => {
-    let mounted = true;
-
-    (async () => {
-      if (!loggedIn) {
-        setSubStatus("none");
-        return;
-      }
-
-      try {
-        const { data: s } = await supabase.auth.getSession();
-        const user = s.session?.user;
-        if (!user) {
-          setSubStatus("none");
-          return;
-        }
-
-        const { data, error } = await supabase.from("subscriptions").select("*").eq("user_id", user.id).maybeSingle();
-
-        if (!mounted) return;
-
-        if (error) {
-          setSubStatus("none");
-          return;
-        }
-
-        setSubStatus(normalizeSubStatus(data));
-      } catch {
-        if (mounted) setSubStatus("none");
-      }
-    })();
-
-    return () => {
-      mounted = false;
-    };
-  }, [supabase, loggedIn]);
-
   async function getTokenOrLogin(withBuy?: Tier) {
     const { data: s } = await supabase.auth.getSession();
     const token = s.session?.access_token;
 
     if (!token) {
       const buy = withBuy ? `?buy=${encodeURIComponent(withBuy)}` : "";
-      // Pozn.: aby auto-buy fungoval po login-e na 100%, LoginClient musí rešpektovať ?next=...
       window.location.href = `/login?mode=login&next=${encodeURIComponent("/pricing" + buy)}`;
       return null;
     }
 
     return token;
   }
+
+  async function fetchEntitlementsOnce() {
+    const { data: s } = await supabase.auth.getSession();
+    const token = s.session?.access_token;
+
+    if (!token) {
+      setEnt(null);
+      setSubStatus("none");
+      return;
+    }
+
+    const res = await fetch("/api/entitlements", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data) {
+      setEnt(null);
+      setSubStatus("none");
+      return;
+    }
+
+    setEnt(data as Entitlements);
+    setSubStatus(normalizeSubStatusFromEnt(data as Entitlements));
+  }
+
+  // (C) načítaj entitlements, len ak je user prihlásený
+  useEffect(() => {
+    let mounted = true;
+
+    (async () => {
+      if (!loggedIn) {
+        setEnt(null);
+        setSubStatus("none");
+        return;
+      }
+      try {
+        await fetchEntitlementsOnce();
+      } catch {
+        if (mounted) {
+          setEnt(null);
+          setSubStatus("none");
+        }
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loggedIn]);
+
+  // (C2) po návrate zo Stripe skúsiť refresh (webhook môže dobiehať)
+  useEffect(() => {
+    const success = sp.get("success");
+    if (!loggedIn) return;
+    if (success !== "1") return;
+
+    const t1 = window.setTimeout(() => void fetchEntitlementsOnce(), 1500);
+    const t2 = window.setTimeout(() => void fetchEntitlementsOnce(), 4500);
+    const t3 = window.setTimeout(() => void fetchEntitlementsOnce(), 9000);
+
+    return () => {
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+      window.clearTimeout(t3);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loggedIn, sp]);
 
   async function startCheckout(plan: Tier) {
     setMsg(null);
@@ -256,6 +290,16 @@ export default function PricingClient() {
   async function openPortal() {
     setMsg(null);
 
+    // poistka: portal len keď existuje Stripe link (konzistentné s API)
+    if (!ent?.has_stripe_link) {
+      setMsg({
+        type: "error",
+        text:
+          "Nie je dostupné spravovanie predplatného (chýba Stripe väzba). Ak si práve kúpil plán, skús obnoviť stránku o pár sekúnd.",
+      });
+      return;
+    }
+
     const token = await getTokenOrLogin();
     if (!token) return;
 
@@ -304,7 +348,6 @@ export default function PricingClient() {
     if (!loggedIn) return;
     if (buy !== "basic" && buy !== "plus") return;
 
-    // odstráň buy z URL, aby sa to nespúšťalo opakovane po refresh
     const url = new URL(window.location.href);
     url.searchParams.delete("buy");
     window.history.replaceState({}, "", url.toString());
@@ -315,20 +358,13 @@ export default function PricingClient() {
 
   const buttonBase =
     "w-full rounded-2xl px-5 py-3 text-center text-sm font-semibold transition disabled:opacity-60 disabled:cursor-not-allowed";
-
   const btnPrimary = "btn-primary " + buttonBase;
-
-  const btnSecondary =
-    buttonBase + " border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-zinc-900";
+  const btnSecondary = buttonBase + " border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-zinc-900";
 
   const isNoSub = subStatus === "none";
   const isBasic = subStatus === "basic";
   const isPlus = subStatus === "plus";
 
-  // CTA podľa tvojich bodov 1–4:
-  // - none: Zakúpiť BASIC/PLUS (checkout)
-  // - basic: Basic = Spravovať (portal), Plus = Prejsť na PLUS (portal)
-  // - plus: Plus = Spravovať (portal), Basic = Prejsť na BASIC (portal)
   const basicCta = isPlus ? (
     <button type="button" className={btnSecondary} disabled={busy !== null} onClick={openPortal}>
       {busy === "portal" ? "Otváram…" : "Prejsť na BASIC"}
@@ -339,7 +375,7 @@ export default function PricingClient() {
     </button>
   ) : (
     <button type="button" className={btnPrimary} disabled={busy !== null} onClick={() => startCheckout("basic")}>
-      {busy === "basic" ? "Presmerúvam…" : "Zakúpiť BASIC"}
+      {busy === "basic" ? "Presmerúvam…" : loggedIn ? "Zakúpiť BASIC" : "Prihlásiť sa a kúpiť BASIC"}
     </button>
   );
 
@@ -353,7 +389,7 @@ export default function PricingClient() {
     </button>
   ) : (
     <button type="button" className={btnPrimary} disabled={busy !== null} onClick={() => startCheckout("plus")}>
-      {busy === "plus" ? "Presmerúvam…" : "Zakúpiť PLUS"}
+      {busy === "plus" ? "Presmerúvam…" : loggedIn ? "Zakúpiť PLUS" : "Prihlásiť sa a kúpiť PLUS"}
     </button>
   );
 
@@ -387,7 +423,7 @@ export default function PricingClient() {
           <Card
             title="Basic"
             subtitle="Pre rýchly štart"
-            price="10 €"
+            price="9 €"
             period="mesačne"
             features={[
               "3 generovania týždenne",
@@ -416,8 +452,6 @@ export default function PricingClient() {
             ctaNote={isNoSub ? "14 dní zdarma • Zrušíš kedykoľvek" : "Správa prebieha cez Stripe"}
           />
         </div>
-
-        {/* Spodnú sekciu “Pomoc” sme odstránili. */}
       </div>
     </main>
   );

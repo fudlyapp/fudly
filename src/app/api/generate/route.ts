@@ -3,17 +3,14 @@ import { NextResponse } from "next/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 type Body = {
-  weekStart?: string; // YYYY-MM-DD (pondelok)
+  weekStart?: string;
   language?: string; // sk|en|uk
-
   people: string;
   budget: string;
-
   intolerances?: string;
   avoid?: string;
   have?: string;
   favorites?: string;
-
   style?: string;
   shoppingTrips?: string;
   repeatDays?: string;
@@ -21,8 +18,6 @@ type Body = {
 
 type Plan = "basic" | "plus";
 type Status = "inactive" | "trialing" | "active" | "past_due" | "canceled";
-
-const TRIAL_DAYS = 14;
 
 function planLimits(plan: Plan) {
   if (plan === "plus") {
@@ -39,51 +34,67 @@ function planLimits(plan: Plan) {
   };
 }
 
-function isActiveLike(status: Status, now: Date, currentPeriodEnd?: string | null, trialEnd?: string | null) {
+function isActiveLike(status: Status, now: Date, currentPeriodEnd?: string | null, trialUntil?: string | null) {
   if (status === "active") {
     if (!currentPeriodEnd) return true;
     return new Date(currentPeriodEnd).getTime() > now.getTime();
   }
   if (status === "trialing") {
-    if (!trialEnd) return false;
-    return new Date(trialEnd).getTime() > now.getTime();
+    if (!trialUntil) return false;
+    return new Date(trialUntil).getTime() > now.getTime();
   }
   return false;
 }
 
-function addDays(date: Date, days: number) {
-  const d = new Date(date.getTime());
-  d.setDate(d.getDate() + days);
-  return d;
-}
-
-async function ensureSubscriptionOrTrial(supabase: ReturnType<typeof createSupabaseAdminClient>, userId: string) {
+async function requireActiveSubscription(supabase: ReturnType<typeof createSupabaseAdminClient>, userId: string) {
   const { data: subRow, error } = await supabase
     .from("subscriptions")
-    .select("plan,status,current_period_end,trial_end")
+    .select("plan,status,current_period_end,trial_until,stripe_customer_id,stripe_subscription_id")
     .eq("user_id", userId)
     .maybeSingle();
 
-  if (error) throw new Error("SUBSCRIPTION_READ_FAILED: " + error.message);
-  if (subRow) return subRow;
+  if (error) {
+    return {
+      ok: false as const,
+      status: 500,
+      payload: { error: { code: "SUBSCRIPTION_READ_FAILED", message: error.message } },
+    };
+  }
+
+  if (!subRow) {
+    return {
+      ok: false as const,
+      status: 402,
+      payload: { error: { code: "SUBSCRIPTION_INACTIVE", status: "none" } },
+    };
+  }
+
+  const planTier = ((subRow.plan as Plan) || "basic") as Plan;
+  const status = ((subRow.status as Status) || "inactive") as Status;
 
   const now = new Date();
-  const trialEnd = addDays(now, TRIAL_DAYS).toISOString();
+  const activeLike = isActiveLike(status, now, subRow.current_period_end ?? null, subRow.trial_until ?? null);
+  const hasStripeLink = !!(subRow.stripe_customer_id || subRow.stripe_subscription_id);
 
-  const { data: created, error: upErr } = await supabase
-    .from("subscriptions")
-    .upsert(
-      { user_id: userId, plan: "basic", status: "trialing", trial_end: trialEnd, current_period_end: null },
-      { onConflict: "user_id" }
-    )
-    .select("plan,status,current_period_end,trial_end")
-    .maybeSingle();
+  if (!activeLike || !hasStripeLink) {
+    return {
+      ok: false as const,
+      status: 402,
+      payload: {
+        error: {
+          code: "SUBSCRIPTION_INACTIVE",
+          plan: planTier,
+          status,
+          reason: !hasStripeLink ? "MISSING_STRIPE_LINK" : "NOT_ACTIVE",
+        },
+      },
+    };
+  }
 
-  if (upErr) throw new Error("SUBSCRIPTION_TRIAL_CREATE_FAILED: " + upErr.message);
-
-  return created ?? { plan: "basic", status: "trialing", current_period_end: null, trial_end: trialEnd };
+  return { ok: true as const, planTier };
 }
 
+// --- parsovanie OpenAI ---
 function extractText(data: any): string {
   if (!data) return "";
   if (typeof data.output_text === "string" && data.output_text.trim()) return data.output_text;
@@ -124,13 +135,13 @@ function safeParseJSON(text: string): any | null {
   }
 }
 
+function pad2(n: number) {
+  return String(n).padStart(2, "0");
+}
 function addDaysISO(iso: string, add: number) {
   const d = new Date(iso + "T00:00:00");
   d.setDate(d.getDate() + add);
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
 const DAY_NAMES_SK = ["Pondelok", "Utorok", "Streda", "Štvrtok", "Piatok", "Sobota", "Nedeľa"];
@@ -140,60 +151,34 @@ const DAY_NAMES_UK = ["Понеділок", "Вівторок", "Середа", 
 function styleHintFromValue(style: string, lang: "sk" | "en" | "uk") {
   if (lang === "en") {
     switch (style) {
-      case "rychle":
-        return "Prefer very quick meals (max 20–30 min).";
-      case "vyvazene":
-        return "Prefer balanced meals (protein + veggies + sides), still budget-friendly.";
-      case "vegetarianske":
-        return "Vegetarian: no meat or fish (eggs and dairy OK).";
-      case "tradicne":
-        return "Traditional home-style meals.";
-      case "exoticke":
-        return "Exotic inspirations (Asia/Mexico/fusion) using common store ingredients.";
-      case "fit":
-        return "Fit: more protein and veggies, less sugar.";
-      case "lacné":
-      default:
-        return "Prefer the cheapest meals from common ingredients.";
+      case "rychle": return "Prefer very quick meals (max 20–30 min).";
+      case "vyvazene": return "Prefer balanced meals (protein + veggies + sides), still budget-friendly.";
+      case "vegetarianske": return "Vegetarian: no meat or fish (eggs and dairy OK).";
+      case "tradicne": return "Traditional home-style meals.";
+      case "exoticke": return "Exotic inspirations (Asia/Mexico/fusion) using common store ingredients.";
+      case "fit": return "Fit: more protein and veggies, less sugar.";
+      default: return "Prefer the cheapest meals from common ingredients.";
     }
   }
-
   if (lang === "uk") {
     switch (style) {
-      case "rychle":
-        return "Надавай перевагу дуже швидким стравам (макс 20–30 хв).";
-      case "vyvazene":
-        return "Надавай перевагу збалансованим стравам (білок + овочі + гарнір), бюджетно.";
-      case "vegetarianske":
-        return "Вегетаріанське: без м’яса та риби (яйця й молочне можна).";
-      case "tradicne":
-        return "Традиційні домашні страви.";
-      case "exoticke":
-        return "Екзотика (Азія/Мексика/fusion) зі звичайних продуктів.";
-      case "fit":
-        return "Fit: більше білка й овочів, менше цукру.";
-      case "lacné":
-      default:
-        return "Надавай перевагу найдешевшим стравам зі звичайних продуктів.";
+      case "rychle": return "Надавай перевагу дуже швидким стравам (макс 20–30 хв).";
+      case "vyvazene": return "Надавай перевагу збалансованим стравам (білок + овочі + гарнір), бюджетно.";
+      case "vegetarianske": return "Вегетаріанське: без м’яса та риби (яйця й молочне можна).";
+      case "tradicne": return "Традиційні домашні страви.";
+      case "exoticke": return "Екзотика (Азія/Мексика/fusion) зі звичайних продуктів.";
+      case "fit": return "Fit: більше білка й овочів, менше цукру.";
+      default: return "Надавай перевагу найдешевшим стравам зі звичайних продуктів.";
     }
   }
-
   switch (style) {
-    case "rychle":
-      return "Uprednostni veľmi rýchle jedlá (max 20–30 min).";
-    case "vyvazene":
-      return "Uprednostni vyvážené jedlá (bielkoviny, zelenina, prílohy), stále rozumná cena.";
-    case "vegetarianske":
-      return "Vegetariánske: bez mäsa a rýb (vajcia a mliečne OK).";
-    case "tradicne":
-      return "Tradičné: domáca poctivá strava (klasické slovenské/európske jedlá).";
-    case "exoticke":
-      return "Exotické: inšpirácie Ázia/Mexiko/fusion, bežné suroviny z obchodu.";
-    case "fit":
-      return "Fit: viac bielkovín, viac zeleniny, menej cukru, striedme porcie.";
-    case "lacné":
-    default:
-      return "Uprednostni čo najlacnejšie jedlá z bežných surovín.";
+    case "rychle": return "Uprednostni veľmi rýchle jedlá (max 20–30 min).";
+    case "vyvazene": return "Uprednostni vyvážené jedlá (bielkoviny, zelenina, prílohy), stále rozumná cena.";
+    case "vegetarianske": return "Vegetariánske: bez mäsa a rýb (vajcia a mliečne OK).";
+    case "tradicne": return "Tradičné: domáca poctivá strava.";
+    case "exoticke": return "Exotické: inšpirácie Ázia/Mexiko/fusion.";
+    case "fit": return "Fit: viac bielkovín, viac zeleniny, menej cukru.";
+    default: return "Uprednostni čo najlacnejšie jedlá z bežných surovín.";
   }
 }
 
@@ -220,13 +205,11 @@ function normalizeRecipeKey(key: string) {
 
 function normalizePlan(plan: any) {
   const next = JSON.parse(JSON.stringify(plan ?? {}));
-
   if (next.recipes && typeof next.recipes === "object") {
     const fixed: Record<string, any> = {};
     for (const [k, v] of Object.entries(next.recipes)) fixed[normalizeRecipeKey(k)] = v;
     next.recipes = fixed;
   }
-
   if (Array.isArray(next.days)) next.days = next.days.slice(0, 7);
   return next;
 }
@@ -235,16 +218,13 @@ function ensurePerPersonCalories(summary: any) {
   const people = Math.max(1, coerceNumber(summary?.people, 1));
   const avg = coerceNumber(summary?.avg_daily_kcal, 0);
   const weekly = coerceNumber(summary?.weekly_total_kcal, 0);
-
   summary.avg_daily_kcal_per_person = people ? Math.round(avg / people) : null;
   summary.weekly_total_kcal_per_person = people ? Math.round(weekly / people) : null;
   return summary;
 }
 
-// ✅ odstráni kcal polia, ak nie sú povolené
 function stripCalories(plan: any) {
   if (!plan || typeof plan !== "object") return plan;
-
   if (Array.isArray(plan.days)) {
     for (const d of plan.days) {
       if (d && typeof d === "object") {
@@ -255,14 +235,12 @@ function stripCalories(plan: any) {
       }
     }
   }
-
   if (plan.summary && typeof plan.summary === "object") {
     delete plan.summary.weekly_total_kcal;
     delete plan.summary.avg_daily_kcal;
     delete plan.summary.avg_daily_kcal_per_person;
     delete plan.summary.weekly_total_kcal_per_person;
   }
-
   return plan;
 }
 
@@ -291,22 +269,12 @@ export async function POST(req: Request) {
     const langRaw = (body.language || "sk").trim().toLowerCase();
     const lang: "sk" | "en" | "uk" = langRaw === "en" ? "en" : langRaw === "uk" ? "uk" : "sk";
 
-    // ✅ PAYWALL + AUTO TRIAL
-    const subRow = await ensureSubscriptionOrTrial(supabase, userId);
+    // ✅ HARD PAYWALL
+    const sub = await requireActiveSubscription(supabase, userId);
+    if (!sub.ok) return NextResponse.json(sub.payload, { status: sub.status });
 
-    const planTier = ((subRow?.plan as Plan) || "basic") as Plan;
-    const status = ((subRow?.status as Status) || "inactive") as Status;
-
-    const now = new Date();
+    const planTier = sub.planTier as Plan;
     const limits = planLimits(planTier);
-    const canGenerate = isActiveLike(status, now, subRow?.current_period_end ?? null, subRow?.trial_end ?? null);
-
-    if (!canGenerate) {
-      return NextResponse.json(
-        { error: { code: "SUBSCRIPTION_INACTIVE", plan: planTier, status } },
-        { status: 402 }
-      );
-    }
 
     const style = (body.style || "lacné").trim();
     if (!limits.allowed_styles.includes(style)) {
@@ -333,7 +301,6 @@ export async function POST(req: Request) {
       );
     }
 
-    // input
     const people = body.people?.trim() || "1";
     const budget = body.budget?.trim() || "0";
     const intolerances = (body.intolerances || "").trim();
@@ -353,7 +320,6 @@ export async function POST(req: Request) {
       : lang === "uk" ? "Пиши все українською."
       : "Všetko píš po slovensky.";
 
-    // ✅ iba PLUS má kalórie
     const caloriesBlock = limits.calories_enabled
       ? `
 CALORIES:
@@ -477,7 +443,6 @@ Counts:
 
     const data = await r.json().catch(() => null);
 
-    // OpenAI upstream error -> NEPOČÍTAME usage
     if (!r.ok) {
       return NextResponse.json(
         { error: { code: "OPENAI_UPSTREAM_ERROR", status: r.status, detail: data } },
@@ -488,7 +453,6 @@ Counts:
     const text = extractText(data);
     const parsedRaw = safeParseJSON(text);
     if (!parsedRaw) {
-      // nevalidný JSON -> NEPOČÍTAME usage
       return NextResponse.json({ kind: "text", text }, { status: 200 });
     }
 
@@ -497,28 +461,21 @@ Counts:
     const recipes = parsed?.recipes && typeof parsed.recipes === "object" ? parsed.recipes : null;
     const missing = requiredRecipeKeys().filter((k) => !recipes?.[k]);
     if (missing.length) {
-      // nekompletné recepty -> NEPOČÍTAME usage
       return NextResponse.json({ error: { code: "MISSING_RECIPES", missing } }, { status: 500 });
     }
 
     if (!parsed.summary) parsed.summary = {};
     parsed.summary.people = coerceNumber(parsed.summary.people, Number(people) || 1);
 
-    // ✅ ak PLUS, dopočítaj per-person; ak BASIC, kalórie komplet odstráň
-    if (limits.calories_enabled) {
-      parsed.summary = ensurePerPersonCalories(parsed.summary);
-    } else {
-      stripCalories(parsed);
-    }
+    if (limits.calories_enabled) parsed.summary = ensurePerPersonCalories(parsed.summary);
+    else stripCalories(parsed);
 
-    // ✅ usage navýšime až po úspešnej validácii
     const { error: upErr } = await supabase.from("generation_usage").upsert(
       { user_id: userId, week_start: weekStart, count: used + 1 },
       { onConflict: "user_id,week_start" }
     );
 
     if (upErr) {
-      // plán vrátime, ale upozorníme, že sa nepodarilo zapísať usage
       return NextResponse.json(
         { kind: "json", plan: parsed, warning: { code: "USAGE_WRITE_FAILED", message: upErr.message } },
         { status: 200 }

@@ -30,21 +30,37 @@ export async function POST(req: Request) {
 
     const supabase = createSupabaseAdminClient();
 
-    // user z tokenu
     const { data: userRes, error: userErr } = await supabase.auth.getUser(token);
     if (userErr || !userRes?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const userId = userRes.user.id;
     const email = userRes.user.email ?? undefined;
 
-    // existujúci stripe customer?
-    const { data: existingSub } = await supabase
+    // prečítaj subscriptions row (ak existuje)
+    const { data: subRow } = await supabase
       .from("subscriptions")
-      .select("stripe_customer_id")
+      .select("stripe_customer_id,status,trial_until,current_period_end,stripe_subscription_id,plan")
       .eq("user_id", userId)
       .maybeSingle();
 
-    const customer = existingSub?.stripe_customer_id ?? undefined;
+    // ak má aktívny trial/subscription, checkout nepúšťame (má ísť cez portal)
+    const status = String(subRow?.status ?? "").toLowerCase();
+    const now = Date.now();
+    const cpe = subRow?.current_period_end ? new Date(subRow.current_period_end).getTime() : null;
+    const tu = subRow?.trial_until ? new Date(subRow.trial_until).getTime() : null;
+
+    const activeLike =
+      (status === "active" && (!cpe || cpe > now)) ||
+      (status === "trialing" && !!tu && tu > now);
+
+    if (activeLike && (subRow?.stripe_customer_id || subRow?.stripe_subscription_id)) {
+      return NextResponse.json(
+        { error: "Already has active subscription. Use portal." },
+        { status: 409 }
+      );
+    }
+
+    const customer = subRow?.stripe_customer_id ?? undefined;
 
     const origin = process.env.NEXT_PUBLIC_SITE_URL || new URL(req.url).origin;
     const successUrl = `${origin}/pricing?success=1`;
@@ -60,7 +76,6 @@ export async function POST(req: Request) {
       customer_email: customer ? undefined : email,
 
       subscription_data: {
-        // trial len keď ešte nemá customer / alebo ak chceš vždy — tu to nechám ako máš
         trial_period_days: 14,
         metadata: { user_id: userId, plan },
       },

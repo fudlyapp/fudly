@@ -20,7 +20,6 @@ export async function POST(req: Request) {
 
     const supabase = createSupabaseAdminClient();
 
-    // user z tokenu
     const { data: userRes, error: userErr } = await supabase.auth.getUser(token);
     if (userErr || !userRes?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -33,7 +32,12 @@ export async function POST(req: Request) {
       .maybeSingle();
 
     const customerId = row?.stripe_customer_id;
-    if (!customerId) return NextResponse.json({ error: "Missing stripe_customer_id" }, { status: 400 });
+    if (!customerId) {
+      return NextResponse.json(
+        { error: "Missing stripe_customer_id. Buy a plan first." },
+        { status: 400 }
+      );
+    }
 
     const origin = process.env.NEXT_PUBLIC_SITE_URL || new URL(req.url).origin;
 
