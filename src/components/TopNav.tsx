@@ -123,6 +123,7 @@ export default function TopNav() {
                   <NavLink href="/pricing" label="Členstvá" />
                   <NavLink href="/contact" label="Kontakt" />
                   <NavLink href="/docs" label="Dokumenty" />
+                  <NavLink href="/faq" label="FAQ" />
 
                   <div className="w-3" />
 
@@ -144,6 +145,8 @@ export default function TopNav() {
                 <>
                   <NavLink href="/pricing" label="Členstvá" />
                   <NavLink href="/contact" label="Kontakt" />
+                  <NavLink href="/faq" label="FAQ" />
+
                   <PrimaryNavLink href="/login" label="Prihlásiť sa | Vytvoriť účet" />
                 </>
               )}
@@ -187,6 +190,7 @@ export default function TopNav() {
                 <NavLink href="/pricing" label="Členstvá" onClick={closeMobile} />
                 <NavLink href="/contact" label="Kontakt" onClick={closeMobile} />
                 <NavLink href="/docs" label="Dokumenty" onClick={closeMobile} />
+                <NavLink href="/faq" label="FAQ" onClick={closeMobile} />
                 <NavLink href="/profile" label="Profil" onClick={closeMobile} />
 
                 <button
@@ -209,6 +213,7 @@ export default function TopNav() {
               <>
                 <NavLink href="/pricing" label="Členstvá" onClick={closeMobile} />
                 <NavLink href="/contact" label="Kontakt" onClick={closeMobile} />
+                <NavLink href="/faq" label="FAQ" onClick={closeMobile} />
                 <PrimaryNavLink href="/login" label="Prihlásiť sa | Vytvoriť účet" onClick={closeMobile} />
               </>
             )}

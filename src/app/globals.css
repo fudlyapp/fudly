@@ -2,29 +2,19 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  html,
+  body {
+    height: 100%;
+    overflow-x: hidden;
   }
-}
 
-body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  body {
+    font-family: Arial, Helvetica, sans-serif;
+  }
 }
 
 @layer utilities {
-  .text-balance {
-    text-wrap: balance;
-  }
-
   /* Full-page watermark */
   .fudly-watermark {
     position: absolute;
@@ -33,8 +23,8 @@ body {
     background-image: url("/fudly_white.png");
     background-repeat: no-repeat;
     background-position: center;
-    background-size: 1400px 1400px; /* uprav podľa chuti */
-    opacity: 0.14; /* 0.08–0.14 */
+    background-size: 1400px 1400px;
+    opacity: 0.14;
     filter: blur(0.2px);
   }
 
@@ -52,13 +42,13 @@ body {
     @apply border border-gray-200 dark:border-gray-800 shadow-sm;
   }
 
-  /* Muted texty – čitateľné aj na bielom */
+  /* ✅ Muted texty – OPRAVA (na bielom musia byť tmavšie) */
   .muted {
-    @apply text-gray-300 dark:text-gray-700;
+    @apply text-gray-700 dark:text-gray-300;
   }
 
   .muted-2 {
-    @apply text-gray-400 dark:text-gray-600;
+    @apply text-gray-600 dark:text-gray-400;
   }
 
   .input-surface {
@@ -67,10 +57,40 @@ body {
       dark:border-gray-700 dark:bg-black dark:text-white dark:placeholder-gray-500;
   }
 
+  /* Default primary (môžeš používať aj inde) */
   .btn-primary {
     @apply rounded-xl px-5 py-3 font-semibold transition disabled:opacity-50
-      bg-black text-white hover:bg-gray-800
-      dark:bg-white dark:text-black dark:hover:bg-gray-200;
+      bg-black text-white hover:bg-black/90
+      dark:bg-white dark:text-black dark:hover:bg-white/90;
+  }
+
+  /* Secondary button (nech sa pri hoveri “nezmení na čiernu”) */
+  .btn-secondary {
+    @apply rounded-xl px-5 py-3 font-semibold transition
+      border border-gray-300 text-black hover:bg-gray-50
+      dark:border-gray-700 dark:text-white dark:hover:bg-zinc-900;
+  }
+
+  /* ✅ CTA invertované presne podľa zadania:
+     Light: čierny background + biely text
+     Dark:  biely background + čierny text
+     + viditeľný “premium” outline/shadow
+  */
+  .btn-cta-invert {
+    @apply rounded-2xl px-8 py-4 font-semibold transition
+      bg-black text-white hover:bg-black/90
+      shadow-[0_18px_50px_-25px_rgba(0,0,0,0.45)]
+      ring-1 ring-black/10
+      dark:bg-white dark:text-black dark:hover:bg-white/90
+      dark:ring-white/20;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
   }
 }
 
@@ -80,15 +100,4 @@ body {
     background-size: 900px 900px;
     opacity: 0.08;
   }
-html,
-body {
-  overflow-x: hidden;
-}
-.no-scrollbar::-webkit-scrollbar {
-  display: none;
-}
-.no-scrollbar {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-}
 }

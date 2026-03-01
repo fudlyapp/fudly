@@ -3,7 +3,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
 type Recipe = {
@@ -196,6 +196,7 @@ export default function WeekDetailPage() {
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
   const params = useParams<{ week_start: string }>();
   const weekStart = (params?.week_start || "").toString();
+  const noteRefs = useRef<Record<number, HTMLTextAreaElement | null>>({});
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -258,6 +259,15 @@ export default function WeekDetailPage() {
       setLoading(false);
     })();
   }, [supabase, weekStart]);
+
+  useEffect(() => {
+    if (!plan?.days?.length) return;
+    // po načítaní dat nech sa poznámky "nastavia" na správnu výšku
+    requestAnimationFrame(() => {
+    plan.days.forEach((_, idx) => autoResizeNote(idx));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plan?.days?.length]);
 
   // ochrana pred refresh/close tab
   useEffect(() => {
@@ -540,6 +550,13 @@ export default function WeekDetailPage() {
     downloadText(`fudly-nakup-${weekStart}.txt`, shoppingToTXT(weekStart, shopping));
   }
 
+  function autoResizeNote(dayIdx: number) {
+  const el = noteRefs.current[dayIdx];
+  if (!el) return;
+  el.style.height = "auto";
+  el.style.height = el.scrollHeight + "px";
+}
+
   if (loading) {
     return (
       <main className="min-h-screen px-4 sm:px-6 py-6 page-invert-bg overflow-x-hidden">
@@ -650,7 +667,7 @@ export default function WeekDetailPage() {
                     return (
                       <div key={meal} className="rounded-2xl p-3 border border-gray-200 dark:border-gray-800 min-w-0">
                         <div className="flex items-center justify-between gap-3">
-                          <div className="text-sm font-semibold">{label}</div>
+                          <div className="text-xs sm:text-sm font-semibold">{label}</div>
                           <button
                             type="button"
                             onClick={() => showRecipeFor(d.day, meal)}
@@ -690,26 +707,32 @@ export default function WeekDetailPage() {
                   })}
                 </div>
 
-                {/* Poznámka – garantovane menšie písmo */}
-                {typeof d.note === "string" ? (
-                  <div className="mt-3">
-                    <div className="text-xs muted-2 mb-1">Poznámka</div>
-                    <input
-                      className="input-surface !text-[11px] !leading-tight py-2"
-                      value={d.note}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        setDirty(true);
-                        setPlan((prev) => {
-                          if (!prev) return prev;
-                          const next = deepClone(prev);
-                          next.days[dayIdx].note = v;
-                          return next;
-                        });
-                      }}
-                    />
-                  </div>
-                ) : null}
+                {/* Poznámka – auto-grow */}
+{typeof d.note === "string" ? (
+  <div className="mt-3">
+    <div className="text-xs muted-2 mb-1">Poznámka</div>
+
+    <textarea
+      ref={(el) => {
+        noteRefs.current[dayIdx] = el;
+      }}
+      className="input-surface !text-[11px] !leading-tight py-2 resize-none overflow-hidden min-h-[44px]"
+      value={d.note}
+      rows={1}
+      onChange={(e) => {
+        const v = e.target.value;
+        setDirty(true);
+        setPlan((prev) => {
+          if (!prev) return prev;
+          const next = deepClone(prev);
+          next.days[dayIdx].note = v;
+          return next;
+        });
+        autoResizeNote(dayIdx);
+      }}
+    />
+  </div>
+) : null}
               </div>
             ))}
           </div>

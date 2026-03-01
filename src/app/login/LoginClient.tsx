@@ -1,7 +1,7 @@
 // src/app/login/LoginClient.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
@@ -13,6 +13,8 @@ export default function LoginClient() {
   const { t } = useT();
   const searchParams = useSearchParams();
 
+  const supabase = useMemo(() => createSupabaseBrowserClient(), []);
+
   const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -20,11 +22,52 @@ export default function LoginClient() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
+  // pamätáme si, či práve prebehol signup (aby sme po prvom prihlásení vedeli poslať usera na /pricing)
+  const [signedUpNow, setSignedUpNow] = useState(false);
+
+  const nextUrl = useMemo(() => {
+    const raw = searchParams?.get("next");
+    // bezpečný fallback
+    if (!raw) return null;
+
+    // nepustíme externé URL
+    if (raw.startsWith("http://") || raw.startsWith("https://")) return null;
+
+    // musí byť interná cesta
+    if (!raw.startsWith("/")) return null;
+
+    return raw;
+  }, [searchParams]);
+
   useEffect(() => {
     const m = (searchParams?.get("mode") || "").toLowerCase();
     if (m === "signup") setMode("signup");
     else setMode("login");
   }, [searchParams]);
+
+  // Redirect po prihlásení (funguje aj po signup-e, keď session nabehne až neskôr)
+  useEffect(() => {
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+      if (!session?.user) return;
+
+      // 1) keď máme next=..., vždy rešpektuj
+      if (nextUrl) {
+        window.location.href = nextUrl;
+        return;
+      }
+
+      // 2) ak práve prebehol signup (prvé prihlásenie po registrácii)
+      if (signedUpNow) {
+        window.location.href = "/pricing";
+        return;
+      }
+
+      // 3) inak default po login-e
+      window.location.href = "/generate";
+    });
+
+    return () => sub.subscription.unsubscribe();
+  }, [supabase, nextUrl, signedUpNow]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -32,17 +75,26 @@ export default function LoginClient() {
     setLoading(true);
 
     try {
-      const supabase = createSupabaseBrowserClient();
-
       if (mode === "signup") {
+        setSignedUpNow(true);
+
         const { error } = await supabase.auth.signUp({ email, password });
         if (error) throw error;
+
+        // Ak máš email-confirm ON, user sa neprihlási hneď → zobrazíme hlášku.
+        // Ak je OFF, onAuthStateChange sa spustí a presmeruje.
         setMessage(t.auth.signupSuccess);
-      } else {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
-        window.location.href = "/generate";
+        return;
       }
+
+      // login
+      setSignedUpNow(false);
+
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+
+      // redirect vyrieši onAuthStateChange
+      return;
     } catch (err: any) {
       setMessage(err?.message ?? t.common.genericError);
     } finally {
@@ -50,8 +102,7 @@ export default function LoginClient() {
     }
   }
 
-  const tabBase =
-    "rounded-xl px-3 py-2 text-sm border font-semibold transition";
+  const tabBase = "rounded-xl px-3 py-2 text-sm border font-semibold transition";
   const tabActive =
     "bg-black text-white border-black hover:bg-gray-800 dark:bg-white dark:text-black dark:border-white dark:hover:bg-gray-200";
   const tabInactive =
@@ -72,7 +123,11 @@ export default function LoginClient() {
         <div className="mb-4 grid grid-cols-2 gap-2">
           <button
             type="button"
-            onClick={() => setMode("login")}
+            onClick={() => {
+              setMode("login");
+              setSignedUpNow(false);
+              setMessage(null);
+            }}
             className={`${tabBase} ${mode === "login" ? tabActive : tabInactive}`}
           >
             {t.auth.loginTab}
@@ -80,7 +135,10 @@ export default function LoginClient() {
 
           <button
             type="button"
-            onClick={() => setMode("signup")}
+            onClick={() => {
+              setMode("signup");
+              setMessage(null);
+            }}
             className={`${tabBase} ${mode === "signup" ? tabActive : tabInactive}`}
           >
             {t.auth.signupTab}
@@ -97,6 +155,7 @@ export default function LoginClient() {
               placeholder={t.auth.emailPlaceholder}
               type="email"
               required
+              autoComplete="email"
             />
           </div>
 
@@ -109,6 +168,7 @@ export default function LoginClient() {
               placeholder={t.auth.passwordPlaceholder}
               type="password"
               required
+              autoComplete={mode === "signup" ? "new-password" : "current-password"}
             />
           </div>
 
@@ -118,7 +178,7 @@ export default function LoginClient() {
         </form>
 
         {message && (
-          <div className="mt-4 rounded-2xl p-3 page-invert-bg border border-gray-200 dark:border-gray-800 text-sm">
+          <div className="mt-4 rounded-2xl p-3 page-invert-bg border border-gray-200 dark:border-gray-800 text-sm whitespace-pre-wrap">
             {message}
           </div>
         )}

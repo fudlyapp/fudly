@@ -1,7 +1,8 @@
 // src/app/generate/page.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { useT } from "@/lib/i18n/useT";
 
@@ -41,12 +42,14 @@ type PlanJSON = {
   meta?: any;
 };
 
-type ApiResponse = { kind: "json"; plan: PlanJSON } | { kind: "text"; text: string } | { error: any };
+type ApiResponse =
+  | { kind: "json"; plan: PlanJSON; warning?: any }
+  | { kind: "text"; text: string }
+  | { error: any };
 
 type ProfileRow = {
   user_id: string;
   full_name: string | null;
-
   language: string | null;
 
   people_default: number | null;
@@ -64,7 +67,7 @@ type ProfileRow = {
 type MealPlanRowLite = {
   id: string;
   week_start: string;
-  generation_count: number | null;
+  generation_count: number | null; // (staré) — UI používa, ale server má generation_usage
   plan: any;
   plan_generated: any;
 };
@@ -180,12 +183,126 @@ function GENERATION_LIMIT_FOR_TIER(tier: "basic" | "plus") {
   return tier === "plus" ? 5 : 3;
 }
 
+type BannerState =
+  | null
+  | {
+      variant: "error" | "info" | "success";
+      title: string;
+      message: string;
+      detail?: string;
+      canRetry?: boolean;
+      showProfileLink?: boolean; // ✅ nové
+    };
+
+function safeStringify(obj: any) {
+  try {
+    return JSON.stringify(obj, null, 2);
+  } catch {
+    return String(obj);
+  }
+}
+
+function deriveErrorMessage(status: number, api: any) {
+  const code = api?.error?.code;
+
+  if (status === 429 && code === "WEEKLY_LIMIT_REACHED") {
+    const used = api?.error?.used;
+    const limit = api?.error?.limit;
+    return {
+      title: "Dosiahol si týždenný limit generovaní",
+      message: `Tento týždeň máš využité generovania (${used}/${limit}). Skús to znova budúci týždeň alebo upgrade na PLUS.`,
+      canRetry: false,
+    };
+  }
+
+  if (status === 402 && code === "SUBSCRIPTION_INACTIVE") {
+    return {
+      title: "Predplatné nie je aktívne",
+      message: "Vyzerá to, že nemáš aktívne predplatné / trial. Skús sa odhlásiť a prihlásiť alebo otvor Členstvá.",
+      canRetry: false,
+    };
+  }
+
+  if (status === 403 && code === "STYLE_NOT_ALLOWED") {
+    return {
+      title: "Zvolený štýl nie je dostupný",
+      message: "Tento štýl je dostupný iba v inom pláne. Vyber iný štýl alebo upgrade na PLUS.",
+      canRetry: false,
+    };
+  }
+
+  if (status === 502 && code === "OPENAI_UPSTREAM_ERROR") {
+    return {
+      title: "Generovanie sa nepodarilo",
+      message:
+        "AI služba je dočasne nedostupná alebo preťažená. Skús to prosím znova o chvíľu. Zostávajúci počet generovaní ostáva nezmenený.",
+      canRetry: true,
+    };
+  }
+
+  if (status >= 500) {
+    return {
+      title: "Generovanie sa nepodarilo",
+      message:
+        "Nastala chyba na serveri. Skús to znova o chvíľu. Zostávajúci počet generovaní ostáva nezmenený.",
+      canRetry: true,
+    };
+  }
+
+  return {
+    title: "Nastala chyba",
+    message: "Niečo sa pokazilo. Skús to znova. Zostávajúci počet generovaní ostáva nezmenený.",
+    canRetry: true,
+  };
+}
+
+/** ---------- Modal (center) ---------- */
+function CenterModal({
+  open,
+  onClose,
+  title,
+  children,
+}: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  children: React.ReactNode;
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <div className="relative w-full max-w-2xl rounded-2xl p-5 md:p-6 surface-same-as-nav surface-border">
+        <div className="flex items-start justify-between gap-3">
+          <div className="text-lg md:text-xl font-bold">{title}</div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-xl border border-gray-300 dark:border-gray-700 px-3 py-2 text-sm font-semibold hover:bg-gray-100 dark:hover:bg-zinc-900 transition"
+          >
+            Zavrieť
+          </button>
+        </div>
+        <div className="mt-4">{children}</div>
+      </div>
+    </div>
+  );
+}
+
 export default function GeneratorPage() {
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
   const { t } = useT();
 
   const tier = getActiveTier();
-  const generationLimit = GENERATION_LIMIT_FOR_TIER(tier);
+
+  const generationLimitRaw = GENERATION_LIMIT_FOR_TIER(tier);
+  const generationLimitSafe =
+    typeof generationLimitRaw === "number" && Number.isFinite(generationLimitRaw)
+      ? generationLimitRaw
+      : tier === "plus"
+        ? 5
+        : 3;
 
   const [authLoading, setAuthLoading] = useState(true);
   const [userEmail, setUserEmail] = useState<string | null>(null);
@@ -215,8 +332,13 @@ export default function GeneratorPage() {
   const [existingRow, setExistingRow] = useState<MealPlanRowLite | null>(null);
   const [existingLoading, setExistingLoading] = useState(false);
 
+  // ✅ Overwrite modal (center)
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmMsg, setConfirmMsg] = useState("");
+
+  // ✅ Result modal (center) — používame aj na chyby/info/success
+  const [banner, setBanner] = useState<BannerState>(null);
+  const [lastPayload, setLastPayload] = useState<any>(null);
 
   useEffect(() => {
     (async () => {
@@ -277,11 +399,12 @@ export default function GeneratorPage() {
   }, [existingRow]);
 
   const remainingGenerations = useMemo(
-    () => Math.max(0, generationLimit - usedGenerations),
-    [generationLimit, usedGenerations]
+    () => Math.max(0, generationLimitSafe - usedGenerations),
+    [generationLimitSafe, usedGenerations]
   );
 
   async function loadSavedFromProfile() {
+    setBanner(null);
     setPrefMsg("");
     setPrefLoading(true);
 
@@ -335,6 +458,7 @@ export default function GeneratorPage() {
   }
 
   async function saveDefaultsToProfile() {
+    setBanner(null);
     setPrefMsg("");
     setPrefLoading(true);
 
@@ -385,17 +509,47 @@ export default function GeneratorPage() {
     if (p) {
       setPlan(normalizePlan(p));
       setTextResult("");
+      setBanner({
+        variant: "info",
+        title: "Použitý uložený plán",
+        message: "Neurobilo sa nové generovanie. Zostávajúci počet generovaní ostáva nezmenený.",
+        showProfileLink: true,
+      });
     } else {
       setPlan(null);
       setTextResult(t.generator.emptySavedPlan);
     }
   }
 
-  async function generateAndAutoSave() {
+  async function callGenerateApi(inputPayload: any) {
+    const { data: ss } = await supabase.auth.getSession();
+    const accessToken = ss.session?.access_token;
+
+    if (!accessToken) {
+      return { ok: false as const, status: 401 as const, data: { error: { code: "NOT_LOGGED_IN" } } as any };
+    }
+
+    const res = await fetch("/api/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify(inputPayload),
+    });
+
+    let data: any = null;
+    try {
+      data = await res.json();
+    } catch {
+      data = null;
+    }
+
+    return { ok: res.ok, status: res.status, data };
+  }
+
+  async function generateAndAutoSave(payloadOverride?: any) {
     setLoading(true);
     setTextResult("");
-    setPlan(null);
     setPrefMsg("");
+    setBanner(null);
 
     const { data: s } = await supabase.auth.getSession();
     const user = s.session?.user;
@@ -405,21 +559,19 @@ export default function GeneratorPage() {
       return;
     }
 
-    const currentCount = existingRow?.generation_count ?? 0;
-    if (currentCount >= generationLimit) {
-      setLoading(false);
-      setTextResult(t.generator.limitReached(generationLimit));
-      return;
-    }
-
-    const styleMeta = STYLE_OPTIONS.find((x) => x.value === style);
+    const styleMeta = STYLE_OPTIONS.find((x) => x.value === (payloadOverride?.style ?? style));
     if (styleMeta?.plusOnly && tier !== "plus") {
       setLoading(false);
-      setTextResult(t.generator.plusOnlyStyle(styleMeta.label));
+      setBanner({
+        variant: "error",
+        title: "Tento štýl je iba pre PLUS",
+        message: t.generator.plusOnlyStyle(styleMeta.label),
+        canRetry: false,
+      });
       return;
     }
 
-    const inputPayload = {
+    const inputPayload = payloadOverride ?? {
       weekStart,
       people,
       budget,
@@ -432,43 +584,49 @@ export default function GeneratorPage() {
       repeatDays,
     };
 
+    setLastPayload(inputPayload);
+
     try {
-      const { data: ss } = await supabase.auth.getSession();
-      const accessToken = ss.session?.access_token;
-      if (!accessToken) {
-        setTextResult(t.generator.notLoggedIn);
+      const out = await callGenerateApi(inputPayload);
+
+      if (!out.ok) {
+        const { title, message, canRetry } = deriveErrorMessage(out.status, out.data);
+        setBanner({
+          variant: "error",
+          title,
+          message,
+          detail: out.data ? safeStringify(out.data) : `HTTP ${out.status}`,
+          canRetry,
+        });
         return;
       }
 
-      const res = await fetch("/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
-        body: JSON.stringify(inputPayload),
-      });
+      const data: ApiResponse = out.data as any;
 
-      const data: ApiResponse = await res.json();
-
-      if (!res.ok) {
-        setTextResult(t.generator.serverError(JSON.stringify((data as any).error ?? data, null, 2)));
-        return;
-      }
-
-      if ("kind" in data && data.kind === "json") {
+      if (data && "kind" in data && data.kind === "json") {
         const normalized = normalizePlan(data.plan);
 
         if (!hasAllRecipes(normalized)) {
-          setTextResult(t.common.errorPrefix + " missing recipes, try again.");
+          setBanner({
+            variant: "error",
+            title: "Generovanie sa nepodarilo",
+            message:
+              "Výstup neobsahuje všetky recepty. Skús to prosím znova. Zostávajúci počet generovaní ostáva nezmenený.",
+            canRetry: true,
+          });
           return;
         }
 
-        const weekEnd = addDaysISO(weekStart, 6);
+        // ✅ UI odráta až po úspešnom uložení do DB
+        const weekEnd = addDaysISO(inputPayload.weekStart, 6);
+        const currentCount = existingRow?.generation_count ?? 0;
         const nextCount = currentCount + 1;
         const nowIso = new Date().toISOString();
 
         const { error } = await supabase.from("meal_plans").upsert(
           {
             user_id: user.id,
-            week_start: weekStart,
+            week_start: inputPayload.weekStart,
             week_end: weekEnd,
             input: inputPayload,
             plan_generated: normalized,
@@ -482,8 +640,15 @@ export default function GeneratorPage() {
         );
 
         if (error) {
-          setTextResult(t.generator.generatedButSaveFailed(error.message));
           setPlan(normalized);
+          setBanner({
+            variant: "error",
+            title: "Plán vygenerovaný, ale nepodarilo sa uložiť",
+            message:
+              "Skús prosím refresh alebo generuj znova. (Generovanie už prebehlo, ale uloženie do DB zlyhalo.)",
+            detail: error.message,
+            canRetry: true,
+          });
           return;
         }
 
@@ -491,7 +656,7 @@ export default function GeneratorPage() {
           const base = prev ?? ({} as any);
           return {
             id: base.id ?? "unknown",
-            week_start: weekStart,
+            week_start: inputPayload.weekStart,
             generation_count: nextCount,
             plan: normalized,
             plan_generated: normalized,
@@ -499,13 +664,55 @@ export default function GeneratorPage() {
         });
 
         setPlan(normalized);
-      } else if ("kind" in data && data.kind === "text") {
-        setTextResult(data.text);
-      } else {
-        setTextResult(t.generator.unexpectedServer);
+
+        if ((data as any)?.warning?.code === "USAGE_WRITE_FAILED") {
+          setBanner({
+            variant: "info",
+            title: "Plán je hotový",
+            message:
+              "Poznámka: nepodarilo sa zapísať usage na serveri. Pre používateľa to nič nemení, ale pozri logy.",
+            detail: safeStringify((data as any).warning),
+            showProfileLink: true,
+          });
+        } else {
+          setBanner({
+            variant: "success",
+            title: "✅ Jedálniček je vygenerovaný",
+            message: "Nájdeš ho v Profile. Môžeš ho tam upraviť, pozrieť recepty aj nákupy.",
+            showProfileLink: true,
+          });
+        }
+        return;
       }
+
+      if (data && "kind" in data && data.kind === "text") {
+        setBanner({
+          variant: "error",
+          title: "Generovanie sa nepodarilo",
+          message:
+            "AI vrátila nečitateľný výstup. Skús to prosím znova o chvíľu. Zostávajúci počet generovaní ostáva nezmenený.",
+          detail: data.text,
+          canRetry: true,
+        });
+        return;
+      }
+
+      setBanner({
+        variant: "error",
+        title: "Neočakávaná odpoveď",
+        message: "Server vrátil nečakaný formát. Skús to znova. Zostávajúci počet generovaní ostáva nezmenený.",
+        detail: safeStringify(data),
+        canRetry: true,
+      });
     } catch (err: any) {
-      setTextResult(t.generator.serverError(err?.message ?? "unknown"));
+      setBanner({
+        variant: "error",
+        title: "Generovanie sa nepodarilo",
+        message:
+          "Nastala chyba v prehliadači alebo sieti. Skús to znova. Zostávajúci počet generovaní ostáva nezmenený.",
+        detail: err?.message ?? "unknown",
+        canRetry: true,
+      });
     } finally {
       setLoading(false);
     }
@@ -515,6 +722,7 @@ export default function GeneratorPage() {
     e.preventDefault();
     if (!isValid) return;
 
+    // ✅ ak existuje plán pre týždeň => modal do stredu
     if (existingRow) {
       openOverwriteModal();
       return;
@@ -527,7 +735,7 @@ export default function GeneratorPage() {
     if (!isValid) return false;
     if (!userEmail) return true;
     if (existingLoading) return false;
-    if (remainingGenerations <= 0) return false;
+    if (remainingGenerations <= 0) return false; // UI gate
     return true;
   }, [isValid, userEmail, existingLoading, remainingGenerations]);
 
@@ -545,19 +753,107 @@ export default function GeneratorPage() {
         <header className="mb-6">
           <h1 className="mt-2 text-3xl font-bold">{t.generator.title}</h1>
           <div className={`mt-2 ${infoText}`}>{t.generator.subtitle}</div>
+          {authLoading ? <div className="mt-2 text-xs muted-2">Kontrolujem prihlásenie…</div> : null}
         </header>
 
-        <form
-          onSubmit={onSubmit}
-          className="rounded-3xl p-6 surface-same-as-nav surface-border"
+        {/* ✅ RESULT MODAL (success/info/error) */}
+        <CenterModal
+          open={!!banner}
+          onClose={() => setBanner(null)}
+          title={banner?.title ?? ""}
         >
+          {banner ? (
+            <div className="space-y-4">
+              <div className="text-sm muted whitespace-pre-wrap">{banner.message}</div>
+
+              {banner.detail ? (
+                <details>
+                  <summary className="text-xs muted-2 cursor-pointer select-none">Detail</summary>
+                  <pre className="mt-2 whitespace-pre-wrap text-xs muted-2">{banner.detail}</pre>
+                </details>
+              ) : null}
+
+              <div className="flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-end">
+                {banner.canRetry ? (
+                  <button
+                    type="button"
+                    className="btn-primary px-4 py-2 text-sm"
+                    onClick={() => generateAndAutoSave(lastPayload ?? undefined)}
+                    disabled={loading}
+                  >
+                    {loading ? "Skúšam..." : "Skúsiť znova"}
+                  </button>
+                ) : null}
+
+                {banner.showProfileLink ? (
+                  <Link
+                    href="/profile"
+                    className="rounded-xl border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-semibold hover:bg-gray-100 dark:hover:bg-zinc-900 transition text-center"
+                    onClick={() => setBanner(null)}
+                  >
+                    Otvoriť profil
+                  </Link>
+                ) : null}
+
+                <button
+                  type="button"
+                  className="rounded-xl border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-semibold hover:bg-gray-100 dark:hover:bg-zinc-900 transition"
+                  onClick={() => setBanner(null)}
+                >
+                  Zavrieť
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </CenterModal>
+
+        {/* ✅ OVERWRITE MODAL */}
+        <CenterModal
+          open={confirmOpen}
+          onClose={() => setConfirmOpen(false)}
+          title="Týždeň už máš vygenerovaný"
+        >
+          <div className="space-y-4">
+            <div className="text-sm muted whitespace-pre-wrap">{confirmMsg}</div>
+
+            <div className="flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-end">
+              <button
+                type="button"
+                className="btn-primary px-4 py-2 text-sm"
+                onClick={async () => {
+                  setConfirmOpen(false);
+                  await generateAndAutoSave();
+                }}
+              >
+                Prepísať a generovať
+              </button>
+
+              <button
+                type="button"
+                className="rounded-xl border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-semibold hover:bg-gray-100 dark:hover:bg-zinc-900 transition"
+                onClick={async () => {
+                  setConfirmOpen(false);
+                  await keepExistingPlan();
+                }}
+              >
+                Použiť existujúci
+              </button>
+
+              <button
+                type="button"
+                className="rounded-xl border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-semibold hover:bg-gray-100 dark:hover:bg-zinc-900 transition"
+                onClick={() => setConfirmOpen(false)}
+              >
+                Zrušiť
+              </button>
+            </div>
+          </div>
+        </CenterModal>
+
+        <form onSubmit={onSubmit} className="rounded-3xl p-6 surface-same-as-nav surface-border">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             <Field label={t.generator.week}>
-              <select
-                value={weekStart}
-                onChange={(e) => setWeekStart(e.target.value)}
-                className="input-surface"
-              >
+              <select value={weekStart} onChange={(e) => setWeekStart(e.target.value)} className="input-surface">
                 {weekOptions.map((o) => (
                   <option key={o.value} value={o.value}>
                     {o.kind === "this" ? t.generator.thisWeek : t.generator.nextWeek}: {o.label}
@@ -567,23 +863,11 @@ export default function GeneratorPage() {
             </Field>
 
             <Field label={t.generator.people}>
-              <input
-                value={people}
-                onChange={(e) => setPeople(e.target.value)}
-                required
-                className="input-surface"
-                placeholder="2"
-              />
+              <input value={people} onChange={(e) => setPeople(e.target.value)} required className="input-surface" placeholder="2" />
             </Field>
 
             <Field label={t.generator.budget}>
-              <input
-                value={budget}
-                onChange={(e) => setBudget(e.target.value)}
-                required
-                className="input-surface"
-                placeholder="80"
-              />
+              <input value={budget} onChange={(e) => setBudget(e.target.value)} required className="input-surface" placeholder="80" />
             </Field>
           </div>
 
@@ -601,17 +885,11 @@ export default function GeneratorPage() {
                 })}
               </select>
 
-              {tier !== "plus" ? (
-                <div className="mt-1 text-xs muted-2">Fit / Tradičné / Exotické budú v Plus členstve.</div>
-              ) : null}
+              {tier !== "plus" ? <div className="mt-1 text-xs muted-2">Fit / Tradičné / Exotické budú v Plus členstve.</div> : null}
             </Field>
 
             <Field label={t.generator.trips}>
-              <select
-                value={shoppingTrips}
-                onChange={(e) => setShoppingTrips(e.target.value)}
-                className="input-surface"
-              >
+              <select value={shoppingTrips} onChange={(e) => setShoppingTrips(e.target.value)} className="input-surface">
                 <option value="1">1×</option>
                 <option value="2">2×</option>
                 <option value="3">3×</option>
@@ -630,12 +908,7 @@ export default function GeneratorPage() {
 
           <div className="mt-4 grid grid-cols-1 gap-4">
             <Field label={t.generator.intolerances} hint={t.generator.hardBanHint}>
-              <input
-                value={intolerances}
-                onChange={(e) => setIntolerances(e.target.value)}
-                className="input-surface"
-                placeholder="laktóza, arašidy"
-              />
+              <input value={intolerances} onChange={(e) => setIntolerances(e.target.value)} className="input-surface" placeholder="laktóza, arašidy" />
             </Field>
 
             <Field label={t.generator.avoid} hint={t.generator.softPrefHint}>
@@ -647,12 +920,7 @@ export default function GeneratorPage() {
             </Field>
 
             <Field label={t.generator.favorites} hint={t.generator.tastyHint}>
-              <input
-                value={favorites}
-                onChange={(e) => setFavorites(e.target.value)}
-                className="input-surface"
-                placeholder="cestoviny, kura"
-              />
+              <input value={favorites} onChange={(e) => setFavorites(e.target.value)} className="input-surface" placeholder="cestoviny, kura" />
             </Field>
           </div>
 
@@ -665,11 +933,8 @@ export default function GeneratorPage() {
                     {userEmail ? (
                       <>
                         {" • "}
-                        {t.generator.generations}:{" "}
-                        <span className="font-semibold">
-                          {usedGenerations}/{generationLimit}
-                        </span>{" "}
-                        ({t.generator.remaining} <span className="font-semibold">{remainingGenerations}</span>)
+                        {t.generator.generations}: <span className="font-semibold">{usedGenerations}/{generationLimitSafe}</span> ({t.generator.remaining}{" "}
+                        <span className="font-semibold">{remainingGenerations}</span>)
                       </>
                     ) : null}
                   </>
@@ -693,7 +958,7 @@ export default function GeneratorPage() {
                   <button
                     disabled={loading || !canGenerate}
                     className="btn-primary disabled:cursor-not-allowed"
-                    title={remainingGenerations <= 0 ? t.generator.generateCtaHint(generationLimit) : t.generator.generateCtaHintOk}
+                    title={remainingGenerations <= 0 ? t.generator.generateCtaHint(generationLimitSafe) : t.generator.generateCtaHintOk}
                     type="submit"
                   >
                     {loading ? t.generator.generating : t.generator.generate}
@@ -710,41 +975,12 @@ export default function GeneratorPage() {
 
             {prefMsg ? <div className={`text-sm ${infoText}`}>{prefMsg}</div> : null}
 
-            {textResult ? (
-              <pre className="whitespace-pre-wrap text-sm muted">{textResult}</pre>
-            ) : null}
+            {textResult ? <pre className="whitespace-pre-wrap text-sm muted">{textResult}</pre> : null}
 
-            {confirmOpen ? (
-              <div className="rounded-2xl p-4 surface-same-as-nav surface-border">
-                <div className="text-sm muted whitespace-pre-wrap">{confirmMsg}</div>
-                <div className="mt-3 flex gap-2">
-                  <button
-                    type="button"
-                    className="btn-primary px-4 py-2 text-sm"
-                    onClick={async () => {
-                      setConfirmOpen(false);
-                      await generateAndAutoSave();
-                    }}
-                  >
-                    {t.generator.generate}
-                  </button>
-                  <button
-                    type="button"
-                    className={secondaryPill + " rounded-xl px-4 py-2 text-sm"}
-                    onClick={async () => {
-                      setConfirmOpen(false);
-                      await keepExistingPlan();
-                    }}
-                  >
-                    {t.common.close}
-                  </button>
-                </div>
-              </div>
-            ) : null}
+            {/* plán si nechávame v state, ale UI text už nedávame “dole” – rieši to success modal */}
+            {plan ? <div className="hidden" /> : null}
           </div>
         </form>
-
-        {plan ? <div className="mt-6 text-sm muted">OK (plán vygenerovaný - nájdeš ho v profile)</div> : null}
       </div>
     </main>
   );

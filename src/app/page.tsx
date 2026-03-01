@@ -106,30 +106,61 @@ export default function HomePage() {
           </div>
 
           <div className="flex flex-col items-center text-center">
-            <div className="relative w-56 h-56 md:w-80 md:h-80">
+            {/* logo – trochu väčšie */}
+            <div className="relative w-60 h-60 md:w-80 md:h-80">
               <Image src="/logo_black.png" alt="Fudly logo" fill className="object-contain dark:hidden" priority />
               <Image src="/logo_white.png" alt="Fudly logo" fill className="object-contain hidden dark:block" priority />
             </div>
 
-            <h1 className="mt-6 text-4xl md:text-5xl font-bold tracking-tight whitespace-nowrap">
-              Inteligentný týždenný jedálniček{" "}
-              <span className="block muted">na jedno kliknutie</span>
+            {/* ✅ Headline: 1. riadok vždy v jednom riadku + clamp aby sa na mobile nezrezával */}
+            <h1 className="mt-6 font-bold tracking-tight leading-[1.02] px-3">
+              <span className="block whitespace-nowrap text-[clamp(22px,6vw,56px)]">
+                Inteligentný týždenný jedálniček
+              </span>
+              <span className="block text-[clamp(20px,5.2vw,48px)] muted">na jedno kliknutie</span>
             </h1>
 
-            <p className="mt-6 max-w-2xl muted text-lg">
+            {/* text pod tým – nech je čitateľný (nespoliehame sa tu na muted, lebo máte invertované pozadia) */}
+            <p className="mt-6 max-w-2xl text-base sm:text-lg text-black/70 dark:text-black/70">
               Do 2–3 minút máš hotový plán na celý týždeň. Jedlá, nákupy, recepty, kalórie aj finančný prehľad.
             </p>
 
-            <div className="mt-10 flex flex-col sm:flex-row gap-4">
-              <Link href="/login" className="rounded-2xl btn-primary px-8 py-4 shadow-sm">
+            {/* ✅ TOTO NEMENÍM – nechávam presne ako máš */}
+            <div className="mt-8 inline-flex items-center rounded-full border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-semibold surface-same-as-nav">
+              14 dní zdarma • bez záväzkov
+            </div>
+
+            <div className="mt-10 flex flex-col sm:flex-row gap-4 w-full sm:w-auto">
+              {/* ✅ CTA: otočené farby podľa tvojej požiadavky */}
+              <Link
+                href="/login"
+  className="
+  w-full sm:w-auto
+  rounded-2xl px-8 py-4 text-center font-semibold transition
+  bg-gradient-to-r from-amber-600 to-amber-500
+hover:from-amber-500 hover:to-amber-400
+text-white
+shadow-lg shadow-amber-600/40
+"
+              >
                 Vyskúšaj na 14 dní zadarmo
               </Link>
+
+              {/* ✅ Secondary: vždy viditeľné + hover nezmení na nečitateľnú čiernu */}
               <Link
                 href="/pricing"
-                className="rounded-2xl border border-gray-300 dark:border-gray-700 px-8 py-4 font-semibold hover:bg-gray-100 dark:hover:bg-zinc-900 transition"
+                className={[
+                  "w-full sm:w-auto rounded-2xl px-8 py-4 text-center font-semibold transition",
+                  "bg-white text-black border border-gray-300 hover:bg-gray-50",
+                  "dark:bg-black dark:text-white dark:border-gray-700 dark:hover:bg-zinc-900",
+                ].join(" ")}
               >
                 Pozrieť členstvá
               </Link>
+            </div>
+
+            <div className="mt-3 text-sm text-black/60 dark:text-black/60">
+              Registrácia trvá pár sekúnd • Zrušíš kedykoľvek
             </div>
           </div>
         </section>

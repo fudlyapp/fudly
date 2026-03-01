@@ -269,23 +269,23 @@ function stripCalories(plan: any) {
 export async function POST(req: Request) {
   try {
     const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) return NextResponse.json({ error: "Chýba OPENAI_API_KEY" }, { status: 500 });
+    if (!apiKey) return NextResponse.json({ error: { code: "MISSING_OPENAI_KEY" } }, { status: 500 });
 
     const auth = req.headers.get("authorization") || "";
     const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-    if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!token) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
     const supabase = createSupabaseAdminClient();
 
     const { data: userRes, error: userErr } = await supabase.auth.getUser(token);
-    if (userErr || !userRes?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (userErr || !userRes?.user) return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
 
     const userId = userRes.user.id;
     const body = (await req.json()) as Body;
 
     const weekStart = (body.weekStart || "").trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) {
-      return NextResponse.json({ error: "Neplatný weekStart" }, { status: 400 });
+      return NextResponse.json({ error: { code: "INVALID_WEEK_START" } }, { status: 400 });
     }
 
     const langRaw = (body.language || "sk").trim().toLowerCase();
@@ -302,7 +302,10 @@ export async function POST(req: Request) {
     const canGenerate = isActiveLike(status, now, subRow?.current_period_end ?? null, subRow?.trial_end ?? null);
 
     if (!canGenerate) {
-      return NextResponse.json({ error: { code: "SUBSCRIPTION_INACTIVE", plan: planTier, status } }, { status: 402 });
+      return NextResponse.json(
+        { error: { code: "SUBSCRIPTION_INACTIVE", plan: planTier, status } },
+        { status: 402 }
+      );
     }
 
     const style = (body.style || "lacné").trim();
@@ -472,18 +475,29 @@ Counts:
       body: JSON.stringify({ model: "gpt-4.1-mini", input: prompt }),
     });
 
-    const data = await r.json();
-    if (!r.ok) return NextResponse.json({ error: data }, { status: 500 });
+    const data = await r.json().catch(() => null);
+
+    // OpenAI upstream error -> NEPOČÍTAME usage
+    if (!r.ok) {
+      return NextResponse.json(
+        { error: { code: "OPENAI_UPSTREAM_ERROR", status: r.status, detail: data } },
+        { status: 502 }
+      );
+    }
 
     const text = extractText(data);
     const parsedRaw = safeParseJSON(text);
-    if (!parsedRaw) return NextResponse.json({ kind: "text", text }, { status: 200 });
+    if (!parsedRaw) {
+      // nevalidný JSON -> NEPOČÍTAME usage
+      return NextResponse.json({ kind: "text", text }, { status: 200 });
+    }
 
     const parsed = normalizePlan(parsedRaw);
 
     const recipes = parsed?.recipes && typeof parsed.recipes === "object" ? parsed.recipes : null;
     const missing = requiredRecipeKeys().filter((k) => !recipes?.[k]);
     if (missing.length) {
+      // nekompletné recepty -> NEPOČÍTAME usage
       return NextResponse.json({ error: { code: "MISSING_RECIPES", missing } }, { status: 500 });
     }
 
@@ -504,6 +518,7 @@ Counts:
     );
 
     if (upErr) {
+      // plán vrátime, ale upozorníme, že sa nepodarilo zapísať usage
       return NextResponse.json(
         { kind: "json", plan: parsed, warning: { code: "USAGE_WRITE_FAILED", message: upErr.message } },
         { status: 200 }
@@ -512,6 +527,6 @@ Counts:
 
     return NextResponse.json({ kind: "json", plan: parsed }, { status: 200 });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? "Unknown error" }, { status: 500 });
+    return NextResponse.json({ error: { code: "SERVER_ERROR", message: e?.message ?? "Unknown error" } }, { status: 500 });
   }
 }
