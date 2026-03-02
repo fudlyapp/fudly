@@ -223,27 +223,6 @@ function ensurePerPersonCalories(summary: any) {
   return summary;
 }
 
-function stripCalories(plan: any) {
-  if (!plan || typeof plan !== "object") return plan;
-  if (Array.isArray(plan.days)) {
-    for (const d of plan.days) {
-      if (d && typeof d === "object") {
-        delete d.breakfast_kcal;
-        delete d.lunch_kcal;
-        delete d.dinner_kcal;
-        delete d.total_kcal;
-      }
-    }
-  }
-  if (plan.summary && typeof plan.summary === "object") {
-    delete plan.summary.weekly_total_kcal;
-    delete plan.summary.avg_daily_kcal;
-    delete plan.summary.avg_daily_kcal_per_person;
-    delete plan.summary.weekly_total_kcal_per_person;
-  }
-  return plan;
-}
-
 export async function POST(req: Request) {
   try {
     const apiKey = process.env.OPENAI_API_KEY;
@@ -320,31 +299,23 @@ export async function POST(req: Request) {
       : lang === "uk" ? "Пиши все українською."
       : "Všetko píš po slovensky.";
 
-    const caloriesBlock = limits.calories_enabled
-      ? `
+    // ✅ KALÓRIE SA VŽDY GENERUJÚ (aj pre BASIC) – v UI sa len skryjú podľa plánu
+    const caloriesBlock = `
 CALORIES:
 - Calories must be per person/serving.
 - For each day include breakfast_kcal, lunch_kcal, dinner_kcal and total_kcal.
 - In summary include weekly_total_kcal and avg_daily_kcal (for the whole household).
-`
-      : `
-CALORIES:
-- Do NOT include any calorie fields in days or summary (no *_kcal, no totals).
 `;
 
-    const schemaDaysCalories = limits.calories_enabled
-      ? `,
+    const schemaDaysCalories = `,
       "breakfast_kcal": number,
       "lunch_kcal": number,
       "dinner_kcal": number,
-      "total_kcal": number`
-      : "";
+      "total_kcal": number`;
 
-    const schemaSummaryCalories = limits.calories_enabled
-      ? `,
+    const schemaSummaryCalories = `,
     "weekly_total_kcal": number,
-    "avg_daily_kcal": number`
-      : "";
+    "avg_daily_kcal": number`;
 
     const prompt = `
 Return ONLY valid JSON (no other text).
@@ -467,8 +438,8 @@ Counts:
     if (!parsed.summary) parsed.summary = {};
     parsed.summary.people = coerceNumber(parsed.summary.people, Number(people) || 1);
 
-    if (limits.calories_enabled) parsed.summary = ensurePerPersonCalories(parsed.summary);
-    else stripCalories(parsed);
+    // ✅ vždy dopočítame per-person, kalórie zostanú v pláne (UI ich skryje podľa plánu)
+    parsed.summary = ensurePerPersonCalories(parsed.summary);
 
     const { error: upErr } = await supabase.from("generation_usage").upsert(
       { user_id: userId, week_start: weekStart, count: used + 1 },

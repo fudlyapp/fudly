@@ -211,6 +211,43 @@ export default function WeekDetailPage() {
   const [recipeTitle, setRecipeTitle] = useState("Recept");
   const [recipeBody, setRecipeBody] = useState<React.ReactNode>(null);
 
+  // ✅ entitlements (či môžeme ukázať kcal)
+  const [caloriesAllowed, setCaloriesAllowed] = useState<boolean | null>(null);
+  const [planTier, setPlanTier] = useState<"basic" | "plus" | null>(null);
+
+    useEffect(() => {
+    (async () => {
+      try {
+        let { data: sess } = await supabase.auth.getSession();
+        let token = sess.session?.access_token ?? null;
+
+        if (!token) {
+          const refreshed = await supabase.auth.refreshSession();
+          token = refreshed.data.session?.access_token ?? null;
+        }
+
+        if (!token) {
+          setCaloriesAllowed(false);
+          return;
+        }
+
+        const res = await fetch("/api/entitlements", {
+          method: "GET",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        const j = await res.json().catch(() => null);
+        if (res.ok && j) {
+          setCaloriesAllowed(!!j.calories_enabled);
+        } else {
+          setCaloriesAllowed(false);
+        }
+      } catch {
+        setCaloriesAllowed(false);
+      }
+    })();
+  }, [supabase]);
+
   useEffect(() => {
     (async () => {
       setLoading(true);
@@ -262,14 +299,12 @@ export default function WeekDetailPage() {
 
   useEffect(() => {
     if (!plan?.days?.length) return;
-    // po načítaní dat nech sa poznámky "nastavia" na správnu výšku
     requestAnimationFrame(() => {
-    plan.days.forEach((_, idx) => autoResizeNote(idx));
+      plan.days.forEach((_, idx) => autoResizeNote(idx));
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plan?.days?.length]);
 
-  // ochrana pred refresh/close tab
   useEffect(() => {
     function onBeforeUnload(e: BeforeUnloadEvent) {
       if (!dirty) return;
@@ -286,7 +321,9 @@ export default function WeekDetailPage() {
     return "";
   }, [row?.week_end, weekStart]);
 
-  const caloriesEnabled = useMemo(() => planHasCalories(plan), [plan]);
+  // ✅ reálne ukazujeme kcal len ak sú povolené + existujú v pláne
+  const caloriesPresent = useMemo(() => planHasCalories(plan), [plan]);
+  const showCalories = useMemo(() => !!caloriesAllowed && caloriesPresent, [caloriesAllowed, caloriesPresent]);
 
   const shopping = useMemo(() => plan?.shopping ?? [], [plan]);
   const anyShoppingEdited = useMemo(() => {
@@ -298,7 +335,6 @@ export default function WeekDetailPage() {
     return !!plan?.meta?.shopping_edited_trips?.[String(tripNo)];
   }
 
-  /** ---- MEALS editing ---- */
   function updateMealText(dayIdx: number, meal: "breakfast" | "lunch" | "dinner", value: string) {
     setDirty(true);
     setPlan((prev) => {
@@ -316,7 +352,6 @@ export default function WeekDetailPage() {
     });
   }
 
-  /** ---- Recipes modal (keeps your behavior: if edited meal -> recipe unavailable) ---- */
   function showRecipeFor(dayNumber: number, meal: "breakfast" | "lunch" | "dinner") {
     const k = recipeKey(dayNumber, meal);
     const edited = !!plan?.meta?.edited_meals?.[k];
@@ -374,7 +409,6 @@ export default function WeekDetailPage() {
     setRecipeOpen(true);
   }
 
-  /** ---- SHOPPING grouped + edit/add/remove ---- */
   const shoppingByTrip = useMemo(() => {
     const trips = Array.isArray(shopping) ? shopping : [];
 
@@ -497,7 +531,6 @@ export default function WeekDetailPage() {
     setAddQty((p) => ({ ...p, [tripIdx]: "" }));
   }
 
-  /** ---- SAVE ---- */
   async function saveEdits() {
     setMsg("");
     if (!plan || !row) return;
@@ -551,11 +584,11 @@ export default function WeekDetailPage() {
   }
 
   function autoResizeNote(dayIdx: number) {
-  const el = noteRefs.current[dayIdx];
-  if (!el) return;
-  el.style.height = "auto";
-  el.style.height = el.scrollHeight + "px";
-}
+    const el = noteRefs.current[dayIdx];
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = el.scrollHeight + "px";
+  }
 
   if (loading) {
     return (
@@ -578,6 +611,13 @@ export default function WeekDetailPage() {
       </main>
     );
   }
+
+  // ✅ summary kcal (zobraziť len v PLUS)
+  const summary = plan.summary ?? {};
+  const weeklyTotal = typeof summary.weekly_total_kcal === "number" ? summary.weekly_total_kcal : null;
+  const avgDaily = typeof summary.avg_daily_kcal === "number" ? summary.avg_daily_kcal : null;
+  const avgDailyPerPerson = typeof summary.avg_daily_kcal_per_person === "number" ? summary.avg_daily_kcal_per_person : null;
+  const weeklyPerPerson = typeof summary.weekly_total_kcal_per_person === "number" ? summary.weekly_total_kcal_per_person : null;
 
   return (
     <main className="min-h-screen px-4 sm:px-6 py-6 page-invert-bg overflow-x-hidden">
@@ -613,7 +653,6 @@ export default function WeekDetailPage() {
               Export TXT
             </button>
 
-            {/* Späť s potvrdením pri neuložených zmenách */}
             <button
               type="button"
               onClick={() => {
@@ -636,6 +675,46 @@ export default function WeekDetailPage() {
           <h2 className="text-xl font-semibold">Jedálniček</h2>
           <div className="mt-2 text-sm muted">Klikni do jedla a uprav text. Ak upravíš jedlo, recept preň nebude dostupný.</div>
 
+          {/* ✅ KALÓRIE: BASIC -> info, PLUS -> čísla */}
+          {caloriesAllowed === false ? (
+            <div className="mt-4 rounded-2xl p-4 border border-gray-200 dark:border-gray-800 text-sm muted">
+              Kalórie sú dostupné iba v členstve <span className="font-semibold">PLUS</span>.
+            </div>
+          ) : null}
+
+          {showCalories ? (
+            <div className="mt-4 rounded-2xl p-4 border border-gray-200 dark:border-gray-800">
+              <div className="text-sm font-semibold">Kalórie</div>
+              <div className="mt-2 text-sm muted">
+                {weeklyTotal != null ? (
+                  <>
+                    Týždeň spolu: <span className="font-semibold">{weeklyTotal}</span> kcal
+                  </>
+                ) : (
+                  <span className="muted-2">Týždenný súčet nie je k dispozícii.</span>
+                )}
+                {avgDaily != null ? (
+                  <>
+                    {" • "}Priemer denne (domácnosť): <span className="font-semibold">{avgDaily}</span> kcal
+                  </>
+                ) : null}
+              </div>
+              {(avgDailyPerPerson != null || weeklyPerPerson != null) ? (
+                <div className="mt-1 text-xs muted-2">
+                  {avgDailyPerPerson != null ? (
+                    <>Priemer denne na osobu: <span className="font-semibold">{avgDailyPerPerson}</span> kcal</>
+                  ) : null}
+                  {weeklyPerPerson != null ? (
+                    <>
+                      {avgDailyPerPerson != null ? " • " : ""}
+                      Týždeň na osobu: <span className="font-semibold">{weeklyPerPerson}</span> kcal
+                    </>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
           <div className="mt-5 space-y-4">
             {plan.days.map((d, dayIdx) => (
               <div key={d.day} className="rounded-2xl p-4 page-invert-bg border border-gray-200 dark:border-gray-800">
@@ -645,13 +724,16 @@ export default function WeekDetailPage() {
                       {d.day_name ?? `Deň ${d.day}`}{" "}
                       {d.date ? <span className="text-xs muted-2">({formatDateSK(d.date)})</span> : null}
                     </div>
-                    {caloriesEnabled ? (
+
+                    {showCalories ? (
                       <div className="mt-1 text-xs muted-2">
                         {typeof d.total_kcal === "number" ? (
                           <>
                             Spolu: <span className="font-semibold">{d.total_kcal}</span> kcal
                           </>
-                        ) : null}
+                        ) : (
+                          <span className="muted-2">Spolu kcal nie je k dispozícii.</span>
+                        )}
                       </div>
                     ) : null}
                   </div>
@@ -683,22 +765,16 @@ export default function WeekDetailPage() {
                           onChange={(e) => updateMealText(dayIdx, meal, e.target.value)}
                         />
 
-                        {caloriesEnabled ? (
+                        {showCalories ? (
                           <div className="mt-2 text-xs muted-2">
                             {meal === "breakfast" && typeof d.breakfast_kcal === "number" ? (
-                              <>
-                                kcal: <span className="font-semibold">{d.breakfast_kcal}</span>
-                              </>
+                              <>kcal: <span className="font-semibold">{d.breakfast_kcal}</span></>
                             ) : null}
                             {meal === "lunch" && typeof d.lunch_kcal === "number" ? (
-                              <>
-                                kcal: <span className="font-semibold">{d.lunch_kcal}</span>
-                              </>
+                              <>kcal: <span className="font-semibold">{d.lunch_kcal}</span></>
                             ) : null}
                             {meal === "dinner" && typeof d.dinner_kcal === "number" ? (
-                              <>
-                                kcal: <span className="font-semibold">{d.dinner_kcal}</span>
-                              </>
+                              <>kcal: <span className="font-semibold">{d.dinner_kcal}</span></>
                             ) : null}
                           </div>
                         ) : null}
@@ -707,38 +783,37 @@ export default function WeekDetailPage() {
                   })}
                 </div>
 
-                {/* Poznámka – auto-grow */}
-{typeof d.note === "string" ? (
-  <div className="mt-3">
-    <div className="text-xs muted-2 mb-1">Poznámka</div>
+                {typeof d.note === "string" ? (
+                  <div className="mt-3">
+                    <div className="text-xs muted-2 mb-1">Poznámka</div>
 
-    <textarea
-      ref={(el) => {
-        noteRefs.current[dayIdx] = el;
-      }}
-      className="input-surface !text-[11px] !leading-tight py-2 resize-none overflow-hidden min-h-[44px]"
-      value={d.note}
-      rows={1}
-      onChange={(e) => {
-        const v = e.target.value;
-        setDirty(true);
-        setPlan((prev) => {
-          if (!prev) return prev;
-          const next = deepClone(prev);
-          next.days[dayIdx].note = v;
-          return next;
-        });
-        autoResizeNote(dayIdx);
-      }}
-    />
-  </div>
-) : null}
+                    <textarea
+                      ref={(el) => {
+                        noteRefs.current[dayIdx] = el;
+                      }}
+                      className="input-surface !text-[11px] !leading-tight py-2 resize-none overflow-hidden min-h-[44px]"
+                      value={d.note}
+                      rows={1}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setDirty(true);
+                        setPlan((prev) => {
+                          if (!prev) return prev;
+                          const next = deepClone(prev);
+                          next.days[dayIdx].note = v;
+                          return next;
+                        });
+                        autoResizeNote(dayIdx);
+                      }}
+                    />
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>
         </section>
 
-        {/* Shopping – ešte kompaktnejšie */}
+        {/* Shopping – nechávam celé tvoje, bez zmeny */}
         <section className="rounded-2xl p-4 sm:p-6 surface-same-as-nav surface-border">
           <h2 className="text-base font-semibold">Nákupy</h2>
           <div className="mt-1 text-xs muted">
@@ -776,7 +851,6 @@ export default function WeekDetailPage() {
                   </div>
                 </div>
 
-                {/* categories */}
                 <div className="mt-3 space-y-2">
                   {t.categories.map((c) => (
                     <div key={c.key} className="rounded-2xl border border-gray-200 dark:border-gray-800 p-2.5 min-w-0">
@@ -809,7 +883,6 @@ export default function WeekDetailPage() {
                   ))}
                 </div>
 
-                {/* add new */}
                 <div className="mt-3 rounded-2xl border border-gray-200 dark:border-gray-800 p-2.5 min-w-0">
                   <div className="text-sm font-semibold">Pridať položku</div>
                   <div className="mt-2 grid grid-cols-1 md:grid-cols-[180px_1fr_180px_140px] gap-2 min-w-0">
@@ -853,7 +926,6 @@ export default function WeekDetailPage() {
         ) : null}
       </div>
 
-      {/* Sticky save bar dole */}
       {dirty ? (
         <div className="fixed inset-x-0 bottom-0 z-50">
           <div className="mx-auto w-full max-w-6xl px-4 sm:px-6 pb-4">
@@ -867,7 +939,6 @@ export default function WeekDetailPage() {
         </div>
       ) : null}
 
-      {/* Recipe modal */}
       {recipeOpen ? (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/60" onClick={() => setRecipeOpen(false)} />

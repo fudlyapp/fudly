@@ -1,8 +1,9 @@
 // src/app/generate/page.tsx
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { useT } from "@/lib/i18n/useT";
 
@@ -303,6 +304,10 @@ export default function GeneratorPage() {
 
   const [weekOptions] = useState(() => buildWeekOptions());
   const [weekStart, setWeekStart] = useState<string>(weekOptions[0]?.value ?? "");
+  const weekStartRef = useRef(weekStart);
+  useEffect(() => {
+    weekStartRef.current = weekStart;
+  }, [weekStart]);
 
   const [people, setPeople] = useState("");
   const [budget, setBudget] = useState("");
@@ -336,9 +341,19 @@ export default function GeneratorPage() {
   const [entLoading, setEntLoading] = useState(false);
   const [ent, setEnt] = useState<Entitlements | null>(null);
 
+  async function getAccessTokenOrNull() {
+    let { data: ss } = await supabase.auth.getSession();
+    let token = ss.session?.access_token ?? null;
+
+    if (!token) {
+      const refreshed = await supabase.auth.refreshSession();
+      token = refreshed.data.session?.access_token ?? null;
+    }
+    return token;
+  }
+
   async function fetchEntitlementsForWeek(ws: string) {
-    const { data: ss } = await supabase.auth.getSession();
-    const token = ss.session?.access_token;
+    const token = await getAccessTokenOrNull();
     if (!token) {
       setEnt(null);
       return;
@@ -358,32 +373,44 @@ export default function GeneratorPage() {
   }
 
   useEffect(() => {
+    let alive = true;
+
     (async () => {
       setAuthLoading(true);
+      const token = await getAccessTokenOrNull();
+
+      if (!alive) return;
+
       const { data } = await supabase.auth.getSession();
       setUserEmail(data.session?.user?.email ?? null);
       setAuthLoading(false);
 
-      // po nabehnutí session načítaj entitlements
-      if (data.session?.access_token) {
-        await fetchEntitlementsForWeek(weekStart);
-      }
+      if (token) await fetchEntitlementsForWeek(weekStartRef.current);
+      else setEnt(null);
     })();
 
-    const { data: sub } = supabase.auth.onAuthStateChange(async (_e, session) => {
+    const { data: sub } = supabase.auth.onAuthStateChange(async (_e: AuthChangeEvent, session: Session | null) => {
+      if (!alive) return;
+
       setUserEmail(session?.user?.email ?? null);
       setAuthLoading(false);
 
-      if (session?.access_token) await fetchEntitlementsForWeek(weekStart);
+      if (session?.access_token) await fetchEntitlementsForWeek(weekStartRef.current);
       else setEnt(null);
     });
 
-    return () => sub.subscription.unsubscribe();
+    return () => {
+      alive = false;
+      sub.subscription.unsubscribe();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supabase]);
 
   useEffect(() => {
-    if (!userEmail) return;
+    if (!userEmail) {
+      setEnt(null);
+      return;
+    }
     fetchEntitlementsForWeek(weekStart);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [weekStart, userEmail]);
@@ -402,7 +429,7 @@ export default function GeneratorPage() {
     return !!weekStart && Number.isFinite(p) && p >= 1 && p <= 6 && Number.isFinite(b) && b >= 1 && b <= 1000;
   }, [people, budget, weekStart]);
 
-  // načítanie uloženého týždňa (tvoje pôvodné)
+  // načítanie uloženého týždňa
   useEffect(() => {
     (async () => {
       setExistingRow(null);
@@ -430,7 +457,6 @@ export default function GeneratorPage() {
   }, [supabase, userEmail, weekStart]);
 
   const usedGenerations = useMemo(() => {
-    // serverové usage z entitlements je pravda
     if (typeof ent?.used === "number") return ent.used;
     const n = existingRow?.generation_count ?? 0;
     return typeof n === "number" && Number.isFinite(n) ? n : 0;
@@ -562,11 +588,9 @@ export default function GeneratorPage() {
   }
 
   async function callGenerateApi(inputPayload: any) {
-    const { data: ss } = await supabase.auth.getSession();
-    const accessToken = ss.session?.access_token;
-
+    const accessToken = await getAccessTokenOrNull();
     if (!accessToken) {
-      return { ok: false as const, status: 401 as const, data: { error: { code: "NOT_LOGGED_IN" } } as any };
+      return { ok: false as const, status: 401 as const, data: { error: { code: "UNAUTHORIZED" } } as any };
     }
 
     const res = await fetch("/api/generate", {
@@ -586,7 +610,6 @@ export default function GeneratorPage() {
   }
 
   async function generateAndAutoSave(payloadOverride?: any) {
-    // ✅ paywall guard
     if (paywalled) {
       window.location.href = "/pricing";
       return;
@@ -638,9 +661,6 @@ export default function GeneratorPage() {
       if (!out.ok) {
         const { title, message, canRetry } = deriveErrorMessage(out.status, out.data);
 
-        // ak je to paywall, ponúkni link na pricing
-        const showPricing = out.status === 402 && out.data?.error?.code === "SUBSCRIPTION_INACTIVE";
-
         setBanner({
           variant: "error",
           title,
@@ -649,11 +669,6 @@ export default function GeneratorPage() {
           canRetry,
           showProfileLink: false,
         });
-
-        if (showPricing) {
-          // jemný redirect hint (bez auto redirectu, user si klikne)
-          // UI tlačidlo aj tak dole nebude “Vygenerovať”
-        }
 
         return;
       }
@@ -727,9 +742,7 @@ export default function GeneratorPage() {
           showProfileLink: true,
         });
 
-        // refresh entitlements (used/remaining)
         await fetchEntitlementsForWeek(weekStart);
-
         return;
       }
 
@@ -782,14 +795,15 @@ export default function GeneratorPage() {
   }
 
   const canGenerate = useMemo(() => {
+    if (authLoading) return false;
+    if (!userEmail) return false; // ✅ bez loginu negenerujeme
     if (!isValid) return false;
-    if (!userEmail) return true;
     if (existingLoading) return false;
     if (entLoading) return false;
     if (paywalled) return false;
     if (remainingGenerations <= 0) return false;
     return true;
-  }, [isValid, userEmail, existingLoading, remainingGenerations, entLoading, paywalled]);
+  }, [authLoading, userEmail, isValid, existingLoading, entLoading, paywalled, remainingGenerations]);
 
   const secondaryPill =
     "rounded-full border px-3 py-1.5 text-xs font-semibold transition disabled:opacity-40 " +
@@ -811,9 +825,7 @@ export default function GeneratorPage() {
         {paywalled ? (
           <div className="mb-6 rounded-3xl p-6 surface-same-as-nav surface-border">
             <div className="text-lg font-bold">Na generovanie potrebuješ členstvo</div>
-            <div className="mt-2 text-sm muted">
-              Najprv si vyber plán a spusti 14-dňový trial.
-            </div>
+            <div className="mt-2 text-sm muted">Najprv si vyber plán a spusti 14-dňový trial.</div>
             <div className="mt-4">
               <Link href="/pricing" className="btn-primary inline-block px-5 py-3">
                 Otvoriť členstvá
@@ -1002,11 +1014,11 @@ export default function GeneratorPage() {
 
               <div className="flex flex-wrap items-center gap-3">
                 <div className="flex flex-wrap items-center gap-2">
-                  <button type="button" onClick={loadSavedFromProfile} disabled={prefLoading || paywalled} className={secondaryPill}>
+                  <button type="button" onClick={loadSavedFromProfile} disabled={prefLoading || paywalled || !userEmail} className={secondaryPill}>
                     {prefLoading ? t.common.loading : t.generator.loadSaved}
                   </button>
 
-                  <button type="button" onClick={saveDefaultsToProfile} disabled={prefLoading || paywalled} className={secondaryPill}>
+                  <button type="button" onClick={saveDefaultsToProfile} disabled={prefLoading || paywalled || !userEmail} className={secondaryPill}>
                     {prefLoading ? t.common.loading : t.generator.saveAsDefault}
                   </button>
                 </div>
@@ -1017,16 +1029,16 @@ export default function GeneratorPage() {
                       Vybrať členstvo
                     </Link>
                   ) : (
-                    <button
-                      disabled={loading || !canGenerate}
-                      className="btn-primary disabled:cursor-not-allowed"
-                      type="submit"
-                    >
+                    <button disabled={loading || !canGenerate} className="btn-primary disabled:cursor-not-allowed" type="submit">
                       {loading ? t.generator.generating : t.generator.generate}
                     </button>
                   )
                 ) : (
-                  <button type="button" onClick={() => (window.location.href = "/login?mode=login&next=" + encodeURIComponent("/generate"))} className="btn-primary">
+                  <button
+                    type="button"
+                    onClick={() => (window.location.href = "/login?mode=login&next=" + encodeURIComponent("/generate"))}
+                    className="btn-primary"
+                  >
                     {t.generator.loginToGenerate}
                   </button>
                 )}

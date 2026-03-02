@@ -193,13 +193,13 @@ export default function LoginClient() {
                     required
                   />
                   <button
-                    type="button"
-                    onClick={() => setShowPassword((v) => !v)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg px-2 py-1 text-xs font-semibold border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-zinc-900 transition"
-                    aria-label={showPassword ? "Skryť heslo" : "Zobraziť heslo"}
-                  >
-                    {showPassword ? "Skryť" : "Zobraziť"}
-                  </button>
+  type="button"
+  onClick={() => setShowPassword((v) => !v)}
+  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg px-2 py-1 text-xs font-semibold border border-gray-300 dark:border-gray-700 bg-white dark:bg-white text-black hover:bg-gray-100 transition"
+  aria-label={showPassword ? "Skryť heslo" : "Zobraziť heslo"}
+>
+  {showPassword ? "Skryť" : "Zobraziť"}
+</button>
                 </div>
               </div>
 
@@ -256,13 +256,13 @@ export default function LoginClient() {
                     required
                   />
                   <button
-                    type="button"
-                    onClick={() => setShowPassword((v) => !v)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg px-2 py-1 text-xs font-semibold border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-zinc-900 transition"
-                    aria-label={showPassword ? "Skryť heslo" : "Zobraziť heslo"}
-                  >
-                    {showPassword ? "Skryť" : "Zobraziť"}
-                  </button>
+  type="button"
+  onClick={() => setShowPassword((v) => !v)}
+  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg px-2 py-1 text-xs font-semibold border border-gray-300 dark:border-gray-700 bg-white dark:bg-white text-black hover:bg-gray-100 transition"
+  aria-label={showPassword ? "Skryť heslo" : "Zobraziť heslo"}
+>
+  {showPassword ? "Skryť" : "Zobraziť"}
+</button>
                 </div>
 
                 {mode === "login" ? (
