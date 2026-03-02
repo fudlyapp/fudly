@@ -61,7 +61,7 @@ export default function LoginClient() {
       if (mode === "forgot") {
         // pošle reset email
         const origin = window.location.origin;
-        const redirectTo = `${origin}/login?mode=reset`;
+        const redirectTo = `${origin}/reset-password`;
         const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
         if (error) throw error;
 
