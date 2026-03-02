@@ -1,7 +1,7 @@
 // src/app/pricing/PricingClient.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
@@ -99,15 +99,19 @@ function Card({
 
 function normalizeSubStatusFromEnt(ent: Entitlements | null): SubStatus {
   if (!ent) return "none";
-  // ako platné berieme len to, čo server reálne dovolí (konzistentné s /api/generate)
   if (!ent.can_generate) return "none";
   if (!ent.has_stripe_link) return "none";
   return ent.plan === "plus" ? "plus" : "basic";
 }
 
 export default function PricingClient() {
-  const supabase = useMemo(() => createSupabaseBrowserClient(), []);
   const sp = useSearchParams();
+
+  // ✅ Supabase vytvor až v useEffect (nie počas SSR renderu)
+  const [supabase, setSupabase] = useState<ReturnType<typeof createSupabaseBrowserClient> | null>(null);
+  useEffect(() => {
+    setSupabase(createSupabaseBrowserClient());
+  }, []);
 
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [loggedIn, setLoggedIn] = useState(false);
@@ -136,6 +140,8 @@ export default function PricingClient() {
 
   // (B) zisti session
   useEffect(() => {
+    if (!supabase) return;
+
     let mounted = true;
 
     (async () => {
@@ -160,6 +166,8 @@ export default function PricingClient() {
   }, [supabase]);
 
   async function getTokenOrLogin(withBuy?: Tier) {
+    if (!supabase) return null;
+
     const { data: s } = await supabase.auth.getSession();
     const token = s.session?.access_token;
 
@@ -173,6 +181,8 @@ export default function PricingClient() {
   }
 
   async function fetchEntitlementsOnce() {
+    if (!supabase) return;
+
     const { data: s } = await supabase.auth.getSession();
     const token = s.session?.access_token;
 
@@ -199,6 +209,8 @@ export default function PricingClient() {
 
   // (C) načítaj entitlements, len ak je user prihlásený
   useEffect(() => {
+    if (!supabase) return;
+
     let mounted = true;
 
     (async () => {
@@ -221,10 +233,12 @@ export default function PricingClient() {
       mounted = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loggedIn]);
+  }, [loggedIn, supabase]);
 
   // (C2) po návrate zo Stripe skúsiť refresh (webhook môže dobiehať)
   useEffect(() => {
+    if (!supabase) return;
+
     const success = sp.get("success");
     if (!loggedIn) return;
     if (success !== "1") return;
@@ -239,7 +253,7 @@ export default function PricingClient() {
       window.clearTimeout(t3);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loggedIn, sp]);
+  }, [loggedIn, sp, supabase]);
 
   async function startCheckout(plan: Tier) {
     setMsg(null);
@@ -290,7 +304,6 @@ export default function PricingClient() {
   async function openPortal() {
     setMsg(null);
 
-    // poistka: portal len keď existuje Stripe link (konzistentné s API)
     if (!ent?.has_stripe_link) {
       setMsg({
         type: "error",
@@ -344,6 +357,8 @@ export default function PricingClient() {
 
   // (D) auto-buy po login-e: /pricing?buy=basic|plus
   useEffect(() => {
+    if (!supabase) return;
+
     const buy = sp.get("buy");
     if (!loggedIn) return;
     if (buy !== "basic" && buy !== "plus") return;
@@ -354,7 +369,7 @@ export default function PricingClient() {
 
     startCheckout(buy);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loggedIn]);
+  }, [loggedIn, sp, supabase]);
 
   const buttonBase =
     "w-full rounded-2xl px-5 py-3 text-center text-sm font-semibold transition disabled:opacity-60 disabled:cursor-not-allowed";
@@ -401,6 +416,10 @@ export default function PricingClient() {
           <h1 className="mt-2 text-3xl font-bold">Vyber si plán</h1>
           <div className="mt-2 text-sm muted">14 dní zdarma • Zrušíš kedykoľvek</div>
         </header>
+
+        {!supabase ? (
+          <div className="mb-6 rounded-2xl p-4 surface-same-as-nav surface-border text-sm muted">Načítavam…</div>
+        ) : null}
 
         {checkingAuth ? (
           <div className="mb-6 rounded-2xl p-4 surface-same-as-nav surface-border text-sm muted">Načítavam…</div>

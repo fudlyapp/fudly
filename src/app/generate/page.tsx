@@ -294,29 +294,13 @@ function CenterModal({
   );
 }
 
-// ✅ helper: nikdy neposielaj NaN do DB (inak skončíš na NULL)
-function toIntOrNull(raw: string, opts?: { min?: number; max?: number }) {
-  const v = (raw ?? "").toString().trim();
-  if (!v) return null;
-  const n = Number(v);
-  if (!Number.isFinite(n)) return null;
-  const i = Math.trunc(n);
-  if (opts?.min != null && i < opts.min) return null;
-  if (opts?.max != null && i > opts.max) return null;
-  return i;
-}
-function toNumOrNull(raw: string, opts?: { min?: number; max?: number }) {
-  const v = (raw ?? "").toString().trim();
-  if (!v) return null;
-  const n = Number(v);
-  if (!Number.isFinite(n)) return null;
-  if (opts?.min != null && n < opts.min) return null;
-  if (opts?.max != null && n > opts.max) return null;
-  return n;
-}
-
 export default function GeneratorPage() {
-  const supabase = useMemo(() => createSupabaseBrowserClient(), []);
+  // ✅ Supabase klient vytvoríme až v browseri (po mount-e), aby build/prerender nepadal
+  const [supabase, setSupabase] = useState<ReturnType<typeof createSupabaseBrowserClient> | null>(null);
+  useEffect(() => {
+    setSupabase(createSupabaseBrowserClient());
+  }, []);
+
   const { t } = useT();
 
   // ✅ SOURCE OF TRUTH: session
@@ -367,36 +351,39 @@ export default function GeneratorPage() {
 
   // ✅ init auth + listener (len raz)
   useEffect(() => {
-    let alive = true;
+  if (!supabase) return;
+  const sb = supabase; // ✅ toto je fix pre TS
 
-    async function initAuth() {
-      setAuthLoading(true);
-      try {
-        const { data } = await supabase.auth.getSession();
-        if (!alive) return;
-        setSession(data.session ?? null);
-      } catch {
-        if (!alive) return;
-        setSession(null);
-      } finally {
-        if (!alive) return;
-        setAuthLoading(false);
-      }
-    }
+  let alive = true;
 
-    initAuth();
-
-    const { data } = supabase.auth.onAuthStateChange((_event: AuthChangeEvent, nextSession: Session | null) => {
+  async function initAuth() {
+    setAuthLoading(true);
+    try {
+      const { data } = await sb.auth.getSession(); // ✅ sb namiesto supabase
       if (!alive) return;
-      setSession(nextSession);
+      setSession(data.session ?? null);
+    } catch {
+      if (!alive) return;
+      setSession(null);
+    } finally {
+      if (!alive) return;
       setAuthLoading(false);
-    });
+    }
+  }
 
-    return () => {
-      alive = false;
-      data.subscription.unsubscribe();
-    };
-  }, [supabase]);
+  initAuth();
+
+  const { data } = sb.auth.onAuthStateChange((_event, nextSession) => {
+    if (!alive) return;
+    setSession(nextSession);
+    setAuthLoading(false);
+  });
+
+  return () => {
+    alive = false;
+    data.subscription.unsubscribe();
+  };
+}, [supabase]);
 
   async function getAccessTokenOrNull() {
     return accessToken ?? null;
@@ -457,8 +444,10 @@ export default function GeneratorPage() {
     return !!weekStart && Number.isFinite(p) && p >= 1 && p <= 6 && Number.isFinite(b) && b >= 1 && b <= 1000;
   }, [people, budget, weekStart]);
 
-  // ✅ načítanie uloženého týždňa (bez getSession)
+  // ✅ načítanie uloženého týždňa
   useEffect(() => {
+    if (!supabase) return;
+
     (async () => {
       setExistingRow(null);
       const user = session?.user;
@@ -495,6 +484,8 @@ export default function GeneratorPage() {
   const paywalled = !!accessToken && !!ent && ent.can_generate === false;
 
   async function loadSavedFromProfile() {
+    if (!supabase) return;
+
     setBanner(null);
     setPrefMsg("");
     setPrefLoading(true);
@@ -548,6 +539,8 @@ export default function GeneratorPage() {
   }
 
   async function saveDefaultsToProfile() {
+    if (!supabase) return;
+
     setBanner(null);
     setPrefMsg("");
     setPrefLoading(true);
@@ -559,18 +552,15 @@ export default function GeneratorPage() {
       return;
     }
 
-    // ✅ bezpečné čísla -> nikdy NaN -> nikdy NULL “náhodou”
     const payload: ProfileRow = {
       user_id: user.id,
       full_name: null,
       language: null,
 
-      people_default: toIntOrNull(people, { min: 1, max: 20 }),
-      weekly_budget_eur_default: toNumOrNull(budget, { min: 1, max: 100000 }),
-      shopping_trips_default: toIntOrNull(shoppingTrips, { min: 1, max: 10 }),
-
-      repeat_days_default: toIntOrNull(repeatDays, { min: 1, max: 7 }),
-
+      people_default: people.trim() ? Number(people) : null,
+      weekly_budget_eur_default: budget.trim() ? Number(budget) : null,
+      shopping_trips_default: shoppingTrips.trim() ? Number(shoppingTrips) : null,
+      repeat_days_default: repeatDays.trim() ? Number(repeatDays) : null,
       style_default: style.trim() || null,
 
       intolerances: intolerances.trim() || null,
@@ -636,6 +626,8 @@ export default function GeneratorPage() {
   }
 
   async function generateAndAutoSave(payloadOverride?: any) {
+    if (!supabase) return;
+
     if (paywalled) {
       window.location.href = "/pricing";
       return;
@@ -823,7 +815,7 @@ export default function GeneratorPage() {
 
   const canGenerate = useMemo(() => {
     if (authLoading) return false;
-    if (!accessToken) return false; // ✅ bez loginu negenerujeme
+    if (!accessToken) return false;
     if (!isValid) return false;
     if (existingLoading) return false;
     if (entLoading) return false;

@@ -1,18 +1,22 @@
 // src/lib/supabase/client.ts
 import { createBrowserClient } from "@supabase/ssr";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 declare global {
   // eslint-disable-next-line no-var
-  var __fudlySupabaseBrowserClient: SupabaseClient | undefined;
+  var __fudlySupabaseClient: SupabaseClient | undefined;
 }
 
+/**
+ * SSR-safe Supabase client.
+ *
+ * - v prehliadači: použije @supabase/ssr createBrowserClient (persist session, cookies/localStorage handling)
+ * - na serveri: vytvorí "plain" supabase-js klienta (bez browser storage),
+ *   aby Next prerender/build nikdy nepadol
+ */
 export function createSupabaseBrowserClient(): SupabaseClient {
-  if (typeof window === "undefined") {
-    throw new Error("createSupabaseBrowserClient() môže byť použité iba v prehliadači (client components).");
-  }
-
-  if (globalThis.__fudlySupabaseBrowserClient) return globalThis.__fudlySupabaseBrowserClient;
+  // Singleton
+  if (globalThis.__fudlySupabaseClient) return globalThis.__fudlySupabaseClient;
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -23,6 +27,18 @@ export function createSupabaseBrowserClient(): SupabaseClient {
     );
   }
 
-  globalThis.__fudlySupabaseBrowserClient = createBrowserClient(url, anon);
-  return globalThis.__fudlySupabaseBrowserClient;
+  const isBrowser = typeof window !== "undefined";
+
+  globalThis.__fudlySupabaseClient = isBrowser
+    ? createBrowserClient(url, anon)
+    : createClient(url, anon, {
+        auth: {
+          // na serveri nechceme localStorage/cookies z browseru
+          persistSession: false,
+          autoRefreshToken: false,
+          detectSessionInUrl: false,
+        },
+      });
+
+  return globalThis.__fudlySupabaseClient;
 }

@@ -103,9 +103,7 @@ function shoppingToTXT(weekStart: string, shopping: any[]) {
 
   for (const t of shopping || []) {
     lines.push(
-      `Nákup ${t.trip} (dni ${t.covers_days}) – odhad: ${t.estimated_cost_eur ?? "—"} € – reálna: ${
-        t.actual_cost_eur ?? "—"
-      } €`
+      `Nákup ${t.trip} (dni ${t.covers_days}) – odhad: ${t.estimated_cost_eur ?? "—"} € – reálna: ${t.actual_cost_eur ?? "—"} €`
     );
     for (const it of t.items || []) lines.push(`- ${it.name} — ${it.quantity}`);
     lines.push("");
@@ -231,7 +229,12 @@ function toIntOrNull(raw: string, opts?: { min?: number; max?: number }) {
 }
 
 export default function ProfilePage() {
-  const supabase = useMemo(() => createSupabaseBrowserClient(), []);
+  // ✅ Supabase klient vytvoríme až v browseri (po mount-e), aby build/prerender nepadal
+  const [supabase, setSupabase] = useState<ReturnType<typeof createSupabaseBrowserClient> | null>(null);
+  useEffect(() => {
+    setSupabase(createSupabaseBrowserClient());
+  }, []);
+
   const { t } = useT();
 
   const [authLoading, setAuthLoading] = useState(true);
@@ -250,7 +253,7 @@ export default function ProfilePage() {
   const [people, setPeople] = useState("");
   const [budget, setBudget] = useState("");
   const [shoppingTrips, setShoppingTrips] = useState("2");
-  const [repeatDays, setRepeatDays] = useState("2"); // ✅ číslo v stringu
+  const [repeatDays, setRepeatDays] = useState("2");
   const [style, setStyle] = useState("lacné");
   const [intolerances, setIntolerances] = useState("");
   const [avoid, setAvoid] = useState("");
@@ -261,6 +264,8 @@ export default function ProfilePage() {
   const [monthFilter, setMonthFilter] = useState<string>("all");
 
   useEffect(() => {
+    if (!supabase) return;
+
     (async () => {
       setAuthLoading(true);
       const { data } = await supabase.auth.getSession();
@@ -277,6 +282,14 @@ export default function ProfilePage() {
   }, [supabase]);
 
   useEffect(() => {
+    if (!supabase) return;
+    if (!email) {
+      // ak nie je login, aspoň ukonči loading
+      setRows([]);
+      setLoading(false);
+      return;
+    }
+
     (async () => {
       setError("");
       setLoading(true);
@@ -303,6 +316,9 @@ export default function ProfilePage() {
   }, [supabase, email]);
 
   useEffect(() => {
+    if (!supabase) return;
+    if (!email) return;
+
     (async () => {
       setPrefMsg("");
       setPrefLoading(true);
@@ -337,7 +353,7 @@ export default function ProfilePage() {
         if (p.people_default != null) setPeople(String(p.people_default));
         if (p.weekly_budget_eur_default != null) setBudget(String(p.weekly_budget_eur_default));
         if (p.shopping_trips_default != null) setShoppingTrips(String(p.shopping_trips_default));
-        if (p.repeat_days_default != null) setRepeatDays(String(p.repeat_days_default)); // ✅ "2"
+        if (p.repeat_days_default != null) setRepeatDays(String(p.repeat_days_default));
 
         const allowed = new Set(STYLE_OPTIONS.map((x) => x.value));
         const incoming = (p.style_default || "").trim();
@@ -468,6 +484,8 @@ export default function ProfilePage() {
   }, [rows, yearFilter, monthFilter]);
 
   async function saveDefaults() {
+    if (!supabase) return;
+
     setPrefMsg("");
     setPrefLoading(true);
 
@@ -492,10 +510,7 @@ export default function ProfilePage() {
         return Number.isFinite(n) && n >= 1 && n <= 100000 ? n : null;
       })(),
       shopping_trips_default: toIntOrNull(shoppingTrips, { min: 1, max: 10 }),
-
-      // ✅ kľúčové: nikdy neposielame NaN
       repeat_days_default: toIntOrNull(repeatDays, { min: 1, max: 7 }),
-
       style_default: style.trim() || null,
 
       intolerances: intolerances.trim() || null,
@@ -648,7 +663,6 @@ export default function ProfilePage() {
                   </Field>
 
                   <Field label="Varenie na viac dní">
-                    {/* ✅ hodnoty sú čísla */}
                     <select value={repeatDays} onChange={(e) => setRepeatDays(e.target.value)} className="input-surface">
                       <option value="1">1 deň</option>
                       <option value="2">2 dni</option>
@@ -659,12 +673,7 @@ export default function ProfilePage() {
 
                 <div className="mt-4 grid grid-cols-1 gap-4">
                   <Field label="Intolerancie (tvrdý zákaz)">
-                    <input
-                      value={intolerances}
-                      onChange={(e) => setIntolerances(e.target.value)}
-                      className="input-surface"
-                      placeholder="laktóza, arašidy"
-                    />
+                    <input value={intolerances} onChange={(e) => setIntolerances(e.target.value)} className="input-surface" placeholder="laktóza, arašidy" />
                   </Field>
 
                   <Field label="Vyhnúť sa">
@@ -728,8 +737,7 @@ export default function ProfilePage() {
                                     Týždeň {formatDateSK(r.week_start)} – {formatDateSK(weekEnd)}
                                   </div>
                                   <div className="mt-1 text-sm muted-2">
-                                    {r.is_edited ? "Upravené" : "Generované"} {bud ? `• Budget: ${bud} €` : ""}{" "}
-                                    {est ? `• Odhad: ${est} €` : ""}
+                                    {r.is_edited ? "Upravené" : "Generované"} {bud ? `• Budget: ${bud} €` : ""} {est ? `• Odhad: ${est} €` : ""}
                                   </div>
                                 </div>
                                 <div className="text-sm muted-2 shrink-0">Otvor</div>
@@ -751,7 +759,6 @@ export default function ProfilePage() {
                     <h2 className="text-xl font-semibold">Uložené nákupy</h2>
                     <p className="mt-1 text-sm muted">Filtrovanie + export zatiaľ iba TXT.</p>
                   </div>
-                  {/* odstránené duplicitné CTA */}
                 </div>
 
                 {loading ? <div className="mt-4 text-sm muted-2">Načítavam…</div> : null}
@@ -764,9 +771,7 @@ export default function ProfilePage() {
                 <div className="mt-4 space-y-6">
                   {shoppingWeeksFiltered.map((g) => (
                     <div key={g.ym}>
-                      <div className="text-sm muted-2 mb-3">
-                        {g.ym === "Neznámy" ? "Neznámy dátum" : `Mesiac: ${ymLabel(g.ym)}`}
-                      </div>
+                      <div className="text-sm muted-2 mb-3">{g.ym === "Neznámy" ? "Neznámy dátum" : `Mesiac: ${ymLabel(g.ym)}`}</div>
 
                       <div className="grid grid-cols-1 gap-4">
                         {g.items.map(({ r, plan, shopping }) => {
@@ -857,9 +862,7 @@ export default function ProfilePage() {
                 {loading ? <div className="mt-4 text-sm muted-2">Načítavam…</div> : null}
                 {error ? <div className="mt-4 text-sm text-red-500">Chyba: {error}</div> : null}
 
-                {!loading && !error && caloriesWeeksFiltered.length === 0 ? (
-                  <div className="mt-4 muted">Pre tento filter nemáš uložené kalórie.</div>
-                ) : null}
+                {!loading && !error && caloriesWeeksFiltered.length === 0 ? <div className="mt-4 muted">Pre tento filter nemáš uložené kalórie.</div> : null}
 
                 <div className="mt-4 space-y-6">
                   {caloriesWeeksFiltered.map((g) => (
@@ -881,8 +884,7 @@ export default function ProfilePage() {
                                     Týždeň {formatDateSK(r.week_start)} – {formatDateSK(weekEnd)}
                                   </div>
                                   <div className="mt-1 text-sm muted-2">
-                                    Priemer: <span className="font-semibold">{typeof avg === "number" ? avg : "—"}</span> kcal/deň{" "}
-                                    {" • "}
+                                    Priemer: <span className="font-semibold">{typeof avg === "number" ? avg : "—"}</span> kcal/deň {" • "}
                                     Týždeň: <span className="font-semibold">{typeof weekly === "number" ? weekly : "—"}</span> kcal
                                   </div>
                                 </div>

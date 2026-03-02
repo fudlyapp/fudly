@@ -3,7 +3,7 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import ThemeToggle from "@/components/ThemeToggle";
 
@@ -44,18 +44,25 @@ function PrimaryNavLink({ href, label, onClick }: { href: string; label: string;
 }
 
 export default function TopNav() {
-  const supabase = useMemo(() => createSupabaseBrowserClient(), []);
+  const supabaseRef = useRef<ReturnType<typeof createSupabaseBrowserClient> | null>(null);
+
   const [email, setEmail] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
 
+  const closeMobile = () => setMobileOpen(false);
+
   useEffect(() => {
     let alive = true;
+
+    // ✅ supabase klient vytvoríme až po mount-e (100% browser-only)
+    const sb = createSupabaseBrowserClient();
+    supabaseRef.current = sb;
 
     async function init() {
       setAuthLoading(true);
       try {
-        const { data } = await supabase.auth.getSession();
+        const { data } = await sb.auth.getSession();
         if (!alive) return;
         setEmail(data.session?.user?.email ?? null);
       } catch {
@@ -69,7 +76,7 @@ export default function TopNav() {
 
     init();
 
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+    const { data: sub } = sb.auth.onAuthStateChange((_e, session) => {
       if (!alive) return;
       setEmail(session?.user?.email ?? null);
       setAuthLoading(false);
@@ -79,16 +86,17 @@ export default function TopNav() {
       alive = false;
       sub.subscription.unsubscribe();
     };
-  }, [supabase]);
+  }, []);
 
   const isLoggedIn = !!email;
 
   async function logout() {
-    await supabase.auth.signOut();
-    window.location.href = "/login";
+    try {
+      await supabaseRef.current?.auth.signOut();
+    } finally {
+      window.location.href = "/login";
+    }
   }
-
-  const closeMobile = () => setMobileOpen(false);
 
   return (
     <div className="sticky top-0 z-50 border-b border-gray-200 bg-white/80 backdrop-blur dark:border-gray-800 dark:bg-black/70">
