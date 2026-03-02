@@ -342,14 +342,8 @@ export default function GeneratorPage() {
   const [ent, setEnt] = useState<Entitlements | null>(null);
 
   async function getAccessTokenOrNull() {
-    let { data: ss } = await supabase.auth.getSession();
-    let token = ss.session?.access_token ?? null;
-
-    if (!token) {
-      const refreshed = await supabase.auth.refreshSession();
-      token = refreshed.data.session?.access_token ?? null;
-    }
-    return token;
+  const { data } = await supabase.auth.getSession();
+  return data.session?.access_token ?? null;
   }
 
   async function fetchEntitlementsForWeek(ws: string) {
@@ -371,41 +365,60 @@ export default function GeneratorPage() {
       setEntLoading(false);
     }
   }
+    useEffect(() => {
+  let alive = true;
 
-  useEffect(() => {
-    let alive = true;
+  async function initAuth() {
+    if (!alive) return;
+    setAuthLoading(true);
 
-    (async () => {
-      setAuthLoading(true);
-      const token = await getAccessTokenOrNull();
-
+    try {
+      const { data } = await supabase.auth.getSession();
       if (!alive) return;
 
-      const { data } = await supabase.auth.getSession();
-      setUserEmail(data.session?.user?.email ?? null);
+      const session = data.session ?? null;
+      setUserEmail(session?.user?.email ?? null);
+
+      if (session?.access_token) {
+        await fetchEntitlementsForWeek(weekStartRef.current);
+      } else {
+        setEnt(null);
+      }
+    } catch {
+      if (!alive) return;
+      setUserEmail(null);
+      setEnt(null);
+    } finally {
+      if (!alive) return;
       setAuthLoading(false);
+    }
+  }
 
-      if (token) await fetchEntitlementsForWeek(weekStartRef.current);
-      else setEnt(null);
-    })();
+  initAuth();
 
-    const { data: sub } = supabase.auth.onAuthStateChange(async (_e: AuthChangeEvent, session: Session | null) => {
+  const { data } = supabase.auth.onAuthStateChange(
+    async (_event: AuthChangeEvent, session: Session | null) => {
       if (!alive) return;
 
       setUserEmail(session?.user?.email ?? null);
       setAuthLoading(false);
 
-      if (session?.access_token) await fetchEntitlementsForWeek(weekStartRef.current);
-      else setEnt(null);
-    });
+      if (session?.access_token) {
+        await fetchEntitlementsForWeek(weekStartRef.current);
+      } else {
+        setEnt(null);
+      }
+    }
+  );
 
-    return () => {
-      alive = false;
-      sub.subscription.unsubscribe();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [supabase]);
-
+  return () => {
+    alive = false;
+    data.subscription.unsubscribe();
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [supabase]);
+  
+  
   useEffect(() => {
     if (!userEmail) {
       setEnt(null);
@@ -1023,25 +1036,36 @@ export default function GeneratorPage() {
                   </button>
                 </div>
 
-                {userEmail ? (
-                  paywalled ? (
-                    <Link href="/pricing" className="btn-primary px-5 py-3 text-sm font-semibold">
-                      Vybrať členstvo
-                    </Link>
-                  ) : (
-                    <button disabled={loading || !canGenerate} className="btn-primary disabled:cursor-not-allowed" type="submit">
-                      {loading ? t.generator.generating : t.generator.generate}
-                    </button>
-                  )
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => (window.location.href = "/login?mode=login&next=" + encodeURIComponent("/generate"))}
-                    className="btn-primary"
-                  >
-                    {t.generator.loginToGenerate}
-                  </button>
-                )}
+                {authLoading ? (
+  <button disabled className="btn-primary opacity-60 cursor-not-allowed">
+    Kontrolujem prihlásenie…
+  </button>
+) : userEmail ? (
+  paywalled ? (
+    <Link href="/pricing" className="btn-primary px-5 py-3 text-sm font-semibold">
+      Vybrať členstvo
+    </Link>
+  ) : (
+    <button
+      disabled={loading || !canGenerate}
+      className="btn-primary disabled:cursor-not-allowed"
+      type="submit"
+    >
+      {loading ? t.generator.generating : t.generator.generate}
+    </button>
+  )
+) : (
+  <button
+    type="button"
+    onClick={() =>
+      (window.location.href =
+        "/login?mode=login&next=" + encodeURIComponent("/generate"))
+    }
+    className="btn-primary"
+  >
+    {t.generator.loginToGenerate}
+  </button>
+)}
               </div>
             </div>
 
