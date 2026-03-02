@@ -1,4 +1,3 @@
-// src/app/pricing/PricingClient.tsx
 "use client";
 
 import React, { useEffect, useState } from "react";
@@ -9,8 +8,9 @@ type Tier = "basic" | "plus";
 type SubStatus = "none" | "basic" | "plus";
 
 type Entitlements = {
-  plan: "basic" | "plus";
-  status: string;
+  plan: "basic" | "plus" | null;
+  status: string; // "none" | "trialing" | ...
+  active_like: boolean;
   can_generate: boolean;
   weekly_limit: number;
   used: number;
@@ -19,7 +19,7 @@ type Entitlements = {
   allowed_styles: string[];
   trial_until: string | null;
   current_period_end: string | null;
-  has_stripe_link: boolean;
+  has_stripe_link: boolean; // customer id exists
 };
 
 const CHECKOUT_ENDPOINT = "/api/stripe/create_checkout_session";
@@ -97,16 +97,17 @@ function Card({
   );
 }
 
-function normalizeSubStatusFromEnt(ent: Entitlements | null): SubStatus {
+function normalizeSubStatus(ent: Entitlements | null): SubStatus {
   if (!ent) return "none";
-  if (!ent.has_stripe_link) return "none"; // ✅ bez Stripe väzby sa tvárime ako "no sub"
+  if (!ent.plan) return "none";
+  // ✅ subStatus berieme podľa active_like (trial/active), nie podľa existencie customer id
+  if (!ent.active_like) return "none";
   return ent.plan === "plus" ? "plus" : "basic";
 }
 
 export default function PricingClient() {
   const sp = useSearchParams();
 
-  // ✅ Supabase vytvor až v useEffect
   const [supabase, setSupabase] = useState<ReturnType<typeof createSupabaseBrowserClient> | null>(null);
   useEffect(() => {
     setSupabase(createSupabaseBrowserClient());
@@ -121,7 +122,6 @@ export default function PricingClient() {
   const [busy, setBusy] = useState<null | "basic" | "plus" | "portal">(null);
   const [msg, setMsg] = useState<{ type: "success" | "error" | "info"; text: string } | null>(null);
 
-  // success/canceled paramy z checkoutu
   useEffect(() => {
     const success = sp.get("success");
     const canceled = sp.get("canceled");
@@ -136,7 +136,6 @@ export default function PricingClient() {
     }
   }, [sp]);
 
-  // session
   useEffect(() => {
     if (!supabase) return;
 
@@ -202,11 +201,11 @@ export default function PricingClient() {
       return;
     }
 
-    setEnt(data as Entitlements);
-    setSubStatus(normalizeSubStatusFromEnt(data as Entitlements));
+    const e = data as Entitlements;
+    setEnt(e);
+    setSubStatus(normalizeSubStatus(e));
   }
 
-  // načítaj entitlements
   useEffect(() => {
     if (!supabase) return;
 
@@ -234,7 +233,6 @@ export default function PricingClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loggedIn, supabase]);
 
-  // po návrate zo Stripe: refresh párkrát (webhook dobieha)
   useEffect(() => {
     if (!supabase) return;
 
@@ -271,24 +269,16 @@ export default function PricingClient() {
         body: JSON.stringify({ plan }),
       });
 
-      let data: any = null;
-      try {
-        data = await res.json();
-      } catch {
-        data = null;
-      }
+      const data = await res.json().catch(() => null);
 
       if (!res.ok) {
-        setMsg({
-          type: "error",
-          text: `Nepodarilo sa spustiť platbu. (${data?.error ?? `HTTP ${res.status}`})`,
-        });
+        setMsg({ type: "error", text: `Nepodarilo sa spustiť platbu. (${data?.error ?? `HTTP ${res.status}`})` });
         return;
       }
 
       const url = data?.url;
       if (!url) {
-        setMsg({ type: "error", text: "Nepodarilo sa spustiť platbu. (Chýba url v odpovedi servera.)" });
+        setMsg({ type: "error", text: "Nepodarilo sa spustiť platbu. (Chýba url.)" });
         return;
       }
 
@@ -303,11 +293,11 @@ export default function PricingClient() {
   async function openPortal() {
     setMsg(null);
 
-    // ✅ nepúšťaj portal, ak user nemá stripe väzbu
+    // ✅ ak nemáme stripe link, nedáva zmysel volať portal
     if (!ent?.has_stripe_link) {
       setMsg({
-        type: "info",
-        text: "Spravovanie predplatného je dostupné až po prvom zakúpení (keď vznikne Stripe zákazník).",
+        type: "error",
+        text: "Správa predplatného zatiaľ nie je dostupná (chýba Stripe customer). Skús obnoviť stránku o pár sekúnd.",
       });
       return;
     }
@@ -325,18 +315,10 @@ export default function PricingClient() {
         },
       });
 
-      let data: any = null;
-      try {
-        data = await res.json();
-      } catch {
-        data = null;
-      }
+      const data = await res.json().catch(() => null);
 
       if (!res.ok) {
-        setMsg({
-          type: "error",
-          text: `Nepodarilo sa otvoriť Stripe portal. (${data?.error ?? `HTTP ${res.status}`})`,
-        });
+        setMsg({ type: "error", text: `Nepodarilo sa otvoriť Stripe portal. (${data?.error ?? `HTTP ${res.status}`})` });
         return;
       }
 
@@ -354,7 +336,6 @@ export default function PricingClient() {
     }
   }
 
-  // auto-buy po login-e: /pricing?buy=basic|plus
   useEffect(() => {
     if (!supabase) return;
 
@@ -375,18 +356,16 @@ export default function PricingClient() {
   const btnPrimary = "btn-primary " + buttonBase;
   const btnSecondary = buttonBase + " border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-zinc-900";
 
-  const canManage = !!ent?.has_stripe_link;
-
   const isBasic = subStatus === "basic";
   const isPlus = subStatus === "plus";
   const isNone = subStatus === "none";
 
   const basicCta = isPlus ? (
-    <button type="button" className={btnSecondary} disabled={!canManage || busy !== null} onClick={openPortal}>
-      {busy === "portal" ? "Otváram…" : "Prejsť na BASIC"}
+    <button type="button" className={btnSecondary} disabled>
+      Aktívny plán: PLUS
     </button>
   ) : isBasic ? (
-    <button type="button" className={btnPrimary} disabled={!canManage || busy !== null} onClick={openPortal}>
+    <button type="button" className={btnPrimary} disabled={busy !== null} onClick={openPortal}>
       {busy === "portal" ? "Otváram…" : "Spravovať predplatné"}
     </button>
   ) : (
@@ -396,7 +375,7 @@ export default function PricingClient() {
   );
 
   const plusCta = isPlus ? (
-    <button type="button" className={btnPrimary} disabled={!canManage || busy !== null} onClick={openPortal}>
+    <button type="button" className={btnPrimary} disabled={busy !== null} onClick={openPortal}>
       {busy === "portal" ? "Otváram…" : "Spravovať predplatné"}
     </button>
   ) : isBasic ? (
@@ -417,17 +396,13 @@ export default function PricingClient() {
           <h1 className="mt-2 text-3xl font-bold">Vyber si plán</h1>
           <div className="mt-2 text-sm muted">14 dní zdarma • Zrušíš kedykoľvek</div>
 
-          {/* ✅ “Aktuálny plán” ukáž iba ak naozaj existuje Stripe väzba */}
-          {loggedIn && ent?.has_stripe_link ? (
+          {loggedIn && ent?.plan ? (
             <div className="mt-3 text-xs muted-2">
               Aktuálny plán: <span className="font-semibold">{ent.plan.toUpperCase()}</span>
-              {ent.current_period_end ? (
-                <>
-                  {" "}
-                  • obdobie do: <span className="font-semibold">{ent.current_period_end}</span>
-                </>
-              ) : null}
+              {ent.status ? <> • stav: <span className="font-semibold">{ent.status}</span></> : null}
             </div>
+          ) : loggedIn ? (
+            <div className="mt-3 text-xs muted-2">Aktuálny plán: <span className="font-semibold">ŽIADNY</span></div>
           ) : null}
         </header>
 
@@ -454,12 +429,7 @@ export default function PricingClient() {
             subtitle="Pre rýchly štart"
             price="9 €"
             period="mesačne"
-            features={[
-              "3 generovania týždenne",
-              "Jedálniček + nákupný zoznam",
-              "Recepty ku všetkým jedlám",
-              "Uloženie do profilu",
-            ]}
+            features={["3 generovania týždenne", "Jedálniček + nákupný zoznam", "Recepty ku všetkým jedlám", "Uloženie do profilu"]}
             cta={basicCta}
             ctaNote={isNone ? "14 dní zdarma • Zrušíš kedykoľvek" : "Správa prebieha cez Stripe"}
           />
@@ -471,12 +441,7 @@ export default function PricingClient() {
             price="13 €"
             period="mesačne"
             highlighted
-            features={[
-              "5 generovaní týždenne",
-              "Viac štýlov (Fit / Tradičné / Exotické)",
-              "Kalórie na osobu",
-              "Finančný prehľad",
-            ]}
+            features={["5 generovaní týždenne", "Viac štýlov (Fit / Tradičné / Exotické)", "Kalórie na osobu", "Finančný prehľad"]}
             cta={plusCta}
             ctaNote={isNone ? "14 dní zdarma • Zrušíš kedykoľvek" : "Správa prebieha cez Stripe"}
           />

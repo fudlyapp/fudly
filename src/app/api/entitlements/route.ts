@@ -1,4 +1,3 @@
-// src/app/api/entitlements/route.ts
 import { NextResponse } from "next/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -6,7 +5,7 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 type Plan = "basic" | "plus";
-type Status = "inactive" | "trialing" | "active" | "past_due" | "canceled";
+type Status = "none" | "inactive" | "trialing" | "active" | "past_due" | "canceled";
 
 function planLimits(plan: Plan) {
   if (plan === "plus") {
@@ -39,21 +38,16 @@ export async function GET(req: Request) {
   try {
     const auth = req.headers.get("authorization") || "";
     const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+
     if (!token) {
-      return NextResponse.json(
-        { error: "Missing token" },
-        { status: 401, headers: { "Cache-Control": "no-store" } }
-      );
+      return NextResponse.json({ error: "Missing token" }, { status: 401, headers: { "Cache-Control": "no-store" } });
     }
 
     const supabase = createSupabaseAdminClient();
 
     const { data: userRes, error: userErr } = await supabase.auth.getUser(token);
     if (userErr || !userRes?.user) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401, headers: { "Cache-Control": "no-store" } }
-      );
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: { "Cache-Control": "no-store" } });
     }
 
     const userId = userRes.user.id;
@@ -66,29 +60,25 @@ export async function GET(req: Request) {
       .maybeSingle();
 
     if (subErr) {
-      return NextResponse.json(
-        { error: subErr.message },
-        { status: 500, headers: { "Cache-Control": "no-store" } }
-      );
+      return NextResponse.json({ error: subErr.message }, { status: 500, headers: { "Cache-Control": "no-store" } });
     }
 
-    // ✅ Nemá nič v subscriptions -> “bez predplatného”
-    // (plan nech je default "basic", ale bez stripe linku a bez can_generate)
+    // ✅ nový user bez subscription riadku
     if (!subRow) {
-      const limits = planLimits("basic");
       return NextResponse.json(
         {
-          plan: "basic",
-          status: "inactive",
+          plan: null as any,
+          status: "none" as Status,
+          active_like: false,
           can_generate: false,
-          weekly_limit: limits.weekly_limit,
+          weekly_limit: 0,
           used: 0,
-          remaining: limits.weekly_limit,
-          calories_enabled: limits.calories_enabled,
-          allowed_styles: limits.allowed_styles,
+          remaining: 0,
+          calories_enabled: false,
+          allowed_styles: [],
           trial_until: null,
           current_period_end: null,
-          has_stripe_link: false,
+          has_stripe_link: false, // portal nemá z čoho
         },
         { headers: { "Cache-Control": "no-store" } }
       );
@@ -99,13 +89,15 @@ export async function GET(req: Request) {
     const current_period_end = subRow.current_period_end ?? null;
     const trial_until = subRow.trial_until ?? null;
 
-    const has_stripe_link = !!(subRow.stripe_customer_id || subRow.stripe_subscription_id);
+    // ✅ portal potrebuje customer id
+    const has_stripe_link = !!subRow.stripe_customer_id;
 
     const limits = planLimits(plan);
-    const activeLike = isActiveLike(status, now, current_period_end, trial_until);
+    const active_like = isActiveLike(status, now, current_period_end, trial_until);
 
-    // ✅ generovanie len ak active/trial + má stripe väzbu
-    const can_generate = activeLike && has_stripe_link;
+    // ✅ GENEROVANIE NEVIAŽ na stripe_customer_id
+    // trial/active = stačí. (Stripe link riešime osobitne pre portal.)
+    const can_generate = active_like;
 
     // usage (voliteľné)
     const url = new URL(req.url);
@@ -129,6 +121,7 @@ export async function GET(req: Request) {
       {
         plan,
         status,
+        active_like,
         can_generate,
         weekly_limit: limits.weekly_limit,
         used,
