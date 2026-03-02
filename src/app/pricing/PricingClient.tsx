@@ -9,7 +9,7 @@ type Tier = "basic" | "plus";
 type SubStatus = "none" | "basic" | "plus";
 
 type Entitlements = {
-  plan: "basic" | "plus";
+  plan: "basic" | "plus" ; // ✅ bez null
   status: string;
   can_generate: boolean;
   weekly_limit: number;

@@ -65,23 +65,20 @@ export async function GET(req: Request) {
 
     // ak nič nemá -> paywall (ako BASIC)
     if (!subRow) {
-      const limits = planLimits("basic");
-      return NextResponse.json(
-        {
-          plan: "basic",
-          status: "inactive",
-          can_generate: false,
-          weekly_limit: limits.weekly_limit,
-          used: 0,
-          remaining: limits.weekly_limit,
-          calories_enabled: limits.calories_enabled,
-          allowed_styles: limits.allowed_styles,
-          trial_until: null,
-          current_period_end: null,
-          has_stripe_link: false,
-        },
-        { headers: { "Cache-Control": "no-store" } }
-      );
+  return NextResponse.json({
+    plan: null,
+    status: "none",
+    can_generate: false,
+    weekly_limit: 0,
+    used: 0,
+    remaining: 0,
+    calories_enabled: false,
+    allowed_styles: [],
+    trial_until: null,
+    current_period_end: null,
+    has_stripe_link: false,
+  });
+
     }
 
     const plan: Plan = (subRow.plan as Plan) || "basic";
