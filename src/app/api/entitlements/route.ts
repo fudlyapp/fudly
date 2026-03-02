@@ -2,6 +2,9 @@
 import { NextResponse } from "next/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
 type Plan = "basic" | "plus";
 type Status = "inactive" | "trialing" | "active" | "past_due" | "canceled";
 
@@ -36,12 +39,16 @@ export async function GET(req: Request) {
   try {
     const auth = req.headers.get("authorization") || "";
     const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-    if (!token) return NextResponse.json({ error: "Missing token" }, { status: 401 });
+    if (!token) {
+      return NextResponse.json({ error: "Missing token" }, { status: 401, headers: { "Cache-Control": "no-store" } });
+    }
 
     const supabase = createSupabaseAdminClient();
 
     const { data: userRes, error: userErr } = await supabase.auth.getUser(token);
-    if (userErr || !userRes?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (userErr || !userRes?.user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: { "Cache-Control": "no-store" } });
+    }
 
     const userId = userRes.user.id;
     const now = new Date();
@@ -53,25 +60,28 @@ export async function GET(req: Request) {
       .maybeSingle();
 
     if (subErr) {
-      return NextResponse.json({ error: subErr.message }, { status: 500 });
+      return NextResponse.json({ error: subErr.message }, { status: 500, headers: { "Cache-Control": "no-store" } });
     }
 
-    // ak nič nemá -> paywall
+    // ak nič nemá -> paywall (ako BASIC)
     if (!subRow) {
       const limits = planLimits("basic");
-      return NextResponse.json({
-        plan: "basic",
-        status: "inactive",
-        can_generate: false,
-        weekly_limit: limits.weekly_limit,
-        used: 0,
-        remaining: limits.weekly_limit,
-        calories_enabled: limits.calories_enabled,
-        allowed_styles: limits.allowed_styles,
-        trial_until: null,
-        current_period_end: null,
-        has_stripe_link: false,
-      });
+      return NextResponse.json(
+        {
+          plan: "basic",
+          status: "inactive",
+          can_generate: false,
+          weekly_limit: limits.weekly_limit,
+          used: 0,
+          remaining: limits.weekly_limit,
+          calories_enabled: limits.calories_enabled,
+          allowed_styles: limits.allowed_styles,
+          trial_until: null,
+          current_period_end: null,
+          has_stripe_link: false,
+        },
+        { headers: { "Cache-Control": "no-store" } }
+      );
     }
 
     const plan: Plan = (subRow.plan as Plan) || "basic";
@@ -84,6 +94,7 @@ export async function GET(req: Request) {
     const limits = planLimits(plan);
     const activeLike = isActiveLike(status, now, current_period_end, trial_until);
 
+    // Pozn.: generovanie iba ak je aktívne/trial a máme Stripe link
     const can_generate = activeLike && has_stripe_link;
 
     // usage (voliteľné)
@@ -104,20 +115,23 @@ export async function GET(req: Request) {
 
     const remaining = Math.max(0, limits.weekly_limit - used);
 
-    return NextResponse.json({
-      plan,
-      status,
-      can_generate,
-      weekly_limit: limits.weekly_limit,
-      used,
-      remaining,
-      calories_enabled: limits.calories_enabled,
-      allowed_styles: limits.allowed_styles,
-      trial_until,
-      current_period_end,
-      has_stripe_link,
-    });
+    return NextResponse.json(
+      {
+        plan,
+        status,
+        can_generate,
+        weekly_limit: limits.weekly_limit,
+        used,
+        remaining,
+        calories_enabled: limits.calories_enabled,
+        allowed_styles: limits.allowed_styles,
+        trial_until,
+        current_period_end,
+        has_stripe_link,
+      },
+      { headers: { "Cache-Control": "no-store" } }
+    );
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? "Unknown error" }, { status: 500 });
+    return NextResponse.json({ error: e?.message ?? "Unknown error" }, { status: 500, headers: { "Cache-Control": "no-store" } });
   }
 }

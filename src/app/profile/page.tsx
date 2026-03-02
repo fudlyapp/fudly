@@ -34,6 +34,20 @@ type ProfileRow = {
   favorites: string | null;
 };
 
+type Entitlements = {
+  plan: "basic" | "plus";
+  status: string;
+  can_generate: boolean;
+  weekly_limit: number;
+  used: number;
+  remaining: number;
+  calories_enabled: boolean;
+  allowed_styles: string[];
+  trial_until: string | null;
+  current_period_end: string | null;
+  has_stripe_link: boolean;
+};
+
 type TabKey = "defaults" | "plans" | "shopping" | "calories" | "finance";
 
 type StyleOption = {
@@ -103,7 +117,9 @@ function shoppingToTXT(weekStart: string, shopping: any[]) {
 
   for (const t of shopping || []) {
     lines.push(
-      `Nákup ${t.trip} (dni ${t.covers_days}) – odhad: ${t.estimated_cost_eur ?? "—"} € – reálna: ${t.actual_cost_eur ?? "—"} €`
+      `Nákup ${t.trip} (dni ${t.covers_days}) – odhad: ${t.estimated_cost_eur ?? "—"} € – reálna: ${
+        t.actual_cost_eur ?? "—"
+      } €`
     );
     for (const it of t.items || []) lines.push(`- ${it.name} — ${it.quantity}`);
     lines.push("");
@@ -173,22 +189,26 @@ function TabButton({
   active,
   onClick,
   children,
+  locked,
 }: {
   active: boolean;
   onClick: () => void;
   children: React.ReactNode;
+  locked?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
       className={[
-        "rounded-full px-4 py-2 text-sm font-semibold transition border whitespace-nowrap",
+        "rounded-full px-4 py-2 text-sm font-semibold transition border whitespace-nowrap flex items-center gap-2",
         active
           ? "bg-black text-white border-black dark:bg-white dark:text-black dark:border-white"
           : "bg-transparent border-gray-300 text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-zinc-900",
+        locked ? "opacity-80" : "",
       ].join(" ")}
     >
+      {locked ? <span title="Len pre PLUS">🔒</span> : null}
       {children}
     </button>
   );
@@ -216,7 +236,6 @@ function computeActualFromTrips(plan: any) {
   return { sum: any ? Number(sum.toFixed(2)) : null, missing, totalTrips };
 }
 
-// ✅ malé helpery na bezpečné čísla (aby si nikdy neposlal NaN -> NULL)
 function toIntOrNull(raw: string, opts?: { min?: number; max?: number }) {
   const v = (raw ?? "").toString().trim();
   if (!v) return null;
@@ -228,17 +247,25 @@ function toIntOrNull(raw: string, opts?: { min?: number; max?: number }) {
   return i;
 }
 
-export default function ProfilePage() {
-  // ✅ Supabase klient vytvoríme až v browseri (po mount-e), aby build/prerender nepadal
-  const [supabase, setSupabase] = useState<ReturnType<typeof createSupabaseBrowserClient> | null>(null);
-  useEffect(() => {
-    setSupabase(createSupabaseBrowserClient());
-  }, []);
+// vezmeme "nejaký" week_start len na entitlements call (ak nemá nič, dáme dnešný pondelok fallback)
+function mondayISO(d: Date) {
+  const x = new Date(d);
+  const day = x.getDay();
+  const diff = (day + 6) % 7;
+  x.setDate(x.getDate() - diff);
+  const yyyy = x.getFullYear();
+  const mm = String(x.getMonth() + 1).padStart(2, "0");
+  const dd = String(x.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
 
+export default function ProfilePage() {
+  const supabase = useMemo(() => createSupabaseBrowserClient(), []);
   const { t } = useT();
 
   const [authLoading, setAuthLoading] = useState(true);
   const [email, setEmail] = useState<string | null>(null);
+  const [accessToken, setAccessToken] = useState<string | null>(null);
 
   const [tab, setTab] = useState<TabKey>("plans");
 
@@ -263,18 +290,49 @@ export default function ProfilePage() {
   const [yearFilter, setYearFilter] = useState<string>("all");
   const [monthFilter, setMonthFilter] = useState<string>("all");
 
-  useEffect(() => {
-    if (!supabase) return;
+  // ✅ entitlements (na zamknutie tabov)
+  const [entLoading, setEntLoading] = useState(false);
+  const [ent, setEnt] = useState<Entitlements | null>(null);
 
+  const isPlus = (ent?.plan ?? "basic") === "plus";
+  const caloriesEnabled = !!ent?.calories_enabled && isPlus;
+
+  async function fetchEntitlements(signal?: AbortSignal) {
+    if (!accessToken) {
+      setEnt(null);
+      return;
+    }
+
+    const ws = rows?.[0]?.week_start ?? mondayISO(new Date());
+    setEntLoading(true);
+    try {
+      const res = await fetch(`/api/entitlements?week_start=${encodeURIComponent(ws)}&t=${Date.now()}`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        cache: "no-store",
+        signal,
+      });
+
+      const data = await res.json().catch(() => null);
+      if (!signal?.aborted) setEnt(res.ok && data ? (data as Entitlements) : null);
+    } catch (e: any) {
+      if (e?.name !== "AbortError") setEnt(null);
+    } finally {
+      if (!signal?.aborted) setEntLoading(false);
+    }
+  }
+
+  useEffect(() => {
     (async () => {
       setAuthLoading(true);
       const { data } = await supabase.auth.getSession();
       setEmail(data.session?.user?.email ?? null);
+      setAccessToken(data.session?.access_token ?? null);
       setAuthLoading(false);
     })();
 
     const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
       setEmail(session?.user?.email ?? null);
+      setAccessToken(session?.access_token ?? null);
       setAuthLoading(false);
     });
 
@@ -282,14 +340,6 @@ export default function ProfilePage() {
   }, [supabase]);
 
   useEffect(() => {
-    if (!supabase) return;
-    if (!email) {
-      // ak nie je login, aspoň ukonči loading
-      setRows([]);
-      setLoading(false);
-      return;
-    }
-
     (async () => {
       setError("");
       setLoading(true);
@@ -315,10 +365,20 @@ export default function ProfilePage() {
     })();
   }, [supabase, email]);
 
+  // ✅ po načítaní session/token alebo zoznamu plánov: natiahni entitlements
   useEffect(() => {
-    if (!supabase) return;
-    if (!email) return;
+    const ac = new AbortController();
+    fetchEntitlements(ac.signal);
+    return () => ac.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accessToken, rows.length]);
 
+  // ✅ ak nie je PLUS, nedovoľ aby zostal zvolený calories tab
+  useEffect(() => {
+    if (tab === "calories" && !caloriesEnabled) setTab("plans");
+  }, [tab, caloriesEnabled]);
+
+  useEffect(() => {
     (async () => {
       setPrefMsg("");
       setPrefLoading(true);
@@ -484,8 +544,6 @@ export default function ProfilePage() {
   }, [rows, yearFilter, monthFilter]);
 
   async function saveDefaults() {
-    if (!supabase) return;
-
     setPrefMsg("");
     setPrefLoading(true);
 
@@ -532,6 +590,8 @@ export default function ProfilePage() {
     setPrefLoading(false);
   }
 
+  const lockedCalories = !caloriesEnabled;
+
   return (
     <main className="min-h-screen px-4 sm:px-6 py-6 page-invert-bg overflow-x-hidden">
       <div className="mx-auto w-full max-w-5xl min-w-0">
@@ -544,6 +604,10 @@ export default function ProfilePage() {
           ) : email ? (
             <div className="mt-3 text-sm muted">
               Prihlásený ako <span className="font-semibold">{email}</span>
+              {entLoading ? <span className="ml-2 text-xs muted-2">• načítavam členstvo…</span> : null}
+              {!entLoading && ent ? (
+                <span className="ml-2 text-xs muted-2">• plán: {ent.plan.toUpperCase()}</span>
+              ) : null}
             </div>
           ) : null}
         </header>
@@ -567,9 +631,22 @@ export default function ProfilePage() {
                 <TabButton active={tab === "shopping"} onClick={() => setTab("shopping")}>
                   Uložené nákupy
                 </TabButton>
-                <TabButton active={tab === "calories"} onClick={() => setTab("calories")}>
+
+                {/* ✅ Kalórie – len PLUS (zamknuté -> redirect na pricing) */}
+                <TabButton
+                  active={tab === "calories"}
+                  locked={lockedCalories}
+                  onClick={() => {
+                    if (lockedCalories) {
+                      window.location.href = "/pricing";
+                      return;
+                    }
+                    setTab("calories");
+                  }}
+                >
                   Kalórie
                 </TabButton>
+
                 <TabButton active={tab === "finance"} onClick={() => setTab("finance")}>
                   Financie
                 </TabButton>
@@ -673,7 +750,12 @@ export default function ProfilePage() {
 
                 <div className="mt-4 grid grid-cols-1 gap-4">
                   <Field label="Intolerancie (tvrdý zákaz)">
-                    <input value={intolerances} onChange={(e) => setIntolerances(e.target.value)} className="input-surface" placeholder="laktóza, arašidy" />
+                    <input
+                      value={intolerances}
+                      onChange={(e) => setIntolerances(e.target.value)}
+                      className="input-surface"
+                      placeholder="laktóza, arašidy"
+                    />
                   </Field>
 
                   <Field label="Vyhnúť sa">
@@ -737,7 +819,8 @@ export default function ProfilePage() {
                                     Týždeň {formatDateSK(r.week_start)} – {formatDateSK(weekEnd)}
                                   </div>
                                   <div className="mt-1 text-sm muted-2">
-                                    {r.is_edited ? "Upravené" : "Generované"} {bud ? `• Budget: ${bud} €` : ""} {est ? `• Odhad: ${est} €` : ""}
+                                    {r.is_edited ? "Upravené" : "Generované"} {bud ? `• Budget: ${bud} €` : ""}{" "}
+                                    {est ? `• Odhad: ${est} €` : ""}
                                   </div>
                                 </div>
                                 <div className="text-sm muted-2 shrink-0">Otvor</div>
@@ -771,7 +854,9 @@ export default function ProfilePage() {
                 <div className="mt-4 space-y-6">
                   {shoppingWeeksFiltered.map((g) => (
                     <div key={g.ym}>
-                      <div className="text-sm muted-2 mb-3">{g.ym === "Neznámy" ? "Neznámy dátum" : `Mesiac: ${ymLabel(g.ym)}`}</div>
+                      <div className="text-sm muted-2 mb-3">
+                        {g.ym === "Neznámy" ? "Neznámy dátum" : `Mesiac: ${ymLabel(g.ym)}`}
+                      </div>
 
                       <div className="grid grid-cols-1 gap-4">
                         {g.items.map(({ r, plan, shopping }) => {
@@ -862,7 +947,9 @@ export default function ProfilePage() {
                 {loading ? <div className="mt-4 text-sm muted-2">Načítavam…</div> : null}
                 {error ? <div className="mt-4 text-sm text-red-500">Chyba: {error}</div> : null}
 
-                {!loading && !error && caloriesWeeksFiltered.length === 0 ? <div className="mt-4 muted">Pre tento filter nemáš uložené kalórie.</div> : null}
+                {!loading && !error && caloriesWeeksFiltered.length === 0 ? (
+                  <div className="mt-4 muted">Pre tento filter nemáš uložené kalórie.</div>
+                ) : null}
 
                 <div className="mt-4 space-y-6">
                   {caloriesWeeksFiltered.map((g) => (
@@ -884,7 +971,8 @@ export default function ProfilePage() {
                                     Týždeň {formatDateSK(r.week_start)} – {formatDateSK(weekEnd)}
                                   </div>
                                   <div className="mt-1 text-sm muted-2">
-                                    Priemer: <span className="font-semibold">{typeof avg === "number" ? avg : "—"}</span> kcal/deň {" • "}
+                                    Priemer: <span className="font-semibold">{typeof avg === "number" ? avg : "—"}</span> kcal/deň{" "}
+                                    {" • "}
                                     Týždeň: <span className="font-semibold">{typeof weekly === "number" ? weekly : "—"}</span> kcal
                                   </div>
                                 </div>

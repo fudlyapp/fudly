@@ -398,8 +398,9 @@ export default function GeneratorPage() {
 
     setEntLoading(true);
     try {
-      const res = await fetch(`/api/entitlements?week_start=${encodeURIComponent(ws)}`, {
+      const res = await fetch(`/api/entitlements?week_start=${encodeURIComponent(ws)}&t=${Date.now()}`, {
         headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
         signal,
       });
 

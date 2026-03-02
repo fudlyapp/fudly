@@ -18,32 +18,30 @@ function getBearer(req: Request) {
 export async function POST(req: Request) {
   try {
     const token = getBearer(req);
-    if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: { "Cache-Control": "no-store" } });
 
     const { plan } = (await req.json()) as Body;
     if (plan !== "basic" && plan !== "plus") {
-      return NextResponse.json({ error: "Invalid plan" }, { status: 400 });
+      return NextResponse.json({ error: "Invalid plan" }, { status: 400, headers: { "Cache-Control": "no-store" } });
     }
 
     const priceId = plan === "basic" ? process.env.STRIPE_PRICE_BASIC : process.env.STRIPE_PRICE_PLUS;
-    if (!priceId) return NextResponse.json({ error: "Missing STRIPE_PRICE_* env" }, { status: 500 });
+    if (!priceId) return NextResponse.json({ error: "Missing STRIPE_PRICE_* env" }, { status: 500, headers: { "Cache-Control": "no-store" } });
 
     const supabase = createSupabaseAdminClient();
 
     const { data: userRes, error: userErr } = await supabase.auth.getUser(token);
-    if (userErr || !userRes?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (userErr || !userRes?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: { "Cache-Control": "no-store" } });
 
     const userId = userRes.user.id;
     const email = userRes.user.email ?? undefined;
 
-    // prečítaj subscriptions row (ak existuje)
     const { data: subRow } = await supabase
       .from("subscriptions")
       .select("stripe_customer_id,status,trial_until,current_period_end,stripe_subscription_id,plan")
       .eq("user_id", userId)
       .maybeSingle();
 
-    // ak má aktívny trial/subscription, checkout nepúšťame (má ísť cez portal)
     const status = String(subRow?.status ?? "").toLowerCase();
     const now = Date.now();
     const cpe = subRow?.current_period_end ? new Date(subRow.current_period_end).getTime() : null;
@@ -54,10 +52,7 @@ export async function POST(req: Request) {
       (status === "trialing" && !!tu && tu > now);
 
     if (activeLike && (subRow?.stripe_customer_id || subRow?.stripe_subscription_id)) {
-      return NextResponse.json(
-        { error: "Already has active subscription. Use portal." },
-        { status: 409 }
-      );
+      return NextResponse.json({ error: "Already has active subscription. Use portal." }, { status: 409, headers: { "Cache-Control": "no-store" } });
     }
 
     const customer = subRow?.stripe_customer_id ?? undefined;
@@ -83,8 +78,8 @@ export async function POST(req: Request) {
       metadata: { user_id: userId, plan },
     });
 
-    return NextResponse.json({ url: session.url });
+    return NextResponse.json({ url: session.url }, { headers: { "Cache-Control": "no-store" } });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? "Unknown error" }, { status: 500 });
+    return NextResponse.json({ error: e?.message ?? "Unknown error" }, { status: 500, headers: { "Cache-Control": "no-store" } });
   }
 }

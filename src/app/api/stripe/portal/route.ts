@@ -16,26 +16,47 @@ function getBearer(req: Request) {
 export async function POST(req: Request) {
   try {
     const token = getBearer(req);
-    if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: { "Cache-Control": "no-store" } });
 
     const supabase = createSupabaseAdminClient();
 
     const { data: userRes, error: userErr } = await supabase.auth.getUser(token);
-    if (userErr || !userRes?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (userErr || !userRes?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: { "Cache-Control": "no-store" } });
 
     const userId = userRes.user.id;
 
-    const { data: row } = await supabase
+    const { data: row, error: rowErr } = await supabase
       .from("subscriptions")
-      .select("stripe_customer_id")
+      .select("stripe_customer_id,stripe_subscription_id")
       .eq("user_id", userId)
       .maybeSingle();
 
-    const customerId = row?.stripe_customer_id;
+    if (rowErr) {
+      return NextResponse.json({ error: rowErr.message }, { status: 500, headers: { "Cache-Control": "no-store" } });
+    }
+
+    let customerId: string | null = row?.stripe_customer_id ?? null;
+
+    // ✅ fallback: ak customer_id chýba, ale máme subscription_id, zistíme customer zo Stripe a doplníme do DB
+    const subscriptionId: string | null = row?.stripe_subscription_id ?? null;
+    if (!customerId && subscriptionId) {
+      const sub = await stripe.subscriptions.retrieve(subscriptionId);
+      const c = typeof sub.customer === "string" ? sub.customer : sub.customer?.id ?? null;
+
+      if (c) {
+        customerId = c;
+
+        await supabase
+          .from("subscriptions")
+          .update({ stripe_customer_id: customerId })
+          .eq("user_id", userId);
+      }
+    }
+
     if (!customerId) {
       return NextResponse.json(
         { error: "Missing stripe_customer_id. Buy a plan first." },
-        { status: 400 }
+        { status: 400, headers: { "Cache-Control": "no-store" } }
       );
     }
 
@@ -46,8 +67,8 @@ export async function POST(req: Request) {
       return_url: `${origin}/pricing`,
     });
 
-    return NextResponse.json({ url: session.url });
+    return NextResponse.json({ url: session.url }, { headers: { "Cache-Control": "no-store" } });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? "Unknown error" }, { status: 500 });
+    return NextResponse.json({ error: e?.message ?? "Unknown error" }, { status: 500, headers: { "Cache-Control": "no-store" } });
   }
 }

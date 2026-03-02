@@ -91,6 +91,20 @@ const CATEGORY_LABEL: Record<CategoryKey, string> = {
 
 const CATEGORY_ORDER: CategoryKey[] = ["veg", "fruit", "meat", "fish", "dairy", "bakery", "dry", "frozen", "spices", "other"];
 
+type Entitlements = {
+  plan: "basic" | "plus";
+  status: string;
+  can_generate: boolean;
+  weekly_limit: number;
+  used: number;
+  remaining: number;
+  calories_enabled: boolean;
+  allowed_styles: string[];
+  trial_until: string | null;
+  current_period_end: string | null;
+  has_stripe_link: boolean;
+};
+
 function deepClone<T>(x: T): T {
   return JSON.parse(JSON.stringify(x));
 }
@@ -175,6 +189,18 @@ function shoppingToTXT(weekStart: string, shopping: ShoppingTrip[]) {
   return lines.join("\n");
 }
 
+function KcalValue({
+  isPlus,
+  value,
+}: {
+  isPlus: boolean;
+  value: number | null;
+}) {
+  if (!isPlus) return <span className="font-semibold">PLUS</span>;
+  if (typeof value === "number") return <span className="font-semibold">{value}</span>;
+  return <span className="muted-2">—</span>;
+}
+
 export default function WeekDetailPage() {
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
   const params = useParams<{ week_start: string }>();
@@ -199,8 +225,10 @@ export default function WeekDetailPage() {
   const [recipeTitle, setRecipeTitle] = useState("Recept");
   const [recipeBody, setRecipeBody] = useState<React.ReactNode>(null);
 
-  // ✅ entitlements (či môžeme ukázať kcal)
-  const [caloriesAllowed, setCaloriesAllowed] = useState<boolean | null>(null);
+  // ✅ entitlements
+  const [ent, setEnt] = useState<Entitlements | null>(null);
+  const isPlus = ent?.plan === "plus";
+  const caloriesAllowed = !!ent?.calories_enabled && isPlus;
 
   // ✅ init auth + listener (len raz)
   useEffect(() => {
@@ -235,10 +263,10 @@ export default function WeekDetailPage() {
     };
   }, [supabase]);
 
-  // ✅ entitlements fetch (AbortController + token zo session)
+  // ✅ entitlements fetch (week_start + no-store + cache-buster)
   useEffect(() => {
     if (!accessToken) {
-      setCaloriesAllowed(false);
+      setEnt(null);
       return;
     }
 
@@ -246,24 +274,25 @@ export default function WeekDetailPage() {
 
     (async () => {
       try {
-        const res = await fetch("/api/entitlements", {
+        const res = await fetch(`/api/entitlements?week_start=${encodeURIComponent(weekStart)}&t=${Date.now()}`, {
           method: "GET",
           headers: { Authorization: `Bearer ${accessToken}` },
+          cache: "no-store",
           signal: ac.signal,
         });
 
         const j = await res.json().catch(() => null);
         if (ac.signal.aborted) return;
 
-        if (res.ok && j) setCaloriesAllowed(!!j.calories_enabled);
-        else setCaloriesAllowed(false);
+        if (res.ok && j) setEnt(j as Entitlements);
+        else setEnt(null);
       } catch (e: any) {
-        if (e?.name !== "AbortError") setCaloriesAllowed(false);
+        if (e?.name !== "AbortError") setEnt(null);
       }
     })();
 
     return () => ac.abort();
-  }, [accessToken]);
+  }, [accessToken, weekStart]);
 
   // ✅ load meal plan row (bez getSession)
   useEffect(() => {
@@ -273,7 +302,6 @@ export default function WeekDetailPage() {
 
       const user = session?.user;
       if (!user) {
-        // nepresmeruj hneď počas init (inkognito) – počkaj na authLoading
         if (!authLoading) window.location.href = "/login";
         setLoading(false);
         return;
@@ -341,7 +369,6 @@ export default function WeekDetailPage() {
   }, [row?.week_end, weekStart]);
 
   const caloriesPresent = useMemo(() => planHasCalories(plan), [plan]);
-  const showCalories = useMemo(() => !!caloriesAllowed && caloriesPresent, [caloriesAllowed, caloriesPresent]);
 
   const shopping = useMemo(() => plan?.shopping ?? [], [plan]);
   const anyShoppingEdited = useMemo(() => {
@@ -690,13 +717,18 @@ export default function WeekDetailPage() {
           <h2 className="text-xl font-semibold">Jedálniček</h2>
           <div className="mt-2 text-sm muted">Klikni do jedla a uprav text. Ak upravíš jedlo, recept preň nebude dostupný.</div>
 
-          {caloriesAllowed === false ? (
+          {/* ✅ v BASIC iba info box (čísla nikdy neukazuj) */}
+          {!isPlus ? (
             <div className="mt-4 rounded-2xl p-4 border border-gray-200 dark:border-gray-800 text-sm muted">
               Kalórie sú dostupné iba v členstve <span className="font-semibold">PLUS</span>.
+              <Link href="/pricing" className="ml-2 underline font-semibold">
+                Prejsť na PLUS
+              </Link>
             </div>
           ) : null}
 
-          {showCalories ? (
+          {/* ✅ v PLUS ukáž sumáre (ak existujú) */}
+          {isPlus && caloriesAllowed && caloriesPresent ? (
             <div className="mt-4 rounded-2xl p-4 border border-gray-200 dark:border-gray-800">
               <div className="text-sm font-semibold">Kalórie</div>
               <div className="mt-2 text-sm muted">
@@ -732,108 +764,104 @@ export default function WeekDetailPage() {
           ) : null}
 
           <div className="mt-5 space-y-4">
-            {plan.days.map((d, dayIdx) => (
-              <div key={d.day} className="rounded-2xl p-4 page-invert-bg border border-gray-200 dark:border-gray-800">
-                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="font-semibold">
-                      {d.day_name ?? `Deň ${d.day}`} {d.date ? <span className="text-xs muted-2">({formatDateSK(d.date)})</span> : null}
-                    </div>
+            {plan.days.map((d, dayIdx) => {
+              const dayTotal = typeof d.total_kcal === "number" ? d.total_kcal : null;
 
-                    {showCalories ? (
+              return (
+                <div key={d.day} className="rounded-2xl p-4 page-invert-bg border border-gray-200 dark:border-gray-800">
+                  <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="font-semibold">
+                        {d.day_name ?? `Deň ${d.day}`}{" "}
+                        {d.date ? <span className="text-xs muted-2">({formatDateSK(d.date)})</span> : null}
+                      </div>
+
+                      {/* ✅ Spolu za deň: PLUS -> číslo, BASIC -> "PLUS" */}
                       <div className="mt-1 text-xs muted-2">
-                        {typeof d.total_kcal === "number" ? (
-                          <>
-                            Spolu: <span className="font-semibold">{d.total_kcal}</span> kcal
-                          </>
-                        ) : (
-                          <span className="muted-2">Spolu kcal nie je k dispozícii.</span>
-                        )}
+                        Spolu za deň: <KcalValue isPlus={!!isPlus} value={dayTotal} /> kcal
                       </div>
-                    ) : null}
+                    </div>
                   </div>
-                </div>
 
-                <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
-                  {(["breakfast", "lunch", "dinner"] as const).map((meal) => {
-                    const k = recipeKey(d.day, meal);
-                    const edited = !!plan?.meta?.edited_meals?.[k];
-                    const label = meal === "breakfast" ? "Raňajky" : meal === "lunch" ? "Obed" : "Večera";
+                  <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+                    {(["breakfast", "lunch", "dinner"] as const).map((meal) => {
+                      const k = recipeKey(d.day, meal);
+                      const edited = !!plan?.meta?.edited_meals?.[k];
+                      const label = meal === "breakfast" ? "Raňajky" : meal === "lunch" ? "Obed" : "Večera";
 
-                    return (
-                      <div key={meal} className="rounded-2xl p-3 border border-gray-200 dark:border-gray-800 min-w-0">
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="text-xs sm:text-sm font-semibold">{label}</div>
-                          <button
-                            type="button"
-                            onClick={() => showRecipeFor(d.day, meal)}
-                            className="text-xs font-semibold rounded-full border border-gray-300 dark:border-gray-700 px-3 py-1 hover:bg-gray-100 dark:hover:bg-zinc-900 transition shrink-0"
-                          >
-                            {edited ? "Recept (nedost.)" : "Recept"}
-                          </button>
-                        </div>
+                      const kcal =
+                        meal === "breakfast"
+                          ? typeof d.breakfast_kcal === "number"
+                            ? d.breakfast_kcal
+                            : null
+                          : meal === "lunch"
+                          ? typeof d.lunch_kcal === "number"
+                            ? d.lunch_kcal
+                            : null
+                          : typeof d.dinner_kcal === "number"
+                          ? d.dinner_kcal
+                          : null;
 
-                        <textarea
-                          className="mt-2 input-surface h-20 sm:h-24 resize-none"
-                          value={(d as any)[meal] ?? ""}
-                          onChange={(e) => updateMealText(dayIdx, meal, e.target.value)}
-                        />
-
-                        {showCalories ? (
-                          <div className="mt-2 text-xs muted-2">
-                            {meal === "breakfast" && typeof d.breakfast_kcal === "number" ? (
-                              <>
-                                kcal: <span className="font-semibold">{d.breakfast_kcal}</span>
-                              </>
-                            ) : null}
-                            {meal === "lunch" && typeof d.lunch_kcal === "number" ? (
-                              <>
-                                kcal: <span className="font-semibold">{d.lunch_kcal}</span>
-                              </>
-                            ) : null}
-                            {meal === "dinner" && typeof d.dinner_kcal === "number" ? (
-                              <>
-                                kcal: <span className="font-semibold">{d.dinner_kcal}</span>
-                              </>
-                            ) : null}
+                      return (
+                        <div key={meal} className="rounded-2xl p-3 border border-gray-200 dark:border-gray-800 min-w-0">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="text-xs sm:text-sm font-semibold">{label}</div>
+                            <button
+                              type="button"
+                              onClick={() => showRecipeFor(d.day, meal)}
+                              className="text-xs font-semibold rounded-full border border-gray-300 dark:border-gray-700 px-3 py-1 hover:bg-gray-100 dark:hover:bg-zinc-900 transition shrink-0"
+                            >
+                              {edited ? "Recept (nedost.)" : "Recept"}
+                            </button>
                           </div>
-                        ) : null}
-                      </div>
-                    );
-                  })}
-                </div>
 
-                {typeof d.note === "string" ? (
-                  <div className="mt-3">
-                    <div className="text-xs muted-2 mb-1">Poznámka</div>
+                          <textarea
+                            className="mt-2 input-surface h-20 sm:h-24 resize-none"
+                            value={(d as any)[meal] ?? ""}
+                            onChange={(e) => updateMealText(dayIdx, meal, e.target.value)}
+                          />
 
-                    <textarea
-                      ref={(el) => {
-                        noteRefs.current[dayIdx] = el;
-                      }}
-                      className="input-surface !text-[11px] !leading-tight py-2 resize-none overflow-hidden min-h-[44px]"
-                      value={d.note}
-                      rows={1}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        setDirty(true);
-                        setPlan((prev) => {
-                          if (!prev) return prev;
-                          const next = deepClone(prev);
-                          next.days[dayIdx].note = v;
-                          return next;
-                        });
-                        autoResizeNote(dayIdx);
-                      }}
-                    />
+                          {/* ✅ kcal/porcia: PLUS číslo, BASIC "PLUS" */}
+                          <div className="mt-2 text-xs muted-2">
+                            kcal / porcia: <KcalValue isPlus={!!isPlus} value={kcal} />
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                ) : null}
-              </div>
-            ))}
+
+                  {typeof d.note === "string" ? (
+                    <div className="mt-3">
+                      <div className="text-xs muted-2 mb-1">Poznámka</div>
+
+                      <textarea
+                        ref={(el) => {
+                          noteRefs.current[dayIdx] = el;
+                        }}
+                        className="input-surface !text-[11px] !leading-tight py-2 resize-none overflow-hidden min-h-[44px]"
+                        value={d.note}
+                        rows={1}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setDirty(true);
+                          setPlan((prev) => {
+                            if (!prev) return prev;
+                            const next = deepClone(prev);
+                            next.days[dayIdx].note = v;
+                            return next;
+                          });
+                          autoResizeNote(dayIdx);
+                        }}
+                      />
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
           </div>
         </section>
 
-        {/* Shopping – nechávam tvoje nezmenené */}
+        {/* Shopping – ponechané (tvoje) */}
         <section className="rounded-2xl p-4 sm:p-6 surface-same-as-nav surface-border">
           <h2 className="text-base font-semibold">Nákupy</h2>
           <div className="mt-1 text-xs muted">
