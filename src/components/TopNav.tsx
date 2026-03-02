@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import ThemeToggle from "@/components/ThemeToggle";
 
-const SHOW_LANGUAGE_SWITCH = false; // dočasne skryté
+const SHOW_LANGUAGE_SWITCH = false;
 
 function NavLink({ href, label, onClick }: { href: string; label: string; onClick?: () => void }) {
   return (
@@ -50,30 +50,33 @@ export default function TopNav() {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
-    let mounted = true;
+    let alive = true;
 
-    (async () => {
+    async function init() {
+      setAuthLoading(true);
       try {
-        setAuthLoading(true);
         const { data } = await supabase.auth.getSession();
-        if (!mounted) return;
+        if (!alive) return;
         setEmail(data.session?.user?.email ?? null);
-      } catch (e) {
-        console.error("TopNav getSession error:", e);
-        if (!mounted) return;
+      } catch {
+        if (!alive) return;
         setEmail(null);
       } finally {
-        if (mounted) setAuthLoading(false);
+        if (!alive) return;
+        setAuthLoading(false);
       }
-    })();
+    }
+
+    init();
 
     const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+      if (!alive) return;
       setEmail(session?.user?.email ?? null);
       setAuthLoading(false);
     });
 
     return () => {
-      mounted = false;
+      alive = false;
       sub.subscription.unsubscribe();
     };
   }, [supabase]);
@@ -90,7 +93,6 @@ export default function TopNav() {
   return (
     <div className="sticky top-0 z-50 border-b border-gray-200 bg-white/80 backdrop-blur dark:border-gray-800 dark:bg-black/70">
       <div className="mx-auto w-full max-w-6xl px-4 sm:px-6 py-3 flex items-center justify-between gap-3">
-        {/* LOGO + názov */}
         <Link href="/" className="flex items-center gap-3" onClick={closeMobile}>
           <Image
             src="/logo_black.png"
@@ -111,7 +113,6 @@ export default function TopNav() {
           <div className="font-semibold text-lg">Fudly</div>
         </Link>
 
-        {/* DESKTOP MENU */}
         <div className="hidden md:flex items-center gap-2">
           {authLoading ? (
             <div className="text-xs text-gray-500 px-3 dark:text-gray-400">…</div>
@@ -146,7 +147,6 @@ export default function TopNav() {
                   <NavLink href="/pricing" label="Členstvá" />
                   <NavLink href="/contact" label="Kontakt" />
                   <NavLink href="/faq" label="FAQ" />
-
                   <PrimaryNavLink href="/login" label="Prihlásiť sa | Vytvoriť účet" />
                 </>
               )}
@@ -164,7 +164,6 @@ export default function TopNav() {
           )}
         </div>
 
-        {/* MOBILE RIGHT: Theme + Hamburger */}
         <div className="md:hidden flex items-center gap-2">
           <ThemeToggle />
           <button
@@ -178,7 +177,6 @@ export default function TopNav() {
         </div>
       </div>
 
-      {/* MOBILE MENU PANEL */}
       {mobileOpen ? (
         <div className="md:hidden border-t border-gray-200 dark:border-gray-800 bg-white/95 dark:bg-black/95 backdrop-blur">
           <div className="mx-auto w-full max-w-6xl px-4 sm:px-6 py-3 flex flex-col gap-2">

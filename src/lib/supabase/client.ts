@@ -2,7 +2,18 @@
 import { createBrowserClient } from "@supabase/ssr";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-function _createSupabaseBrowserClient(): SupabaseClient {
+declare global {
+  // eslint-disable-next-line no-var
+  var __fudlySupabaseBrowserClient: SupabaseClient | undefined;
+}
+
+export function createSupabaseBrowserClient(): SupabaseClient {
+  if (typeof window === "undefined") {
+    throw new Error("createSupabaseBrowserClient() môže byť použité iba v prehliadači (client components).");
+  }
+
+  if (globalThis.__fudlySupabaseBrowserClient) return globalThis.__fudlySupabaseBrowserClient;
+
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
@@ -12,8 +23,6 @@ function _createSupabaseBrowserClient(): SupabaseClient {
     );
   }
 
-  return createBrowserClient(url, anon);
+  globalThis.__fudlySupabaseBrowserClient = createBrowserClient(url, anon);
+  return globalThis.__fudlySupabaseBrowserClient;
 }
-
-// ✅ nový názov (odporúčam používať všade)
-export const createSupabaseBrowserClient = _createSupabaseBrowserClient;

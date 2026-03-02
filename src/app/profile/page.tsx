@@ -103,7 +103,9 @@ function shoppingToTXT(weekStart: string, shopping: any[]) {
 
   for (const t of shopping || []) {
     lines.push(
-      `Nákup ${t.trip} (dni ${t.covers_days}) – odhad: ${t.estimated_cost_eur ?? "—"} € – reálna: ${t.actual_cost_eur ?? "—"} €`
+      `Nákup ${t.trip} (dni ${t.covers_days}) – odhad: ${t.estimated_cost_eur ?? "—"} € – reálna: ${
+        t.actual_cost_eur ?? "—"
+      } €`
     );
     for (const it of t.items || []) lines.push(`- ${it.name} — ${it.quantity}`);
     lines.push("");
@@ -216,6 +218,18 @@ function computeActualFromTrips(plan: any) {
   return { sum: any ? Number(sum.toFixed(2)) : null, missing, totalTrips };
 }
 
+// ✅ malé helpery na bezpečné čísla (aby si nikdy neposlal NaN -> NULL)
+function toIntOrNull(raw: string, opts?: { min?: number; max?: number }) {
+  const v = (raw ?? "").toString().trim();
+  if (!v) return null;
+  const n = Number(v);
+  if (!Number.isFinite(n)) return null;
+  const i = Math.trunc(n);
+  if (opts?.min != null && i < opts.min) return null;
+  if (opts?.max != null && i > opts.max) return null;
+  return i;
+}
+
 export default function ProfilePage() {
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
   const { t } = useT();
@@ -236,7 +250,7 @@ export default function ProfilePage() {
   const [people, setPeople] = useState("");
   const [budget, setBudget] = useState("");
   const [shoppingTrips, setShoppingTrips] = useState("2");
-  const [repeatDays, setRepeatDays] = useState("2");
+  const [repeatDays, setRepeatDays] = useState("2"); // ✅ číslo v stringu
   const [style, setStyle] = useState("lacné");
   const [intolerances, setIntolerances] = useState("");
   const [avoid, setAvoid] = useState("");
@@ -323,7 +337,7 @@ export default function ProfilePage() {
         if (p.people_default != null) setPeople(String(p.people_default));
         if (p.weekly_budget_eur_default != null) setBudget(String(p.weekly_budget_eur_default));
         if (p.shopping_trips_default != null) setShoppingTrips(String(p.shopping_trips_default));
-        if (p.repeat_days_default != null) setRepeatDays(String(p.repeat_days_default));
+        if (p.repeat_days_default != null) setRepeatDays(String(p.repeat_days_default)); // ✅ "2"
 
         const allowed = new Set(STYLE_OPTIONS.map((x) => x.value));
         const incoming = (p.style_default || "").trim();
@@ -460,6 +474,7 @@ export default function ProfilePage() {
     const { data: sess } = await supabase.auth.getSession();
     const user = sess.session?.user;
     if (!user) {
+      setPrefLoading(false);
       window.location.href = "/login";
       return;
     }
@@ -469,10 +484,18 @@ export default function ProfilePage() {
       full_name: null,
       language: null,
 
-      people_default: people.trim() ? Number(people) : null,
-      weekly_budget_eur_default: budget.trim() ? Number(budget) : null,
-      shopping_trips_default: shoppingTrips.trim() ? Number(shoppingTrips) : null,
-      repeat_days_default: repeatDays.trim() ? Number(repeatDays) : null,
+      people_default: toIntOrNull(people, { min: 1, max: 20 }),
+      weekly_budget_eur_default: (() => {
+        const v = budget.trim();
+        if (!v) return null;
+        const n = Number(v);
+        return Number.isFinite(n) && n >= 1 && n <= 100000 ? n : null;
+      })(),
+      shopping_trips_default: toIntOrNull(shoppingTrips, { min: 1, max: 10 }),
+
+      // ✅ kľúčové: nikdy neposielame NaN
+      repeat_days_default: toIntOrNull(repeatDays, { min: 1, max: 7 }),
+
       style_default: style.trim() || null,
 
       intolerances: intolerances.trim() || null,
@@ -521,7 +544,6 @@ export default function ProfilePage() {
 
         {email && (
           <>
-            {/* Tabs – mobile scroll */}
             <div className="mb-6 -mx-4 px-4 overflow-x-auto no-scrollbar">
               <div className="flex gap-2 min-w-max">
                 <TabButton active={tab === "plans"} onClick={() => setTab("plans")}>
@@ -588,11 +610,7 @@ export default function ProfilePage() {
                     <p className="mt-1 text-sm muted">Toto sa načíta v Generátore cez „Načítať uložené“.</p>
                   </div>
 
-                  <button
-                    onClick={saveDefaults}
-                    disabled={prefLoading}
-                    className="btn-primary w-full sm:w-auto"
-                  >
+                  <button onClick={saveDefaults} disabled={prefLoading} className="btn-primary w-full sm:w-auto">
                     {prefLoading ? "Ukladám..." : "Uložiť predvolené"}
                   </button>
                 </div>
@@ -630,17 +648,23 @@ export default function ProfilePage() {
                   </Field>
 
                   <Field label="Varenie na viac dní">
+                    {/* ✅ hodnoty sú čísla */}
                     <select value={repeatDays} onChange={(e) => setRepeatDays(e.target.value)} className="input-surface">
-                      <option value="1 deň">1 deň</option>
-                      <option value="2 dni">2 dni</option>
-                      <option value="3 dni">3 dni</option>
+                      <option value="1">1 deň</option>
+                      <option value="2">2 dni</option>
+                      <option value="3">3 dni</option>
                     </select>
                   </Field>
                 </div>
 
                 <div className="mt-4 grid grid-cols-1 gap-4">
                   <Field label="Intolerancie (tvrdý zákaz)">
-                    <input value={intolerances} onChange={(e) => setIntolerances(e.target.value)} className="input-surface" placeholder="laktóza, arašidy" />
+                    <input
+                      value={intolerances}
+                      onChange={(e) => setIntolerances(e.target.value)}
+                      className="input-surface"
+                      placeholder="laktóza, arašidy"
+                    />
                   </Field>
 
                   <Field label="Vyhnúť sa">
@@ -727,12 +751,7 @@ export default function ProfilePage() {
                     <h2 className="text-xl font-semibold">Uložené nákupy</h2>
                     <p className="mt-1 text-sm muted">Filtrovanie + export zatiaľ iba TXT.</p>
                   </div>
-                  <Link
-                    href="/generate"
-                    className="rounded-xl border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-zinc-900 transition w-full sm:w-auto text-center"
-                  >
-                    Generovať nový týždeň
-                  </Link>
+                  {/* odstránené duplicitné CTA */}
                 </div>
 
                 {loading ? <div className="mt-4 text-sm muted-2">Načítavam…</div> : null}
@@ -773,9 +792,7 @@ export default function ProfilePage() {
                                 <div className="flex flex-col sm:flex-row flex-wrap gap-2">
                                   <button
                                     type="button"
-                                    onClick={() =>
-                                      downloadText(`fudly-nakup-${r.week_start}.txt`, shoppingToTXT(r.week_start, shopping))
-                                    }
+                                    onClick={() => downloadText(`fudly-nakup-${r.week_start}.txt`, shoppingToTXT(r.week_start, shopping))}
                                     className="rounded-full border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-xs font-semibold hover:bg-gray-100 dark:hover:bg-zinc-900 transition w-full sm:w-auto"
                                   >
                                     Export TXT
@@ -847,9 +864,7 @@ export default function ProfilePage() {
                 <div className="mt-4 space-y-6">
                   {caloriesWeeksFiltered.map((g) => (
                     <div key={g.ym}>
-                      <div className="text-sm muted-2 mb-3">
-                        {g.ym === "Neznámy" ? "Neznámy dátum" : `Mesiac: ${ymLabel(g.ym)}`}
-                      </div>
+                      <div className="text-sm muted-2 mb-3">{g.ym === "Neznámy" ? "Neznámy dátum" : `Mesiac: ${ymLabel(g.ym)}`}</div>
 
                       <div className="grid grid-cols-1 gap-4">
                         {g.items.map(({ r, avg, weekly }) => {
@@ -866,7 +881,7 @@ export default function ProfilePage() {
                                     Týždeň {formatDateSK(r.week_start)} – {formatDateSK(weekEnd)}
                                   </div>
                                   <div className="mt-1 text-sm muted-2">
-                                    Priemer: <span className="font-semibold">{typeof avg === "number" ? avg : "—"}</span> kcal/deň
+                                    Priemer: <span className="font-semibold">{typeof avg === "number" ? avg : "—"}</span> kcal/deň{" "}
                                     {" • "}
                                     Týždeň: <span className="font-semibold">{typeof weekly === "number" ? weekly : "—"}</span> kcal
                                   </div>
@@ -898,9 +913,7 @@ export default function ProfilePage() {
                 <div className="mt-4 space-y-6">
                   {financeWeeksFiltered.map((g) => (
                     <div key={g.ym}>
-                      <div className="text-sm muted-2 mb-3">
-                        {g.ym === "Neznámy" ? "Neznámy dátum" : `Mesiac: ${ymLabel(g.ym)}`}
-                      </div>
+                      <div className="text-sm muted-2 mb-3">{g.ym === "Neznámy" ? "Neznámy dátum" : `Mesiac: ${ymLabel(g.ym)}`}</div>
 
                       <div className="grid grid-cols-1 gap-4">
                         {g.items.map(({ r, bud, est, act, missing, totalTrips }) => {
@@ -922,8 +935,7 @@ export default function ProfilePage() {
                                   </div>
 
                                   <div className="mt-1 text-sm muted-2">
-                                    Budget: <span className="font-semibold">{budgetVal != null ? `${budgetVal} €` : "—"}</span>
-                                    {" • "}
+                                    Budget: <span className="font-semibold">{budgetVal != null ? `${budgetVal} €` : "—"}</span> {" • "}
                                     Odhad: <span className="font-semibold">{estVal != null ? `${estVal} €` : "—"}</span>
                                     {diffEst != null ? (
                                       <>

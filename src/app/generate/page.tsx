@@ -249,8 +249,7 @@ function deriveErrorMessage(status: number, api: any) {
   if (status >= 500) {
     return {
       title: "Generovanie sa nepodarilo",
-      message:
-        "Nastala chyba na serveri. Skús to znova o chvíľu. Zostávajúci počet generovaní ostáva nezmenený.",
+      message: "Nastala chyba na serveri. Skús to znova o chvíľu. Zostávajúci počet generovaní ostáva nezmenený.",
       canRetry: true,
     };
   }
@@ -295,12 +294,37 @@ function CenterModal({
   );
 }
 
+// ✅ helper: nikdy neposielaj NaN do DB (inak skončíš na NULL)
+function toIntOrNull(raw: string, opts?: { min?: number; max?: number }) {
+  const v = (raw ?? "").toString().trim();
+  if (!v) return null;
+  const n = Number(v);
+  if (!Number.isFinite(n)) return null;
+  const i = Math.trunc(n);
+  if (opts?.min != null && i < opts.min) return null;
+  if (opts?.max != null && i > opts.max) return null;
+  return i;
+}
+function toNumOrNull(raw: string, opts?: { min?: number; max?: number }) {
+  const v = (raw ?? "").toString().trim();
+  if (!v) return null;
+  const n = Number(v);
+  if (!Number.isFinite(n)) return null;
+  if (opts?.min != null && n < opts.min) return null;
+  if (opts?.max != null && n > opts.max) return null;
+  return n;
+}
+
 export default function GeneratorPage() {
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
   const { t } = useT();
 
+  // ✅ SOURCE OF TRUTH: session
   const [authLoading, setAuthLoading] = useState(true);
-  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
+
+  const userEmail = session?.user?.email ?? null;
+  const accessToken = session?.access_token ?? null;
 
   const [weekOptions] = useState(() => buildWeekOptions());
   const [weekStart, setWeekStart] = useState<string>(weekOptions[0]?.value ?? "");
@@ -341,12 +365,44 @@ export default function GeneratorPage() {
   const [entLoading, setEntLoading] = useState(false);
   const [ent, setEnt] = useState<Entitlements | null>(null);
 
+  // ✅ init auth + listener (len raz)
+  useEffect(() => {
+    let alive = true;
+
+    async function initAuth() {
+      setAuthLoading(true);
+      try {
+        const { data } = await supabase.auth.getSession();
+        if (!alive) return;
+        setSession(data.session ?? null);
+      } catch {
+        if (!alive) return;
+        setSession(null);
+      } finally {
+        if (!alive) return;
+        setAuthLoading(false);
+      }
+    }
+
+    initAuth();
+
+    const { data } = supabase.auth.onAuthStateChange((_event: AuthChangeEvent, nextSession: Session | null) => {
+      if (!alive) return;
+      setSession(nextSession);
+      setAuthLoading(false);
+    });
+
+    return () => {
+      alive = false;
+      data.subscription.unsubscribe();
+    };
+  }, [supabase]);
+
   async function getAccessTokenOrNull() {
-  const { data } = await supabase.auth.getSession();
-  return data.session?.access_token ?? null;
+    return accessToken ?? null;
   }
 
-  async function fetchEntitlementsForWeek(ws: string) {
+  async function fetchEntitlementsForWeek(ws: string, signal?: AbortSignal) {
     const token = await getAccessTokenOrNull();
     if (!token) {
       setEnt(null);
@@ -357,76 +413,35 @@ export default function GeneratorPage() {
     try {
       const res = await fetch(`/api/entitlements?week_start=${encodeURIComponent(ws)}`, {
         headers: { Authorization: `Bearer ${token}` },
+        signal,
       });
+
       const data = await res.json().catch(() => null);
-      if (res.ok && data) setEnt(data as Entitlements);
-      else setEnt(null);
-    } finally {
-      setEntLoading(false);
-    }
-  }
-    useEffect(() => {
-  let alive = true;
 
-  async function initAuth() {
-    if (!alive) return;
-    setAuthLoading(true);
-
-    try {
-      const { data } = await supabase.auth.getSession();
-      if (!alive) return;
-
-      const session = data.session ?? null;
-      setUserEmail(session?.user?.email ?? null);
-
-      if (session?.access_token) {
-        await fetchEntitlementsForWeek(weekStartRef.current);
-      } else {
-        setEnt(null);
+      if (!signal?.aborted) {
+        if (res.ok && data) setEnt(data as Entitlements);
+        else setEnt(null);
       }
-    } catch {
-      if (!alive) return;
-      setUserEmail(null);
-      setEnt(null);
+    } catch (e: any) {
+      if (e?.name !== "AbortError") setEnt(null);
     } finally {
-      if (!alive) return;
-      setAuthLoading(false);
+      if (!signal?.aborted) setEntLoading(false);
     }
   }
 
-  initAuth();
-
-  const { data } = supabase.auth.onAuthStateChange(
-    async (_event: AuthChangeEvent, session: Session | null) => {
-      if (!alive) return;
-
-      setUserEmail(session?.user?.email ?? null);
-      setAuthLoading(false);
-
-      if (session?.access_token) {
-        await fetchEntitlementsForWeek(weekStartRef.current);
-      } else {
-        setEnt(null);
-      }
-    }
-  );
-
-  return () => {
-    alive = false;
-    data.subscription.unsubscribe();
-  };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [supabase]);
-  
-  
+  // ✅ entitlements fetch: iba keď máme token + pri zmene weekStart
   useEffect(() => {
-    if (!userEmail) {
+    if (!accessToken) {
       setEnt(null);
       return;
     }
-    fetchEntitlementsForWeek(weekStart);
+
+    const ac = new AbortController();
+    fetchEntitlementsForWeek(weekStart, ac.signal);
+
+    return () => ac.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [weekStart, userEmail]);
+  }, [accessToken, weekStart]);
 
   const tier = (ent?.plan ?? "basic") as "basic" | "plus";
   const generationLimitSafe = ent?.weekly_limit ?? (tier === "plus" ? 5 : 3);
@@ -442,18 +457,15 @@ export default function GeneratorPage() {
     return !!weekStart && Number.isFinite(p) && p >= 1 && p <= 6 && Number.isFinite(b) && b >= 1 && b <= 1000;
   }, [people, budget, weekStart]);
 
-  // načítanie uloženého týždňa
+  // ✅ načítanie uloženého týždňa (bez getSession)
   useEffect(() => {
     (async () => {
       setExistingRow(null);
-      if (!userEmail) return;
+      const user = session?.user;
+      if (!user) return;
 
       setExistingLoading(true);
       try {
-        const { data: sess } = await supabase.auth.getSession();
-        const user = sess.session?.user;
-        if (!user) return;
-
         const { data, error } = await supabase
           .from("meal_plans")
           .select("id, week_start, generation_count, plan, plan_generated")
@@ -467,7 +479,7 @@ export default function GeneratorPage() {
         setExistingLoading(false);
       }
     })();
-  }, [supabase, userEmail, weekStart]);
+  }, [supabase, session, weekStart]);
 
   const usedGenerations = useMemo(() => {
     if (typeof ent?.used === "number") return ent.used;
@@ -480,15 +492,14 @@ export default function GeneratorPage() {
     return Math.max(0, generationLimitSafe - usedGenerations);
   }, [generationLimitSafe, usedGenerations, ent]);
 
-  const paywalled = !!userEmail && !!ent && ent.can_generate === false;
+  const paywalled = !!accessToken && !!ent && ent.can_generate === false;
 
   async function loadSavedFromProfile() {
     setBanner(null);
     setPrefMsg("");
     setPrefLoading(true);
 
-    const { data: s } = await supabase.auth.getSession();
-    const user = s.session?.user;
+    const user = session?.user;
     if (!user) {
       setPrefLoading(false);
       window.location.href = "/login";
@@ -541,23 +552,25 @@ export default function GeneratorPage() {
     setPrefMsg("");
     setPrefLoading(true);
 
-    const { data: s } = await supabase.auth.getSession();
-    const user = s.session?.user;
+    const user = session?.user;
     if (!user) {
       setPrefLoading(false);
       window.location.href = "/login";
       return;
     }
 
+    // ✅ bezpečné čísla -> nikdy NaN -> nikdy NULL “náhodou”
     const payload: ProfileRow = {
       user_id: user.id,
       full_name: null,
       language: null,
 
-      people_default: people.trim() ? Number(people) : null,
-      weekly_budget_eur_default: budget.trim() ? Number(budget) : null,
-      shopping_trips_default: shoppingTrips.trim() ? Number(shoppingTrips) : null,
-      repeat_days_default: repeatDays.trim() ? Number(repeatDays) : null,
+      people_default: toIntOrNull(people, { min: 1, max: 20 }),
+      weekly_budget_eur_default: toNumOrNull(budget, { min: 1, max: 100000 }),
+      shopping_trips_default: toIntOrNull(shoppingTrips, { min: 1, max: 10 }),
+
+      repeat_days_default: toIntOrNull(repeatDays, { min: 1, max: 7 }),
+
       style_default: style.trim() || null,
 
       intolerances: intolerances.trim() || null,
@@ -601,14 +614,14 @@ export default function GeneratorPage() {
   }
 
   async function callGenerateApi(inputPayload: any) {
-    const accessToken = await getAccessTokenOrNull();
-    if (!accessToken) {
+    const token = await getAccessTokenOrNull();
+    if (!token) {
       return { ok: false as const, status: 401 as const, data: { error: { code: "UNAUTHORIZED" } } as any };
     }
 
     const res = await fetch("/api/generate", {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify(inputPayload),
     });
 
@@ -633,8 +646,7 @@ export default function GeneratorPage() {
     setPrefMsg("");
     setBanner(null);
 
-    const { data: s } = await supabase.auth.getSession();
-    const user = s.session?.user;
+    const user = session?.user;
     if (!user) {
       setLoading(false);
       window.location.href = "/login?mode=login&next=" + encodeURIComponent("/generate");
@@ -755,7 +767,9 @@ export default function GeneratorPage() {
           showProfileLink: true,
         });
 
-        await fetchEntitlementsForWeek(weekStart);
+        // refresh entitlements usage pre UI
+        const ac = new AbortController();
+        await fetchEntitlementsForWeek(weekStart, ac.signal);
         return;
       }
 
@@ -809,14 +823,14 @@ export default function GeneratorPage() {
 
   const canGenerate = useMemo(() => {
     if (authLoading) return false;
-    if (!userEmail) return false; // ✅ bez loginu negenerujeme
+    if (!accessToken) return false; // ✅ bez loginu negenerujeme
     if (!isValid) return false;
     if (existingLoading) return false;
     if (entLoading) return false;
     if (paywalled) return false;
     if (remainingGenerations <= 0) return false;
     return true;
-  }, [authLoading, userEmail, isValid, existingLoading, entLoading, paywalled, remainingGenerations]);
+  }, [authLoading, accessToken, isValid, existingLoading, entLoading, paywalled, remainingGenerations]);
 
   const secondaryPill =
     "rounded-full border px-3 py-1.5 text-xs font-semibold transition disabled:opacity-40 " +
@@ -1011,12 +1025,14 @@ export default function GeneratorPage() {
                 {isValid ? (
                   <>
                     {t.generator.ready} • {t.generator.week}: {weekLabel}
-                    {userEmail ? (
+                    {accessToken ? (
                       <>
                         {" • "}
                         {t.generator.generations}:{" "}
-                        <span className="font-semibold">{usedGenerations}/{generationLimitSafe}</span> ({t.generator.remaining}{" "}
-                        <span className="font-semibold">{remainingGenerations}</span>)
+                        <span className="font-semibold">
+                          {usedGenerations}/{generationLimitSafe}
+                        </span>{" "}
+                        ({t.generator.remaining} <span className="font-semibold">{remainingGenerations}</span>)
                       </>
                     ) : null}
                   </>
@@ -1027,45 +1043,38 @@ export default function GeneratorPage() {
 
               <div className="flex flex-wrap items-center gap-3">
                 <div className="flex flex-wrap items-center gap-2">
-                  <button type="button" onClick={loadSavedFromProfile} disabled={prefLoading || paywalled || !userEmail} className={secondaryPill}>
+                  <button type="button" onClick={loadSavedFromProfile} disabled={prefLoading || paywalled || !accessToken} className={secondaryPill}>
                     {prefLoading ? t.common.loading : t.generator.loadSaved}
                   </button>
 
-                  <button type="button" onClick={saveDefaultsToProfile} disabled={prefLoading || paywalled || !userEmail} className={secondaryPill}>
+                  <button type="button" onClick={saveDefaultsToProfile} disabled={prefLoading || paywalled || !accessToken} className={secondaryPill}>
                     {prefLoading ? t.common.loading : t.generator.saveAsDefault}
                   </button>
                 </div>
 
                 {authLoading ? (
-  <button disabled className="btn-primary opacity-60 cursor-not-allowed">
-    Kontrolujem prihlásenie…
-  </button>
-) : userEmail ? (
-  paywalled ? (
-    <Link href="/pricing" className="btn-primary px-5 py-3 text-sm font-semibold">
-      Vybrať členstvo
-    </Link>
-  ) : (
-    <button
-      disabled={loading || !canGenerate}
-      className="btn-primary disabled:cursor-not-allowed"
-      type="submit"
-    >
-      {loading ? t.generator.generating : t.generator.generate}
-    </button>
-  )
-) : (
-  <button
-    type="button"
-    onClick={() =>
-      (window.location.href =
-        "/login?mode=login&next=" + encodeURIComponent("/generate"))
-    }
-    className="btn-primary"
-  >
-    {t.generator.loginToGenerate}
-  </button>
-)}
+                  <button disabled className="btn-primary opacity-60 cursor-not-allowed">
+                    Kontrolujem prihlásenie…
+                  </button>
+                ) : accessToken ? (
+                  paywalled ? (
+                    <Link href="/pricing" className="btn-primary px-5 py-3 text-sm font-semibold">
+                      Vybrať členstvo
+                    </Link>
+                  ) : (
+                    <button disabled={loading || !canGenerate} className="btn-primary disabled:cursor-not-allowed" type="submit">
+                      {loading ? t.generator.generating : t.generator.generate}
+                    </button>
+                  )
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => (window.location.href = "/login?mode=login&next=" + encodeURIComponent("/generate"))}
+                    className="btn-primary"
+                  >
+                    {t.generator.loginToGenerate}
+                  </button>
+                )}
               </div>
             </div>
 
