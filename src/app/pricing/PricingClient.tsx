@@ -9,7 +9,7 @@ type Tier = "basic" | "plus";
 type SubStatus = "none" | "basic" | "plus";
 
 type Entitlements = {
-  plan: "basic" | "plus" ; // ✅ bez null
+  plan: "basic" | "plus";
   status: string;
   can_generate: boolean;
   weekly_limit: number;
@@ -99,6 +99,7 @@ function Card({
 
 function normalizeSubStatusFromEnt(ent: Entitlements | null): SubStatus {
   if (!ent) return "none";
+  if (!ent.has_stripe_link) return "none"; // ✅ bez Stripe väzby sa tvárime ako "no sub"
   return ent.plan === "plus" ? "plus" : "basic";
 }
 
@@ -118,7 +119,6 @@ export default function PricingClient() {
   const [subStatus, setSubStatus] = useState<SubStatus>("none");
 
   const [busy, setBusy] = useState<null | "basic" | "plus" | "portal">(null);
-
   const [msg, setMsg] = useState<{ type: "success" | "error" | "info"; text: string } | null>(null);
 
   // success/canceled paramy z checkoutu
@@ -303,6 +303,15 @@ export default function PricingClient() {
   async function openPortal() {
     setMsg(null);
 
+    // ✅ nepúšťaj portal, ak user nemá stripe väzbu
+    if (!ent?.has_stripe_link) {
+      setMsg({
+        type: "info",
+        text: "Spravovanie predplatného je dostupné až po prvom zakúpení (keď vznikne Stripe zákazník).",
+      });
+      return;
+    }
+
     const token = await getTokenOrLogin();
     if (!token) return;
 
@@ -366,16 +375,18 @@ export default function PricingClient() {
   const btnPrimary = "btn-primary " + buttonBase;
   const btnSecondary = buttonBase + " border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-zinc-900";
 
+  const canManage = !!ent?.has_stripe_link;
+
   const isBasic = subStatus === "basic";
   const isPlus = subStatus === "plus";
   const isNone = subStatus === "none";
 
   const basicCta = isPlus ? (
-    <button type="button" className={btnSecondary} disabled>
-      Aktívny plán: PLUS
+    <button type="button" className={btnSecondary} disabled={!canManage || busy !== null} onClick={openPortal}>
+      {busy === "portal" ? "Otváram…" : "Prejsť na BASIC"}
     </button>
   ) : isBasic ? (
-    <button type="button" className={btnPrimary} disabled={busy !== null} onClick={openPortal}>
+    <button type="button" className={btnPrimary} disabled={!canManage || busy !== null} onClick={openPortal}>
       {busy === "portal" ? "Otváram…" : "Spravovať predplatné"}
     </button>
   ) : (
@@ -385,7 +396,7 @@ export default function PricingClient() {
   );
 
   const plusCta = isPlus ? (
-    <button type="button" className={btnPrimary} disabled={busy !== null} onClick={openPortal}>
+    <button type="button" className={btnPrimary} disabled={!canManage || busy !== null} onClick={openPortal}>
       {busy === "portal" ? "Otváram…" : "Spravovať predplatné"}
     </button>
   ) : isBasic ? (
@@ -406,10 +417,16 @@ export default function PricingClient() {
           <h1 className="mt-2 text-3xl font-bold">Vyber si plán</h1>
           <div className="mt-2 text-sm muted">14 dní zdarma • Zrušíš kedykoľvek</div>
 
-          {loggedIn && ent ? (
+          {/* ✅ “Aktuálny plán” ukáž iba ak naozaj existuje Stripe väzba */}
+          {loggedIn && ent?.has_stripe_link ? (
             <div className="mt-3 text-xs muted-2">
               Aktuálny plán: <span className="font-semibold">{ent.plan.toUpperCase()}</span>
-              {ent.current_period_end ? <> • obdobie do: <span className="font-semibold">{ent.current_period_end}</span></> : null}
+              {ent.current_period_end ? (
+                <>
+                  {" "}
+                  • obdobie do: <span className="font-semibold">{ent.current_period_end}</span>
+                </>
+              ) : null}
             </div>
           ) : null}
         </header>

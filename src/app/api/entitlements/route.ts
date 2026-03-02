@@ -40,14 +40,20 @@ export async function GET(req: Request) {
     const auth = req.headers.get("authorization") || "";
     const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
     if (!token) {
-      return NextResponse.json({ error: "Missing token" }, { status: 401, headers: { "Cache-Control": "no-store" } });
+      return NextResponse.json(
+        { error: "Missing token" },
+        { status: 401, headers: { "Cache-Control": "no-store" } }
+      );
     }
 
     const supabase = createSupabaseAdminClient();
 
     const { data: userRes, error: userErr } = await supabase.auth.getUser(token);
     if (userErr || !userRes?.user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: { "Cache-Control": "no-store" } });
+      return NextResponse.json(
+        { error: "Unauthorized" },
+        { status: 401, headers: { "Cache-Control": "no-store" } }
+      );
     }
 
     const userId = userRes.user.id;
@@ -60,25 +66,32 @@ export async function GET(req: Request) {
       .maybeSingle();
 
     if (subErr) {
-      return NextResponse.json({ error: subErr.message }, { status: 500, headers: { "Cache-Control": "no-store" } });
+      return NextResponse.json(
+        { error: subErr.message },
+        { status: 500, headers: { "Cache-Control": "no-store" } }
+      );
     }
 
-    // ak nič nemá -> paywall (ako BASIC)
+    // ✅ Nemá nič v subscriptions -> “bez predplatného”
+    // (plan nech je default "basic", ale bez stripe linku a bez can_generate)
     if (!subRow) {
-  return NextResponse.json({
-    plan: null,
-    status: "none",
-    can_generate: false,
-    weekly_limit: 0,
-    used: 0,
-    remaining: 0,
-    calories_enabled: false,
-    allowed_styles: [],
-    trial_until: null,
-    current_period_end: null,
-    has_stripe_link: false,
-  });
-
+      const limits = planLimits("basic");
+      return NextResponse.json(
+        {
+          plan: "basic",
+          status: "inactive",
+          can_generate: false,
+          weekly_limit: limits.weekly_limit,
+          used: 0,
+          remaining: limits.weekly_limit,
+          calories_enabled: limits.calories_enabled,
+          allowed_styles: limits.allowed_styles,
+          trial_until: null,
+          current_period_end: null,
+          has_stripe_link: false,
+        },
+        { headers: { "Cache-Control": "no-store" } }
+      );
     }
 
     const plan: Plan = (subRow.plan as Plan) || "basic";
@@ -91,7 +104,7 @@ export async function GET(req: Request) {
     const limits = planLimits(plan);
     const activeLike = isActiveLike(status, now, current_period_end, trial_until);
 
-    // Pozn.: generovanie iba ak je aktívne/trial a máme Stripe link
+    // ✅ generovanie len ak active/trial + má stripe väzbu
     const can_generate = activeLike && has_stripe_link;
 
     // usage (voliteľné)
@@ -129,6 +142,9 @@ export async function GET(req: Request) {
       { headers: { "Cache-Control": "no-store" } }
     );
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? "Unknown error" }, { status: 500, headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json(
+      { error: e?.message ?? "Unknown error" },
+      { status: 500, headers: { "Cache-Control": "no-store" } }
+    );
   }
 }
