@@ -1,4 +1,3 @@
-// src/app/api/stripe/create_checkout_session/route.ts
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -43,17 +42,20 @@ export async function POST(req: Request) {
 
     const price = plan === "plus" ? pricePlus : priceBasic;
 
-    // 1) Nájdeme existujúce mapovanie v DB (ak existuje)
-    const { data: subRow } = await supabase
+    // Nájdeme existujúce mapovanie
+    const { data: subRow, error: subErr } = await supabase
       .from("subscriptions")
       .select("stripe_customer_id,stripe_subscription_id,status")
       .eq("user_id", user.id)
       .maybeSingle();
 
-    // Ak už má aktívne/trial predplatné, vráť 409 (to je to, čo teraz vidíš)
+    if (subErr) {
+      return NextResponse.json({ error: subErr.message }, { status: 500 });
+    }
+
+    // Ak už existuje subscription id, over v Stripe či je stále active-like
     const existingSubId = subRow?.stripe_subscription_id ?? null;
     if (existingSubId) {
-      // niekedy máš stale row ale v Stripe je zrušené – overíme v Stripe
       try {
         const existing = await stripe.subscriptions.retrieve(existingSubId);
         if (["active", "trialing", "past_due", "unpaid"].includes(existing.status)) {
@@ -63,32 +65,30 @@ export async function POST(req: Request) {
           );
         }
       } catch {
-        // ak retrieve zlyhá, pokračujeme – môže byť staré ID
+        // staré ID - pokračuj
       }
     }
 
-    // 2) Customer: ak existuje v DB, použi ho. Inak vytvor.
+    // Customer
     let customerId = subRow?.stripe_customer_id ?? null;
 
     if (!customerId) {
       const created = await stripe.customers.create({
         email: user.email ?? undefined,
-        metadata: {
-          user_id: user.id,
-        },
+        metadata: { user_id: user.id },
       });
       customerId = created.id;
 
-      // uložíme aspoň customer_id do DB, aby portal fungoval hneď po checkout
+      // Ulož customer do DB hneď (portal bude fungovať aj pred webhookom)
       await supabase.from("subscriptions").upsert(
         {
           user_id: user.id,
           stripe_customer_id: customerId,
-          plan: "basic", // dočasne, reálny plán nastaví webhook podľa price
+          stripe_subscription_id: null,
+          plan: "basic",
           status: "incomplete",
           current_period_end: null,
           trial_until: null,
-          stripe_subscription_id: null,
         },
         { onConflict: "user_id" }
       );
@@ -98,7 +98,6 @@ export async function POST(req: Request) {
     const successUrl = `${site}/pricing?success=1`;
     const cancelUrl = `${site}/pricing?canceled=1`;
 
-    // 3) Checkout session – a TU je fix: metadata pre webhook + subscription_data.metadata
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       customer: customerId,
@@ -107,13 +106,16 @@ export async function POST(req: Request) {
       success_url: successUrl,
       cancel_url: cancelUrl,
 
-      // ✅ toto musí byť, inak webhook nevie user_id
+      // ✅ najspoľahlivejšie priradenie usera
+      client_reference_id: user.id,
+
+      // ✅ metadata na session
       metadata: {
         user_id: user.id,
         plan,
       },
 
-      // ✅ toto je extra istota: user_id aj na subscription
+      // ✅ metadata aj na subscription
       subscription_data: {
         trial_period_days: 14,
         metadata: {
