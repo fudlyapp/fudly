@@ -1,3 +1,4 @@
+// src/app/api/entitlements/route.ts
 import { NextResponse } from "next/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -5,7 +6,7 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 type Plan = "basic" | "plus";
-type Status = "none" | "inactive" | "trialing" | "active" | "past_due" | "canceled";
+type Status = "inactive" | "trialing" | "active" | "past_due" | "canceled" | "none";
 
 function planLimits(plan: Plan) {
   if (plan === "plus") {
@@ -22,15 +23,35 @@ function planLimits(plan: Plan) {
   };
 }
 
-function isActiveLike(status: Status, now: Date, currentPeriodEnd?: string | null, trialUntil?: string | null) {
+// bezpečné parsovanie dátumu (zvládne aj "2026-03-16 22:37:53+00")
+function parseDateMs(v?: string | null) {
+  if (!v) return null;
+
+  // ak je tam medzera medzi dátumom a časom, prehoď na ISO-like
+  let s = v.trim();
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(s)) s = s.replace(" ", "T");
+
+  // +00 -> +00:00
+  if (/[+-]\d{2}$/.test(s)) s = s + ":00";
+
+  const ms = Date.parse(s);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function isActiveLike(status: Status, now: number, currentPeriodEnd?: string | null, trialUntil?: string | null) {
   if (status === "active") {
-    if (!currentPeriodEnd) return true;
-    return new Date(currentPeriodEnd).getTime() > now.getTime();
+    const cpe = parseDateMs(currentPeriodEnd);
+    if (!cpe) return true; // ak Stripe neposlal, ber ako aktívne
+    return cpe > now;
   }
+
   if (status === "trialing") {
-    if (!trialUntil) return false;
-    return new Date(trialUntil).getTime() > now.getTime();
+    const tu = parseDateMs(trialUntil);
+    if (!tu) return false;
+    return tu > now;
   }
+
+  // past_due môžeš (ak chceš) považovať za aktívne, ja to nechávam ako neaktívne
   return false;
 }
 
@@ -40,18 +61,24 @@ export async function GET(req: Request) {
     const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
 
     if (!token) {
-      return NextResponse.json({ error: "Missing token" }, { status: 401, headers: { "Cache-Control": "no-store" } });
+      return NextResponse.json(
+        { error: "Missing token" },
+        { status: 401, headers: { "Cache-Control": "no-store" } }
+      );
     }
 
     const supabase = createSupabaseAdminClient();
 
     const { data: userRes, error: userErr } = await supabase.auth.getUser(token);
     if (userErr || !userRes?.user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: { "Cache-Control": "no-store" } });
+      return NextResponse.json(
+        { error: "Unauthorized" },
+        { status: 401, headers: { "Cache-Control": "no-store" } }
+      );
     }
 
     const userId = userRes.user.id;
-    const now = new Date();
+    const now = Date.now();
 
     const { data: subRow, error: subErr } = await supabase
       .from("subscriptions")
@@ -60,15 +87,18 @@ export async function GET(req: Request) {
       .maybeSingle();
 
     if (subErr) {
-      return NextResponse.json({ error: subErr.message }, { status: 500, headers: { "Cache-Control": "no-store" } });
+      return NextResponse.json(
+        { error: subErr.message },
+        { status: 500, headers: { "Cache-Control": "no-store" } }
+      );
     }
 
-    // ✅ nový user bez subscription riadku
+    // ✅ user nemá subscription row -> ŽIADNY plán
     if (!subRow) {
       return NextResponse.json(
         {
-          plan: null as any,
-          status: "none" as Status,
+          plan: null,
+          status: "none" as const,
           active_like: false,
           can_generate: false,
           weekly_limit: 0,
@@ -78,7 +108,7 @@ export async function GET(req: Request) {
           allowed_styles: [],
           trial_until: null,
           current_period_end: null,
-          has_stripe_link: false, // portal nemá z čoho
+          has_stripe_link: false,
         },
         { headers: { "Cache-Control": "no-store" } }
       );
@@ -86,18 +116,17 @@ export async function GET(req: Request) {
 
     const plan: Plan = (subRow.plan as Plan) || "basic";
     const status: Status = (subRow.status as Status) || "inactive";
+
     const current_period_end = subRow.current_period_end ?? null;
     const trial_until = subRow.trial_until ?? null;
 
-    // ✅ portal potrebuje customer id
-    const has_stripe_link = !!subRow.stripe_customer_id;
+    const has_stripe_link = !!(subRow.stripe_customer_id || subRow.stripe_subscription_id);
 
     const limits = planLimits(plan);
     const active_like = isActiveLike(status, now, current_period_end, trial_until);
 
-    // ✅ GENEROVANIE NEVIAŽ na stripe_customer_id
-    // trial/active = stačí. (Stripe link riešime osobitne pre portal.)
-    const can_generate = active_like;
+    // ✅ generovanie povol len ak to je aktívne/trial + máme stripe link
+    const can_generate = active_like && has_stripe_link;
 
     // usage (voliteľné)
     const url = new URL(req.url);
