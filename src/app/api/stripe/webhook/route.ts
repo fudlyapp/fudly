@@ -1,4 +1,3 @@
-// src/app/api/stripe/webhook/route.ts
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -6,7 +5,7 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string);
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, );
 
 function toIsoFromUnix(unix?: number | null) {
   return unix ? new Date(unix * 1000).toISOString() : null;
@@ -26,6 +25,48 @@ function inferPlanFromSubscription(sub: Stripe.Subscription): "basic" | "plus" |
   return null;
 }
 
+async function resolveUserIdFromEvent(
+  event: Stripe.Event
+): Promise<{ userId: string | null; customerId: string | null; subscriptionId: string | null }> {
+  // checkout.session.completed
+  if (event.type === "checkout.session.completed") {
+    const session = event.data.object as Stripe.Checkout.Session;
+
+    const subscriptionId = (session.subscription as string | null) ?? null;
+    const customerId = (session.customer as string | null) ?? null;
+
+    const userId =
+      (session.metadata?.user_id as string | undefined) ??
+      (session.client_reference_id as string | undefined) ??
+      null;
+
+    return { userId, customerId, subscriptionId };
+  }
+
+  // subscription events
+  if (
+    event.type === "customer.subscription.created" ||
+    event.type === "customer.subscription.updated" ||
+    event.type === "customer.subscription.deleted"
+  ) {
+    const sub = event.data.object as Stripe.Subscription;
+    const subscriptionId = sub.id;
+    const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer?.id ?? null;
+
+    let userId = (sub.metadata?.user_id as string | undefined) ?? null;
+
+    // poistka: ak nemáme userId, skús customer metadata (ak customer vytvárame my)
+    if (!userId && customerId) {
+      const cust = await stripe.customers.retrieve(customerId);
+      if (!("deleted" in cust) && cust?.metadata?.user_id) userId = cust.metadata.user_id;
+    }
+
+    return { userId, customerId, subscriptionId };
+  }
+
+  return { userId: null, customerId: null, subscriptionId: null };
+}
+
 export async function POST(req: Request) {
   const sig = req.headers.get("stripe-signature");
   if (!sig) return NextResponse.json({ error: "Missing stripe signature" }, { status: 400 });
@@ -42,25 +83,19 @@ export async function POST(req: Request) {
   const supabase = createSupabaseAdminClient();
 
   try {
+    const { userId, customerId, subscriptionId } = await resolveUserIdFromEvent(event);
+
     // ===============================
     // CHECKOUT COMPLETED
     // ===============================
     if (event.type === "checkout.session.completed") {
-      const session = event.data.object as Stripe.Checkout.Session;
-
-      const userId = session.metadata?.user_id;
-      const planFromMetadata = (session.metadata?.plan as "basic" | "plus" | undefined) ?? undefined;
-
-      const subscriptionId = (session.subscription as string | null) ?? null;
-      const customerId = (session.customer as string | null) ?? null;
-
       if (!userId || !subscriptionId || !customerId) {
-        return NextResponse.json({ received: true });
+        // nechceme failovať webhook, ale toto je presne dôvod “nič sa neprepne”
+        return NextResponse.json({ received: true, note: "missing userId/subscriptionId/customerId" });
       }
 
       const sub = await stripe.subscriptions.retrieve(subscriptionId);
-      const planFromSub = inferPlanFromSubscription(sub) ?? "basic";
-      const plan = planFromMetadata ?? planFromSub;
+      const plan = (sub.metadata?.plan as "basic" | "plus" | undefined) ?? inferPlanFromSubscription(sub) ?? "basic";
 
       const currentPeriodEnd = toIsoFromUnix((sub as any).current_period_end);
       const trialUntil = toIsoFromUnix((sub as any).trial_end);
@@ -77,94 +112,67 @@ export async function POST(req: Request) {
         },
         { onConflict: "user_id" }
       );
+
+      return NextResponse.json({ received: true });
     }
 
     // ===============================
-    // SUBSCRIPTION CREATED (doplnené)
+    // SUBSCRIPTION CREATED / UPDATED
     // ===============================
-    if (event.type === "customer.subscription.created") {
+    if (
+      event.type === "customer.subscription.created" ||
+      event.type === "customer.subscription.updated"
+    ) {
+      if (!subscriptionId) return NextResponse.json({ received: true });
+
       const sub = event.data.object as Stripe.Subscription;
 
-      const subscriptionId = sub.id;
-      const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer?.id;
-
-      const planFromSub = inferPlanFromSubscription(sub) ?? "basic";
+      const planFromSub = inferPlanFromSubscription(sub) ?? (sub.metadata?.plan as any) ?? null;
       const currentPeriodEnd = toIsoFromUnix((sub as any).current_period_end);
       const trialUntil = toIsoFromUnix((sub as any).trial_end);
-
-      // user_id nemusí byť na 100% v Stripe pri portal zmene,
-      // ale často metadata býva zachované – skúsime ho vytiahnuť.
-      const userId = (sub.metadata?.user_id as string | undefined) ?? undefined;
-
-      if (userId) {
-        await supabase.from("subscriptions").upsert(
-          {
-            user_id: userId,
-            stripe_customer_id: customerId ?? null,
-            stripe_subscription_id: subscriptionId,
-            plan: planFromSub,
-            status: sub.status,
-            current_period_end: currentPeriodEnd,
-            trial_until: trialUntil,
-          },
-          { onConflict: "user_id" }
-        );
-      } else {
-        // ak user_id nemáme, aspoň updatuj podľa subscription_id (ak už existuje row)
-        await supabase
-          .from("subscriptions")
-          .update({
-            stripe_customer_id: customerId ?? null,
-            plan: planFromSub,
-            status: sub.status,
-            current_period_end: currentPeriodEnd,
-            trial_until: trialUntil,
-          })
-          .eq("stripe_subscription_id", subscriptionId);
-      }
-    }
-
-    // ===============================
-    // SUBSCRIPTION UPDATED (FIX: aj plan)
-    // ===============================
-    if (event.type === "customer.subscription.updated") {
-      const sub = event.data.object as Stripe.Subscription;
-
-      const subscriptionId = sub.id;
-
-      const currentPeriodEnd = toIsoFromUnix((sub as any).current_period_end);
-      const trialUntil = toIsoFromUnix((sub as any).trial_end);
-
-      const planFromSub = inferPlanFromSubscription(sub);
 
       const patch: any = {
         status: sub.status,
         current_period_end: currentPeriodEnd,
         trial_until: trialUntil,
       };
-
-      // ✅ toto ti doteraz chýbalo
+      if (customerId) patch.stripe_customer_id = customerId;
       if (planFromSub) patch.plan = planFromSub;
 
-      await supabase.from("subscriptions").update(patch).eq("stripe_subscription_id", subscriptionId);
+      if (userId) {
+        await supabase.from("subscriptions").upsert(
+          {
+            user_id: userId,
+            stripe_customer_id: customerId,
+            stripe_subscription_id: subscriptionId,
+            ...patch,
+          },
+          { onConflict: "user_id" }
+        );
+      } else {
+        // fallback: update podľa subscription id (ak row existuje)
+        await supabase.from("subscriptions").update(patch).eq("stripe_subscription_id", subscriptionId);
+      }
+
+      return NextResponse.json({ received: true });
     }
 
     // ===============================
     // SUBSCRIPTION DELETED
     // ===============================
     if (event.type === "customer.subscription.deleted") {
-      const sub = event.data.object as Stripe.Subscription;
-      const subscriptionId = sub.id;
+      if (!subscriptionId) return NextResponse.json({ received: true });
 
       await supabase
         .from("subscriptions")
         .update({
           status: "canceled",
-          stripe_subscription_id: null,
           current_period_end: null,
-          // plan nechávam, aby si vedel zobraziť históriu; ak chceš, môžem ho dať na "basic"
+          trial_until: null,
         })
         .eq("stripe_subscription_id", subscriptionId);
+
+      return NextResponse.json({ received: true });
     }
 
     return NextResponse.json({ received: true });

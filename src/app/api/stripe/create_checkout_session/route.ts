@@ -1,4 +1,3 @@
-// src/app/api/stripe/create_checkout_session/route.ts
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -6,7 +5,9 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string);
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
+  apiVersion: "2023-10-16",
+});
 
 type Body = { plan: "basic" | "plus" };
 
@@ -18,30 +19,37 @@ function getBearer(req: Request) {
 export async function POST(req: Request) {
   try {
     const token = getBearer(req);
-    if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: { "Cache-Control": "no-store" } });
+    if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const { plan } = (await req.json()) as Body;
     if (plan !== "basic" && plan !== "plus") {
-      return NextResponse.json({ error: "Invalid plan" }, { status: 400, headers: { "Cache-Control": "no-store" } });
+      return NextResponse.json({ error: "Invalid plan" }, { status: 400 });
     }
 
-    const priceId = plan === "basic" ? process.env.STRIPE_PRICE_BASIC : process.env.STRIPE_PRICE_PLUS;
-    if (!priceId) return NextResponse.json({ error: "Missing STRIPE_PRICE_* env" }, { status: 500, headers: { "Cache-Control": "no-store" } });
+    const priceId =
+      plan === "basic" ? process.env.STRIPE_PRICE_BASIC : process.env.STRIPE_PRICE_PLUS;
+    if (!priceId) {
+      return NextResponse.json({ error: "Missing STRIPE_PRICE_* env" }, { status: 500 });
+    }
 
     const supabase = createSupabaseAdminClient();
 
     const { data: userRes, error: userErr } = await supabase.auth.getUser(token);
-    if (userErr || !userRes?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: { "Cache-Control": "no-store" } });
+    if (userErr || !userRes?.user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
     const userId = userRes.user.id;
     const email = userRes.user.email ?? undefined;
 
+    // existujúci row (ak je)
     const { data: subRow } = await supabase
       .from("subscriptions")
-      .select("stripe_customer_id,status,trial_until,current_period_end,stripe_subscription_id,plan")
+      .select("stripe_customer_id,status,trial_until,current_period_end,stripe_subscription_id")
       .eq("user_id", userId)
       .maybeSingle();
 
+    // ak už má aktívny/trial, nepúšťaj checkout (má ísť cez portal)
     const status = String(subRow?.status ?? "").toLowerCase();
     const now = Date.now();
     const cpe = subRow?.current_period_end ? new Date(subRow.current_period_end).getTime() : null;
@@ -52,10 +60,33 @@ export async function POST(req: Request) {
       (status === "trialing" && !!tu && tu > now);
 
     if (activeLike && (subRow?.stripe_customer_id || subRow?.stripe_subscription_id)) {
-      return NextResponse.json({ error: "Already has active subscription. Use portal." }, { status: 409, headers: { "Cache-Control": "no-store" } });
+      return NextResponse.json(
+        { error: "Already has active subscription. Use portal." },
+        { status: 409 }
+      );
     }
 
-    const customer = subRow?.stripe_customer_id ?? undefined;
+    // ✅ VŽDY mať customer s user_id v metadata (najspoľahlivejšie mapovanie pre webhook)
+    let customerId = subRow?.stripe_customer_id ?? null;
+
+    if (!customerId) {
+      const customer = await stripe.customers.create({
+        email,
+        metadata: { user_id: userId },
+      });
+      customerId = customer.id;
+
+      // uložíme aspoň customer_id hneď (portal bude vedieť fungovať po checkout-e)
+      await supabase.from("subscriptions").upsert(
+        {
+          user_id: userId,
+          stripe_customer_id: customerId,
+          plan: "basic", // placeholder, webhook to prepíše na reálny
+          status: "inactive",
+        },
+        { onConflict: "user_id" }
+      );
+    }
 
     const origin = process.env.NEXT_PUBLIC_SITE_URL || new URL(req.url).origin;
     const successUrl = `${origin}/pricing?success=1`;
@@ -67,8 +98,12 @@ export async function POST(req: Request) {
       success_url: successUrl,
       cancel_url: cancelUrl,
 
-      customer,
-      customer_email: customer ? undefined : email,
+      customer: customerId,
+      // email už netreba, customer existuje
+      customer_email: undefined,
+
+      // ✅ extra poistka: userId aj sem
+      client_reference_id: userId,
 
       subscription_data: {
         trial_period_days: 14,
@@ -78,8 +113,8 @@ export async function POST(req: Request) {
       metadata: { user_id: userId, plan },
     });
 
-    return NextResponse.json({ url: session.url }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({ url: session.url });
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? "Unknown error" }, { status: 500, headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({ error: e?.message ?? "Unknown error" }, { status: 500 });
   }
 }
