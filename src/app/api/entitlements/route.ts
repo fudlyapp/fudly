@@ -95,24 +95,27 @@ export async function GET(req: Request) {
 
     // ✅ user nemá subscription row -> ŽIADNY plán
     if (!subRow) {
-      return NextResponse.json(
-        {
-          plan: null,
-          status: "none" as const,
-          active_like: false,
-          can_generate: false,
-          weekly_limit: 0,
-          used: 0,
-          remaining: 0,
-          calories_enabled: false,
-          allowed_styles: [],
-          trial_until: null,
-          current_period_end: null,
-          has_stripe_link: false,
-        },
-        { headers: { "Cache-Control": "no-store" } }
-      );
-    }
+  return NextResponse.json(
+    {
+      debug_user_id: userId,
+      debug_email: userRes.user.email ?? null,
+
+      plan: null,
+      status: "none" as const,
+      active_like: false,
+      can_generate: false,
+      weekly_limit: 0,
+      used: 0,
+      remaining: 0,
+      calories_enabled: false,
+      allowed_styles: [],
+      trial_until: null,
+      current_period_end: null,
+      has_stripe_link: false,
+    },
+    { headers: { "Cache-Control": "no-store" } }
+  );
+}
 
     const plan: Plan = (subRow.plan as Plan) || "basic";
     const status: Status = (subRow.status as Status) || "inactive";
@@ -148,6 +151,8 @@ export async function GET(req: Request) {
 
     return NextResponse.json(
       {
+        debug_user_id: userId,
+    debug_email: userRes.user.email ?? null,
         plan,
         status,
         active_like,
