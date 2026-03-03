@@ -35,8 +35,9 @@ type ProfileRow = {
 };
 
 type Entitlements = {
-  plan: "basic" | "plus";
+  plan: "basic" | "plus" | null; // ✅ NOVÉ: môže byť null (žiadny plán)
   status: string;
+  active_like?: boolean;
   can_generate: boolean;
   weekly_limit: number;
   used: number;
@@ -294,8 +295,10 @@ export default function ProfilePage() {
   const [entLoading, setEntLoading] = useState(false);
   const [ent, setEnt] = useState<Entitlements | null>(null);
 
-  const isPlus = (ent?.plan ?? "basic") === "plus";
-  const caloriesEnabled = !!ent?.calories_enabled && isPlus;
+  const isPlus = ent?.plan === "plus";
+  const caloriesEnabled = !!ent?.calories_enabled; // entitlements rozhodujú
+
+  const planLabel = ent?.plan ? ent.plan.toUpperCase() : "ŽIADNY";
 
   async function fetchEntitlements(signal?: AbortSignal) {
     if (!accessToken) {
@@ -375,8 +378,8 @@ export default function ProfilePage() {
 
   // ✅ ak nie je PLUS, nedovoľ aby zostal zvolený calories tab
   useEffect(() => {
-    if (tab === "calories" && !caloriesEnabled) setTab("plans");
-  }, [tab, caloriesEnabled]);
+    if (tab === "calories" && (!caloriesEnabled || !isPlus)) setTab("plans");
+  }, [tab, caloriesEnabled, isPlus]);
 
   useEffect(() => {
     (async () => {
@@ -590,7 +593,7 @@ export default function ProfilePage() {
     setPrefLoading(false);
   }
 
-  const lockedCalories = !caloriesEnabled;
+  const lockedCalories = !(isPlus && caloriesEnabled);
 
   return (
     <main className="min-h-screen px-4 sm:px-6 py-6 page-invert-bg overflow-x-hidden">
@@ -605,9 +608,7 @@ export default function ProfilePage() {
             <div className="mt-3 text-sm muted">
               Prihlásený ako <span className="font-semibold">{email}</span>
               {entLoading ? <span className="ml-2 text-xs muted-2">• načítavam členstvo…</span> : null}
-              {!entLoading && ent ? (
-                <span className="ml-2 text-xs muted-2">• plán: {ent.plan.toUpperCase()}</span>
-              ) : null}
+              {!entLoading ? <span className="ml-2 text-xs muted-2">• plán: {planLabel}</span> : null}
             </div>
           ) : null}
         </header>
@@ -632,7 +633,6 @@ export default function ProfilePage() {
                   Uložené nákupy
                 </TabButton>
 
-                {/* ✅ Kalórie – len PLUS (zamknuté -> redirect na pricing) */}
                 <TabButton
                   active={tab === "calories"}
                   locked={lockedCalories}
@@ -693,6 +693,13 @@ export default function ProfilePage() {
                 </select>
               </div>
             )}
+
+            {/* Zvyšok komponentu ostáva nezmenený */}
+            {/* ... */}
+
+            {/* ⚠️ Od tohto miesta je kód identický ako tvoj pôvodný (tabs, listy, UI) */}
+            {/* Aby som ti poslal naozaj komplet funkčný súbor bez ďalších rizík, nechávam zvyšok tak ako bol. */}
+            {/* Nižšie pokračuje tvoj pôvodný render s tabmi presne ako si poslal. */}
 
             {tab === "defaults" ? (
               <section className="rounded-3xl p-6 surface-same-as-nav surface-border">
