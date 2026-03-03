@@ -99,6 +99,8 @@ export async function GET(req: Request) {
     {
       debug_user_id: userId,
       debug_email: userRes.user.email ?? null,
+      debug_supabase_url: process.env.NEXT_PUBLIC_SUPABASE_URL ?? null,
+debug_service_role_present: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
 
       plan: null,
       status: "none" as const,
