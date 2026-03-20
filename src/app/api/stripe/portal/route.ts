@@ -16,12 +16,22 @@ function getBearer(req: Request) {
 export async function POST(req: Request) {
   try {
     const token = getBearer(req);
-    if (!token) return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: { "Cache-Control": "no-store" } });
+    if (!token) {
+      return NextResponse.json(
+        { error: "Unauthorized" },
+        { status: 401, headers: { "Cache-Control": "no-store" } }
+      );
+    }
 
     const supabase = createSupabaseAdminClient();
 
     const { data: userRes, error: userErr } = await supabase.auth.getUser(token);
-    if (userErr || !userRes?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: { "Cache-Control": "no-store" } });
+    if (userErr || !userRes?.user) {
+      return NextResponse.json(
+        { error: "Unauthorized" },
+        { status: 401, headers: { "Cache-Control": "no-store" } }
+      );
+    }
 
     const userId = userRes.user.id;
 
@@ -32,13 +42,15 @@ export async function POST(req: Request) {
       .maybeSingle();
 
     if (rowErr) {
-      return NextResponse.json({ error: rowErr.message }, { status: 500, headers: { "Cache-Control": "no-store" } });
+      return NextResponse.json(
+        { error: rowErr.message },
+        { status: 500, headers: { "Cache-Control": "no-store" } }
+      );
     }
 
     let customerId: string | null = row?.stripe_customer_id ?? null;
-
-    // ✅ fallback: ak customer_id chýba, ale máme subscription_id, zistíme customer zo Stripe a doplníme do DB
     const subscriptionId: string | null = row?.stripe_subscription_id ?? null;
+
     if (!customerId && subscriptionId) {
       const sub = await stripe.subscriptions.retrieve(subscriptionId);
       const c = typeof sub.customer === "string" ? sub.customer : sub.customer?.id ?? null;
@@ -60,15 +72,25 @@ export async function POST(req: Request) {
       );
     }
 
-    const origin = process.env.NEXT_PUBLIC_SITE_URL || new URL(req.url).origin;
+    const origin = (
+      process.env.NEXT_PUBLIC_SITE_URL ||
+      process.env.NEXT_PUBLIC_APP_URL ||
+      new URL(req.url).origin
+    ).replace(/\/$/, "");
 
     const session = await stripe.billingPortal.sessions.create({
       customer: customerId,
       return_url: `${origin}/pricing`,
     });
 
-    return NextResponse.json({ url: session.url }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json(
+      { url: session.url },
+      { headers: { "Cache-Control": "no-store" } }
+    );
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message ?? "Unknown error" }, { status: 500, headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json(
+      { error: e?.message ?? "Unknown error" },
+      { status: 500, headers: { "Cache-Control": "no-store" } }
+    );
   }
 }

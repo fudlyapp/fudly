@@ -1,9 +1,8 @@
-// src/app/generate/page.tsx
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
+import type { Session } from "@supabase/supabase-js";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { useT } from "@/lib/i18n/useT";
 
@@ -51,13 +50,11 @@ type ProfileRow = {
   user_id: string;
   full_name: string | null;
   language: string | null;
-
   people_default: number | null;
   weekly_budget_eur_default: number | null;
   shopping_trips_default: number | null;
   repeat_days_default: number | null;
   style_default: string | null;
-
   intolerances: string | null;
   avoid: string | null;
   have: string | null;
@@ -73,7 +70,7 @@ type MealPlanRowLite = {
 };
 
 type Entitlements = {
-  plan: "basic" | "plus";
+  plan: "basic" | "plus" | null;
   status: string;
   can_generate: boolean;
   weekly_limit: number;
@@ -89,14 +86,17 @@ type Entitlements = {
 function pad2(n: number) {
   return String(n).padStart(2, "0");
 }
+
 function toISODate(d: Date) {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
+
 function addDaysISO(iso: string, add: number) {
   const d = new Date(iso + "T00:00:00");
   d.setDate(d.getDate() + add);
   return toISODate(d);
 }
+
 function mondayOfWeekISO(date: Date) {
   const d = new Date(date);
   const day = d.getDay();
@@ -104,6 +104,7 @@ function mondayOfWeekISO(date: Date) {
   d.setDate(d.getDate() - diffToMonday);
   return toISODate(d);
 }
+
 function formatDateFromISO(iso?: string) {
   if (!iso) return "";
   const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -111,6 +112,7 @@ function formatDateFromISO(iso?: string) {
   const [, y, mm, dd] = m;
   return `${dd}.${mm}.${y}`;
 }
+
 function buildWeekOptions() {
   const today = new Date();
   const day = today.getDay();
@@ -165,24 +167,31 @@ function normalizeRecipeKey(key: string) {
   if (m2) return `d${m2[1]}_${m2[2].toLowerCase()}`;
   return k;
 }
+
 function normalizePlan(plan: PlanJSON): PlanJSON {
   if (!plan) return plan;
   const next: PlanJSON = JSON.parse(JSON.stringify(plan));
 
   if (next.recipes && typeof next.recipes === "object") {
     const fixed: Record<string, Recipe> = {};
-    for (const [k, v] of Object.entries(next.recipes)) fixed[normalizeRecipeKey(k)] = v as Recipe;
+    for (const [k, v] of Object.entries(next.recipes)) {
+      fixed[normalizeRecipeKey(k)] = v as Recipe;
+    }
     next.recipes = fixed;
   }
 
   if (Array.isArray(next.days)) next.days = next.days.slice(0, 7);
   return next;
 }
+
 function expectedRecipeKeys() {
   const keys: string[] = [];
-  for (let d = 1; d <= 7; d++) keys.push(`d${d}_breakfast`, `d${d}_lunch`, `d${d}_dinner`);
+  for (let d = 1; d <= 7; d++) {
+    keys.push(`d${d}_breakfast`, `d${d}_lunch`, `d${d}_dinner`);
+  }
   return keys;
 }
+
 function hasAllRecipes(plan: PlanJSON | null) {
   if (!plan?.recipes) return false;
   const have = new Set(Object.keys(plan.recipes).map(normalizeRecipeKey));
@@ -295,27 +304,21 @@ function CenterModal({
 }
 
 export default function GeneratorPage() {
-  // ✅ Supabase klient vytvoríme až v browseri (po mount-e), aby build/prerender nepadal
   const [supabase, setSupabase] = useState<ReturnType<typeof createSupabaseBrowserClient> | null>(null);
+
   useEffect(() => {
     setSupabase(createSupabaseBrowserClient());
   }, []);
 
   const { t } = useT();
 
-  // ✅ SOURCE OF TRUTH: session
   const [authLoading, setAuthLoading] = useState(true);
   const [session, setSession] = useState<Session | null>(null);
 
-  const userEmail = session?.user?.email ?? null;
   const accessToken = session?.access_token ?? null;
 
   const [weekOptions] = useState(() => buildWeekOptions());
   const [weekStart, setWeekStart] = useState<string>(weekOptions[0]?.value ?? "");
-  const weekStartRef = useRef(weekStart);
-  useEffect(() => {
-    weekStartRef.current = weekStart;
-  }, [weekStart]);
 
   const [people, setPeople] = useState("");
   const [budget, setBudget] = useState("");
@@ -345,45 +348,43 @@ export default function GeneratorPage() {
   const [banner, setBanner] = useState<BannerState>(null);
   const [lastPayload, setLastPayload] = useState<any>(null);
 
-  // ✅ ENTITLEMENTS (zdroj pravdy)
   const [entLoading, setEntLoading] = useState(false);
   const [ent, setEnt] = useState<Entitlements | null>(null);
 
-  // ✅ init auth + listener (len raz)
   useEffect(() => {
-  if (!supabase) return;
-  const sb = supabase; // ✅ toto je fix pre TS
+    if (!supabase) return;
+    const sb = supabase;
 
-  let alive = true;
+    let alive = true;
 
-  async function initAuth() {
-    setAuthLoading(true);
-    try {
-      const { data } = await sb.auth.getSession(); // ✅ sb namiesto supabase
-      if (!alive) return;
-      setSession(data.session ?? null);
-    } catch {
-      if (!alive) return;
-      setSession(null);
-    } finally {
-      if (!alive) return;
-      setAuthLoading(false);
+    async function initAuth() {
+      setAuthLoading(true);
+      try {
+        const { data } = await sb.auth.getSession();
+        if (!alive) return;
+        setSession(data.session ?? null);
+      } catch {
+        if (!alive) return;
+        setSession(null);
+      } finally {
+        if (!alive) return;
+        setAuthLoading(false);
+      }
     }
-  }
 
-  initAuth();
+    initAuth();
 
-  const { data } = sb.auth.onAuthStateChange((_event, nextSession) => {
-    if (!alive) return;
-    setSession(nextSession);
-    setAuthLoading(false);
-  });
+    const { data } = sb.auth.onAuthStateChange((_event, nextSession) => {
+      if (!alive) return;
+      setSession(nextSession);
+      setAuthLoading(false);
+    });
 
-  return () => {
-    alive = false;
-    data.subscription.unsubscribe();
-  };
-}, [supabase]);
+    return () => {
+      alive = false;
+      data.subscription.unsubscribe();
+    };
+  }, [supabase]);
 
   async function getAccessTokenOrNull() {
     return accessToken ?? null;
@@ -391,12 +392,14 @@ export default function GeneratorPage() {
 
   async function fetchEntitlementsForWeek(ws: string, signal?: AbortSignal) {
     const token = await getAccessTokenOrNull();
+
     if (!token) {
       setEnt(null);
       return;
     }
 
     setEntLoading(true);
+
     try {
       const res = await fetch(`/api/entitlements?week_start=${encodeURIComponent(ws)}&t=${Date.now()}`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -417,7 +420,6 @@ export default function GeneratorPage() {
     }
   }
 
-  // ✅ entitlements fetch: iba keď máme token + pri zmene weekStart
   useEffect(() => {
     if (!accessToken) {
       setEnt(null);
@@ -428,7 +430,6 @@ export default function GeneratorPage() {
     fetchEntitlementsForWeek(weekStart, ac.signal);
 
     return () => ac.abort();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accessToken, weekStart]);
 
   const tier = (ent?.plan ?? "basic") as "basic" | "plus";
@@ -445,16 +446,17 @@ export default function GeneratorPage() {
     return !!weekStart && Number.isFinite(p) && p >= 1 && p <= 6 && Number.isFinite(b) && b >= 1 && b <= 1000;
   }, [people, budget, weekStart]);
 
-  // ✅ načítanie uloženého týždňa
   useEffect(() => {
     if (!supabase) return;
 
     (async () => {
       setExistingRow(null);
+
       const user = session?.user;
       if (!user) return;
 
       setExistingLoading(true);
+
       try {
         const { data, error } = await supabase
           .from("meal_plans")
@@ -481,6 +483,15 @@ export default function GeneratorPage() {
     if (typeof ent?.remaining === "number") return ent.remaining;
     return Math.max(0, generationLimitSafe - usedGenerations);
   }, [generationLimitSafe, usedGenerations, ent]);
+
+  const allowedStyles = useMemo(() => {
+    if (Array.isArray(ent?.allowed_styles) && ent.allowed_styles.length > 0) {
+      return new Set(ent.allowed_styles);
+    }
+    return new Set(tier === "plus"
+      ? ["lacné", "rychle", "vyvazene", "vegetarianske", "fit", "tradicne", "exoticke"]
+      : ["lacné", "rychle", "vyvazene", "vegetarianske"]);
+  }, [ent, tier]);
 
   const paywalled = !!accessToken && !!ent && ent.can_generate === false;
 
@@ -513,6 +524,7 @@ export default function GeneratorPage() {
     }
 
     const p = (data as ProfileRow) ?? null;
+
     if (!p) {
       setPrefMsg(t.generator.loadProfileNoDefaults);
       setPrefLoading(false);
@@ -557,13 +569,11 @@ export default function GeneratorPage() {
       user_id: user.id,
       full_name: null,
       language: null,
-
       people_default: people.trim() ? Number(people) : null,
       weekly_budget_eur_default: budget.trim() ? Number(budget) : null,
       shopping_trips_default: shoppingTrips.trim() ? Number(shoppingTrips) : null,
       repeat_days_default: repeatDays.trim() ? Number(repeatDays) : null,
       style_default: style.trim() || null,
-
       intolerances: intolerances.trim() || null,
       avoid: avoid.trim() || null,
       have: have.trim() || null,
@@ -589,6 +599,7 @@ export default function GeneratorPage() {
 
   async function keepExistingPlan() {
     const p = (existingRow?.plan ?? existingRow?.plan_generated) as PlanJSON | null;
+
     if (p) {
       setPlan(normalizePlan(p));
       setTextResult("");
@@ -606,8 +617,13 @@ export default function GeneratorPage() {
 
   async function callGenerateApi(inputPayload: any) {
     const token = await getAccessTokenOrNull();
+
     if (!token) {
-      return { ok: false as const, status: 401 as const, data: { error: { code: "UNAUTHORIZED" } } as any };
+      return {
+        ok: false as const,
+        status: 401 as const,
+        data: { error: { code: "UNAUTHORIZED" } } as any,
+      };
     }
 
     const res = await fetch("/api/generate", {
@@ -617,6 +633,7 @@ export default function GeneratorPage() {
     });
 
     let data: any = null;
+
     try {
       data = await res.json();
     } catch {
@@ -646,7 +663,20 @@ export default function GeneratorPage() {
       return;
     }
 
-    const styleMeta = STYLE_OPTIONS.find((x) => x.value === (payloadOverride?.style ?? style));
+    const selectedStyle = payloadOverride?.style ?? style;
+    const styleMeta = STYLE_OPTIONS.find((x) => x.value === selectedStyle);
+
+    if (!allowedStyles.has(selectedStyle)) {
+      setLoading(false);
+      setBanner({
+        variant: "error",
+        title: "Zvolený štýl nie je dostupný",
+        message: "Tento štýl nie je dostupný v tvojom členstve. Vyber iný štýl alebo upgrade na PLUS.",
+        canRetry: false,
+      });
+      return;
+    }
+
     if (styleMeta?.plusOnly && tier !== "plus") {
       setLoading(false);
       setBanner({
@@ -760,7 +790,6 @@ export default function GeneratorPage() {
           showProfileLink: true,
         });
 
-        // refresh entitlements usage pre UI
         const ac = new AbortController();
         await fetchEntitlementsForWeek(weekStart, ac.signal);
         return;
@@ -799,6 +828,7 @@ export default function GeneratorPage() {
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+
     if (!isValid) return;
 
     if (paywalled) {
@@ -951,11 +981,23 @@ export default function GeneratorPage() {
             </Field>
 
             <Field label={t.generator.people}>
-              <input value={people} onChange={(e) => setPeople(e.target.value)} required className="input-surface" placeholder="2" />
+              <input
+                value={people}
+                onChange={(e) => setPeople(e.target.value)}
+                required
+                className="input-surface"
+                placeholder="2"
+              />
             </Field>
 
             <Field label={t.generator.budget}>
-              <input value={budget} onChange={(e) => setBudget(e.target.value)} required className="input-surface" placeholder="80" />
+              <input
+                value={budget}
+                onChange={(e) => setBudget(e.target.value)}
+                required
+                className="input-surface"
+                placeholder="80"
+              />
             </Field>
           </div>
 
@@ -963,7 +1005,7 @@ export default function GeneratorPage() {
             <Field label={t.generator.style}>
               <select value={style} onChange={(e) => setStyle(e.target.value)} className="input-surface">
                 {STYLE_OPTIONS.map((s) => {
-                  const disabled = !!s.plusOnly && tier !== "plus";
+                  const disabled = !allowedStyles.has(s.value);
                   return (
                     <option key={s.value} value={s.value} disabled={disabled}>
                       {s.emoji} {s.label} — {s.desc}
@@ -973,7 +1015,9 @@ export default function GeneratorPage() {
                 })}
               </select>
 
-              {tier !== "plus" ? <div className="mt-1 text-xs muted-2">Fit / Tradičné / Exotické budú v Plus členstve.</div> : null}
+              {tier !== "plus" ? (
+                <div className="mt-1 text-xs muted-2">Fit / Tradičné / Exotické budú v Plus členstve.</div>
+              ) : null}
             </Field>
 
             <Field label={t.generator.trips}>
@@ -996,19 +1040,39 @@ export default function GeneratorPage() {
 
           <div className="mt-4 grid grid-cols-1 gap-4">
             <Field label={t.generator.intolerances} hint={t.generator.hardBanHint}>
-              <input value={intolerances} onChange={(e) => setIntolerances(e.target.value)} className="input-surface" placeholder="laktóza, arašidy" />
+              <input
+                value={intolerances}
+                onChange={(e) => setIntolerances(e.target.value)}
+                className="input-surface"
+                placeholder="laktóza, arašidy"
+              />
             </Field>
 
             <Field label={t.generator.avoid} hint={t.generator.softPrefHint}>
-              <input value={avoid} onChange={(e) => setAvoid(e.target.value)} className="input-surface" placeholder="huby, brokolica" />
+              <input
+                value={avoid}
+                onChange={(e) => setAvoid(e.target.value)}
+                className="input-surface"
+                placeholder="huby, brokolica"
+              />
             </Field>
 
             <Field label={t.generator.have} hint={t.generator.wasteLessHint}>
-              <input value={have} onChange={(e) => setHave(e.target.value)} className="input-surface" placeholder="ryža, vajcia" />
+              <input
+                value={have}
+                onChange={(e) => setHave(e.target.value)}
+                className="input-surface"
+                placeholder="ryža, vajcia"
+              />
             </Field>
 
             <Field label={t.generator.favorites} hint={t.generator.tastyHint}>
-              <input value={favorites} onChange={(e) => setFavorites(e.target.value)} className="input-surface" placeholder="cestoviny, kura" />
+              <input
+                value={favorites}
+                onChange={(e) => setFavorites(e.target.value)}
+                className="input-surface"
+                placeholder="cestoviny, kura"
+              />
             </Field>
           </div>
 
@@ -1036,11 +1100,21 @@ export default function GeneratorPage() {
 
               <div className="flex flex-wrap items-center gap-3">
                 <div className="flex flex-wrap items-center gap-2">
-                  <button type="button" onClick={loadSavedFromProfile} disabled={prefLoading || paywalled || !accessToken} className={secondaryPill}>
+                  <button
+                    type="button"
+                    onClick={loadSavedFromProfile}
+                    disabled={prefLoading || paywalled || !accessToken}
+                    className={secondaryPill}
+                  >
                     {prefLoading ? t.common.loading : t.generator.loadSaved}
                   </button>
 
-                  <button type="button" onClick={saveDefaultsToProfile} disabled={prefLoading || paywalled || !accessToken} className={secondaryPill}>
+                  <button
+                    type="button"
+                    onClick={saveDefaultsToProfile}
+                    disabled={prefLoading || paywalled || !accessToken}
+                    className={secondaryPill}
+                  >
                     {prefLoading ? t.common.loading : t.generator.saveAsDefault}
                   </button>
                 </div>
