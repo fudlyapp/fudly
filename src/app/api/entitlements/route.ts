@@ -1,4 +1,3 @@
-// src/app/api/entitlements/route.ts
 import { NextResponse } from "next/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -16,6 +15,8 @@ type SubscriptionRow = {
   trial_until: string | null;
   stripe_customer_id: string | null;
   stripe_subscription_id: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
 };
 
 function planLimits(plan: Plan) {
@@ -133,17 +134,38 @@ export async function GET(req: Request) {
     const userEmail = userRes.user.email ?? null;
     const now = Date.now();
 
+    // 1) presný filter podľa user_id
     const { data: subRows, error: subErr } = await supabase
       .from("subscriptions")
       .select(
-        "user_id,plan,status,current_period_end,trial_until,stripe_customer_id,stripe_subscription_id"
+        "user_id,plan,status,current_period_end,trial_until,stripe_customer_id,stripe_subscription_id,created_at,updated_at"
       )
       .eq("user_id", userId);
+
+    // 2) maybeSingle pre porovnanie
+    const { data: subMaybe, error: subMaybeErr } = await supabase
+      .from("subscriptions")
+      .select(
+        "user_id,plan,status,current_period_end,trial_until,stripe_customer_id,stripe_subscription_id,created_at,updated_at"
+      )
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    // 3) vzorka celej tabuľky
+    const { data: allRows, error: allErr } = await supabase
+      .from("subscriptions")
+      .select(
+        "user_id,plan,status,current_period_end,trial_until,stripe_customer_id,stripe_subscription_id,created_at,updated_at"
+      )
+      .order("updated_at", { ascending: false })
+      .limit(10);
 
     if (subErr) {
       return NextResponse.json(
         {
           error: subErr.message,
+          subMaybeErr: subMaybeErr?.message ?? null,
+          allErr: allErr?.message ?? null,
           ...debugBase(userId, userEmail),
         },
         { status: 500, headers: noStoreHeaders() }
@@ -157,6 +179,11 @@ export async function GET(req: Request) {
         {
           ...debugBase(userId, userEmail),
           debug_rows: subRows ?? [],
+          debug_maybe_single: subMaybe ?? null,
+          debug_sub_maybe_error: subMaybeErr?.message ?? null,
+          debug_all_rows: allRows ?? [],
+          debug_all_rows_count: allRows?.length ?? 0,
+          debug_all_rows_error: allErr?.message ?? null,
           plan: null,
           status: "none" as const,
           active_like: false,
@@ -176,14 +203,9 @@ export async function GET(req: Request) {
 
     const plan = normalizePlan(subRow.plan);
     const status = normalizeStatus(subRow.status);
-
     const current_period_end = subRow.current_period_end ?? null;
     const trial_until = subRow.trial_until ?? null;
-
-    const has_stripe_link = !!(
-      subRow.stripe_customer_id ||
-      subRow.stripe_subscription_id
-    );
+    const has_stripe_link = !!(subRow.stripe_customer_id || subRow.stripe_subscription_id);
 
     const limits = planLimits(plan);
     const active_like = isActiveLike(status, now, current_period_end, trial_until);
@@ -208,6 +230,11 @@ export async function GET(req: Request) {
             error: usageErr.message,
             ...debugBase(userId, userEmail),
             debug_rows: subRows ?? [],
+            debug_maybe_single: subMaybe ?? null,
+            debug_sub_maybe_error: subMaybeErr?.message ?? null,
+            debug_all_rows: allRows ?? [],
+            debug_all_rows_count: allRows?.length ?? 0,
+            debug_all_rows_error: allErr?.message ?? null,
           },
           { status: 500, headers: noStoreHeaders() }
         );
@@ -222,6 +249,11 @@ export async function GET(req: Request) {
       {
         ...debugBase(userId, userEmail),
         debug_rows: subRows ?? [],
+        debug_maybe_single: subMaybe ?? null,
+        debug_sub_maybe_error: subMaybeErr?.message ?? null,
+        debug_all_rows: allRows ?? [],
+        debug_all_rows_count: allRows?.length ?? 0,
+        debug_all_rows_error: allErr?.message ?? null,
         plan,
         status,
         active_like,
