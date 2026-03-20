@@ -25,15 +25,34 @@ function inferPlanFromSubscription(sub: Stripe.Subscription): "basic" | "plus" |
   return null;
 }
 
+function mapStripeStatus(
+  status: string
+): "inactive" | "trialing" | "active" | "past_due" | "canceled" {
+  switch (status) {
+    case "trialing":
+      return "trialing";
+    case "active":
+      return "active";
+    case "past_due":
+      return "past_due";
+    case "canceled":
+      return "canceled";
+    case "unpaid":
+    case "incomplete":
+    case "incomplete_expired":
+    case "paused":
+    default:
+      return "inactive";
+  }
+}
+
 async function resolveUserIdFromStripe(
   customerId: string | null,
   subscriptionId: string | null,
   fallbackUserId: string | null
 ) {
-  // 1) fallback z eventu (session.client_reference_id / session.metadata)
   let userId = fallbackUserId;
 
-  // 2) subscription metadata
   if (!userId && subscriptionId) {
     try {
       const sub = await stripe.subscriptions.retrieve(subscriptionId);
@@ -41,7 +60,6 @@ async function resolveUserIdFromStripe(
     } catch {}
   }
 
-  // 3) customer metadata
   if (!userId && customerId) {
     try {
       const cust = await stripe.customers.retrieve(customerId);
@@ -71,7 +89,6 @@ export async function POST(req: Request) {
   const supabase = createSupabaseAdminClient();
 
   try {
-    // ---------- checkout.session.completed ----------
     if (event.type === "checkout.session.completed") {
       const session = event.data.object as Stripe.Checkout.Session;
 
@@ -110,7 +127,7 @@ export async function POST(req: Request) {
           stripe_customer_id: customerId,
           stripe_subscription_id: subscriptionId,
           plan,
-          status: sub.status,
+          status: mapStripeStatus(sub.status),
           current_period_end: currentPeriodEnd,
           trial_until: trialUntil,
         },
@@ -124,7 +141,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ received: true });
     }
 
-    // ---------- customer.subscription.* ----------
     if (
       event.type === "customer.subscription.created" ||
       event.type === "customer.subscription.updated" ||
@@ -142,23 +158,26 @@ export async function POST(req: Request) {
       const trialUntil = toIsoFromUnix((sub as any).trial_end);
 
       if (event.type === "customer.subscription.deleted") {
-        // zrušené
         const { error } = await supabase
           .from("subscriptions")
           .update({ status: "canceled", current_period_end: null, trial_until: null })
           .eq("stripe_subscription_id", subscriptionId);
 
-        if (error) return NextResponse.json({ received: true, note: "db update failed", db_error: error.message });
+        if (error) {
+          return NextResponse.json({ received: true, note: "db update failed", db_error: error.message });
+        }
+
         return NextResponse.json({ received: true });
       }
 
       const planFromSub = inferPlanFromSubscription(sub) ?? (sub.metadata?.plan as any) ?? null;
 
       const patch: any = {
-        status: sub.status,
+        status: mapStripeStatus(sub.status),
         current_period_end: currentPeriodEnd,
         trial_until: trialUntil,
       };
+
       if (customerId) patch.stripe_customer_id = customerId;
       if (planFromSub) patch.plan = planFromSub;
 
@@ -172,10 +191,19 @@ export async function POST(req: Request) {
           },
           { onConflict: "user_id" }
         );
-        if (error) return NextResponse.json({ received: true, note: "db upsert failed", db_error: error.message });
+
+        if (error) {
+          return NextResponse.json({ received: true, note: "db upsert failed", db_error: error.message });
+        }
       } else {
-        const { error } = await supabase.from("subscriptions").update(patch).eq("stripe_subscription_id", subscriptionId);
-        if (error) return NextResponse.json({ received: true, note: "db update failed", db_error: error.message });
+        const { error } = await supabase
+          .from("subscriptions")
+          .update(patch)
+          .eq("stripe_subscription_id", subscriptionId);
+
+        if (error) {
+          return NextResponse.json({ received: true, note: "db update failed", db_error: error.message });
+        }
       }
 
       return NextResponse.json({ received: true });
