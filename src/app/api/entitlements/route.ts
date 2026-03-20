@@ -8,6 +8,16 @@ export const runtime = "nodejs";
 type Plan = "basic" | "plus";
 type Status = "inactive" | "trialing" | "active" | "past_due" | "canceled" | "none";
 
+type SubscriptionRow = {
+  user_id: string;
+  plan: string | null;
+  status: string | null;
+  current_period_end: string | null;
+  trial_until: string | null;
+  stripe_customer_id: string | null;
+  stripe_subscription_id: string | null;
+};
+
 function planLimits(plan: Plan) {
   if (plan === "plus") {
     return {
@@ -16,6 +26,7 @@ function planLimits(plan: Plan) {
       allowed_styles: ["lacné", "rychle", "vyvazene", "vegetarianske", "fit", "tradicne", "exoticke"],
     };
   }
+
   return {
     weekly_limit: 3,
     calories_enabled: false,
@@ -23,25 +34,53 @@ function planLimits(plan: Plan) {
   };
 }
 
-// bezpečné parsovanie dátumu (zvládne aj "2026-03-16 22:37:53+00")
 function parseDateMs(v?: string | null) {
   if (!v) return null;
 
-  // ak je tam medzera medzi dátumom a časom, prehoď na ISO-like
   let s = v.trim();
-  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(s)) s = s.replace(" ", "T");
 
-  // +00 -> +00:00
-  if (/[+-]\d{2}$/.test(s)) s = s + ":00";
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(s)) {
+    s = s.replace(" ", "T");
+  }
+
+  if (/[+-]\d{2}$/.test(s)) {
+    s = s + ":00";
+  }
 
   const ms = Date.parse(s);
   return Number.isFinite(ms) ? ms : null;
 }
 
-function isActiveLike(status: Status, now: number, currentPeriodEnd?: string | null, trialUntil?: string | null) {
+function normalizePlan(v?: string | null): Plan {
+  return v === "plus" ? "plus" : "basic";
+}
+
+function normalizeStatus(v?: string | null): Status {
+  switch (v) {
+    case "trialing":
+      return "trialing";
+    case "active":
+      return "active";
+    case "past_due":
+      return "past_due";
+    case "canceled":
+      return "canceled";
+    case "inactive":
+      return "inactive";
+    default:
+      return "none";
+  }
+}
+
+function isActiveLike(
+  status: Status,
+  now: number,
+  currentPeriodEnd?: string | null,
+  trialUntil?: string | null
+) {
   if (status === "active") {
     const cpe = parseDateMs(currentPeriodEnd);
-    if (!cpe) return true; // ak Stripe neposlal, ber ako aktívne
+    if (!cpe) return true;
     return cpe > now;
   }
 
@@ -51,8 +90,20 @@ function isActiveLike(status: Status, now: number, currentPeriodEnd?: string | n
     return tu > now;
   }
 
-  // past_due môžeš (ak chceš) považovať za aktívne, ja to nechávam ako neaktívne
   return false;
+}
+
+function noStoreHeaders() {
+  return { "Cache-Control": "no-store" };
+}
+
+function debugBase(userId: string, email: string | null) {
+  return {
+    debug_user_id: userId,
+    debug_email: email,
+    debug_supabase_url: process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || null,
+    debug_service_role_present: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+  };
 }
 
 export async function GET(req: Request) {
@@ -63,88 +114,104 @@ export async function GET(req: Request) {
     if (!token) {
       return NextResponse.json(
         { error: "Missing token" },
-        { status: 401, headers: { "Cache-Control": "no-store" } }
+        { status: 401, headers: noStoreHeaders() }
       );
     }
 
     const supabase = createSupabaseAdminClient();
 
     const { data: userRes, error: userErr } = await supabase.auth.getUser(token);
+
     if (userErr || !userRes?.user) {
       return NextResponse.json(
         { error: "Unauthorized" },
-        { status: 401, headers: { "Cache-Control": "no-store" } }
+        { status: 401, headers: noStoreHeaders() }
       );
     }
 
     const userId = userRes.user.id;
+    const userEmail = userRes.user.email ?? null;
     const now = Date.now();
 
-    const { data: subRow, error: subErr } = await supabase
+    const { data: subRows, error: subErr } = await supabase
       .from("subscriptions")
-      .select("plan,status,current_period_end,trial_until,stripe_customer_id,stripe_subscription_id")
-      .eq("user_id", userId)
-      .maybeSingle();
+      .select(
+        "user_id,plan,status,current_period_end,trial_until,stripe_customer_id,stripe_subscription_id"
+      )
+      .eq("user_id", userId);
 
     if (subErr) {
       return NextResponse.json(
-        { error: subErr.message },
-        { status: 500, headers: { "Cache-Control": "no-store" } }
+        {
+          error: subErr.message,
+          ...debugBase(userId, userEmail),
+        },
+        { status: 500, headers: noStoreHeaders() }
       );
     }
 
-    // ✅ user nemá subscription row -> ŽIADNY plán
+    const subRow = (subRows?.[0] ?? null) as SubscriptionRow | null;
+
     if (!subRow) {
-  return NextResponse.json(
-    {
-      debug_user_id: userId,
-      debug_email: userRes.user.email ?? null,
-      debug_supabase_url: process.env.NEXT_PUBLIC_SUPABASE_URL ?? null,
-debug_service_role_present: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+      return NextResponse.json(
+        {
+          ...debugBase(userId, userEmail),
+          debug_rows: subRows ?? [],
+          plan: null,
+          status: "none" as const,
+          active_like: false,
+          can_generate: false,
+          weekly_limit: 0,
+          used: 0,
+          remaining: 0,
+          calories_enabled: false,
+          allowed_styles: [],
+          trial_until: null,
+          current_period_end: null,
+          has_stripe_link: false,
+        },
+        { headers: noStoreHeaders() }
+      );
+    }
 
-      plan: null,
-      status: "none" as const,
-      active_like: false,
-      can_generate: false,
-      weekly_limit: 0,
-      used: 0,
-      remaining: 0,
-      calories_enabled: false,
-      allowed_styles: [],
-      trial_until: null,
-      current_period_end: null,
-      has_stripe_link: false,
-    },
-    { headers: { "Cache-Control": "no-store" } }
-  );
-}
-
-    const plan: Plan = (subRow.plan as Plan) || "basic";
-    const status: Status = (subRow.status as Status) || "inactive";
+    const plan = normalizePlan(subRow.plan);
+    const status = normalizeStatus(subRow.status);
 
     const current_period_end = subRow.current_period_end ?? null;
     const trial_until = subRow.trial_until ?? null;
 
-    const has_stripe_link = !!(subRow.stripe_customer_id || subRow.stripe_subscription_id);
+    const has_stripe_link = !!(
+      subRow.stripe_customer_id ||
+      subRow.stripe_subscription_id
+    );
 
     const limits = planLimits(plan);
     const active_like = isActiveLike(status, now, current_period_end, trial_until);
-
-    // ✅ generovanie povol len ak to je aktívne/trial + máme stripe link
     const can_generate = active_like && has_stripe_link;
 
-    // usage (voliteľné)
     const url = new URL(req.url);
     const week_start = url.searchParams.get("week_start");
 
     let used = 0;
+
     if (week_start && /^\d{4}-\d{2}-\d{2}$/.test(week_start)) {
-      const { data: usage } = await supabase
+      const { data: usage, error: usageErr } = await supabase
         .from("generation_usage")
         .select("count")
         .eq("user_id", userId)
         .eq("week_start", week_start)
         .maybeSingle();
+
+      if (usageErr) {
+        return NextResponse.json(
+          {
+            error: usageErr.message,
+            ...debugBase(userId, userEmail),
+            debug_rows: subRows ?? [],
+          },
+          { status: 500, headers: noStoreHeaders() }
+        );
+      }
 
       used = usage?.count ?? 0;
     }
@@ -153,8 +220,8 @@ debug_service_role_present: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
 
     return NextResponse.json(
       {
-        debug_user_id: userId,
-    debug_email: userRes.user.email ?? null,
+        ...debugBase(userId, userEmail),
+        debug_rows: subRows ?? [],
         plan,
         status,
         active_like,
@@ -168,12 +235,12 @@ debug_service_role_present: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
         current_period_end,
         has_stripe_link,
       },
-      { headers: { "Cache-Control": "no-store" } }
+      { headers: noStoreHeaders() }
     );
   } catch (e: any) {
     return NextResponse.json(
       { error: e?.message ?? "Unknown error" },
-      { status: 500, headers: { "Cache-Control": "no-store" } }
+      { status: 500, headers: noStoreHeaders() }
     );
   }
 }
