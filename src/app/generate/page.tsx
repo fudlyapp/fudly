@@ -474,15 +474,22 @@ export default function GeneratorPage() {
   }, [supabase, session, weekStart]);
 
   const usedGenerations = useMemo(() => {
-    if (typeof ent?.used === "number") return ent.used;
-    const n = existingRow?.generation_count ?? 0;
-    return typeof n === "number" && Number.isFinite(n) ? n : 0;
-  }, [existingRow, ent]);
+  const entUsed = typeof ent?.used === "number" && Number.isFinite(ent.used) ? ent.used : 0;
+  const rowUsed =
+    typeof existingRow?.generation_count === "number" && Number.isFinite(existingRow.generation_count)
+      ? existingRow.generation_count
+      : 0;
 
-  const remainingGenerations = useMemo(() => {
-    if (typeof ent?.remaining === "number") return ent.remaining;
-    return Math.max(0, generationLimitSafe - usedGenerations);
-  }, [generationLimitSafe, usedGenerations, ent]);
+  return Math.max(entUsed, rowUsed);
+}, [existingRow, ent]);
+
+const remainingGenerations = useMemo(() => {
+  if (typeof ent?.remaining === "number" && Number.isFinite(ent.remaining)) {
+    return Math.min(ent.remaining, Math.max(0, generationLimitSafe - usedGenerations));
+  }
+
+  return Math.max(0, generationLimitSafe - usedGenerations);
+}, [generationLimitSafe, usedGenerations, ent]);
 
   const allowedStyles = useMemo(() => {
     if (Array.isArray(ent?.allowed_styles) && ent.allowed_styles.length > 0) {
