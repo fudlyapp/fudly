@@ -20,18 +20,20 @@ export async function POST(req: Request) {
   try {
     const auth = req.headers.get("authorization") || "";
     const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+
     if (!token) {
       return NextResponse.json({ error: "Missing token" }, { status: 401 });
     }
 
-    const supabase = createSupabaseAdminClient();
-    const { data: userRes, error: userErr } = await supabase.auth.getUser(token);
+    const authClient = createSupabaseAdminClient();
+    const { data: userRes, error: userErr } = await authClient.auth.getUser(token);
 
     if (userErr || !userRes?.user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const user = userRes.user;
+    const supabase = createSupabaseAdminClient();
 
     const body = (await req.json().catch(() => null)) as Body | null;
     const plan = body?.plan;

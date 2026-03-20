@@ -1,4 +1,3 @@
-// src/app/api/generate/route.ts
 import { NextResponse } from "next/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -30,7 +29,6 @@ function planLimits(plan: Plan) {
       allowed_styles: ["lacné", "rychle", "vyvazene", "vegetarianske", "fit", "tradicne", "exoticke"],
     };
   }
-
   return {
     weekly_limit: 3,
     calories_enabled: false,
@@ -61,13 +59,11 @@ function isActiveLike(status: Status, nowMs: number, currentPeriodEnd?: string |
     if (!cpe) return true;
     return cpe > nowMs;
   }
-
   if (status === "trialing") {
     const tu = parseDateMs(trialUntil);
     if (!tu) return false;
     return tu > nowMs;
   }
-
   return false;
 }
 
@@ -150,7 +146,6 @@ async function requireActiveSubscription(
   return { ok: true as const, planTier };
 }
 
-// --- parsovanie OpenAI ---
 function extractText(data: any): string {
   if (!data) return "";
   if (typeof data.output_text === "string" && data.output_text.trim()) return data.output_text;
@@ -313,9 +308,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
     }
 
-    const supabase = createSupabaseAdminClient();
-
-    const { data: userRes, error: userErr } = await supabase.auth.getUser(token);
+    const authClient = createSupabaseAdminClient();
+    const { data: userRes, error: userErr } = await authClient.auth.getUser(token);
     if (userErr || !userRes?.user) {
       return NextResponse.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
     }
@@ -340,6 +334,8 @@ export async function POST(req: Request) {
     if (budgetNum == null) {
       return NextResponse.json({ error: { code: "INVALID_BUDGET" } }, { status: 400 });
     }
+
+    const supabase = createSupabaseAdminClient();
 
     const sub = await requireActiveSubscription(supabase, userId);
     if (!sub.ok) return NextResponse.json(sub.payload, { status: sub.status });

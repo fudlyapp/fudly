@@ -97,15 +97,6 @@ function noStoreHeaders() {
   return { "Cache-Control": "no-store" };
 }
 
-function debugBase(userId: string, email: string | null) {
-  return {
-    debug_user_id: userId,
-    debug_email: email,
-    debug_supabase_url: process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || null,
-    debug_service_role_present: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
-  };
-}
-
 export async function GET(req: Request) {
   try {
     const auth = req.headers.get("authorization") || "";
@@ -118,9 +109,9 @@ export async function GET(req: Request) {
       );
     }
 
-    const supabase = createSupabaseAdminClient();
-
-    const { data: userRes, error: userErr } = await supabase.auth.getUser(token);
+    // 1) over usera
+    const authClient = createSupabaseAdminClient();
+    const { data: userRes, error: userErr } = await authClient.auth.getUser(token);
 
     if (userErr || !userRes?.user) {
       return NextResponse.json(
@@ -130,22 +121,19 @@ export async function GET(req: Request) {
     }
 
     const userId = userRes.user.id;
-    const userEmail = userRes.user.email ?? null;
     const now = Date.now();
+
+    // 2) na DB používaj fresh admin client
+    const supabase = createSupabaseAdminClient();
 
     const { data: subRows, error: subErr } = await supabase
       .from("subscriptions")
-      .select(
-        "user_id,plan,status,current_period_end,trial_until,stripe_customer_id,stripe_subscription_id"
-      )
+      .select("user_id,plan,status,current_period_end,trial_until,stripe_customer_id,stripe_subscription_id")
       .eq("user_id", userId);
 
     if (subErr) {
       return NextResponse.json(
-        {
-          error: subErr.message,
-          ...debugBase(userId, userEmail),
-        },
+        { error: subErr.message },
         { status: 500, headers: noStoreHeaders() }
       );
     }
@@ -155,8 +143,6 @@ export async function GET(req: Request) {
     if (!subRow) {
       return NextResponse.json(
         {
-          ...debugBase(userId, userEmail),
-          debug_rows: subRows ?? [],
           plan: null,
           status: "none" as const,
           active_like: false,
@@ -176,14 +162,9 @@ export async function GET(req: Request) {
 
     const plan = normalizePlan(subRow.plan);
     const status = normalizeStatus(subRow.status);
-
     const current_period_end = subRow.current_period_end ?? null;
     const trial_until = subRow.trial_until ?? null;
-
-    const has_stripe_link = !!(
-      subRow.stripe_customer_id ||
-      subRow.stripe_subscription_id
-    );
+    const has_stripe_link = !!(subRow.stripe_customer_id || subRow.stripe_subscription_id);
 
     const limits = planLimits(plan);
     const active_like = isActiveLike(status, now, current_period_end, trial_until);
@@ -204,11 +185,7 @@ export async function GET(req: Request) {
 
       if (usageErr) {
         return NextResponse.json(
-          {
-            error: usageErr.message,
-            ...debugBase(userId, userEmail),
-            debug_rows: subRows ?? [],
-          },
+          { error: usageErr.message },
           { status: 500, headers: noStoreHeaders() }
         );
       }
@@ -220,8 +197,6 @@ export async function GET(req: Request) {
 
     return NextResponse.json(
       {
-        ...debugBase(userId, userEmail),
-        debug_rows: subRows ?? [],
         plan,
         status,
         active_like,

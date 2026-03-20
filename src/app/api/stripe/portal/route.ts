@@ -1,4 +1,3 @@
-// src/app/api/stripe/portal/route.ts
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -16,6 +15,7 @@ function getBearer(req: Request) {
 export async function POST(req: Request) {
   try {
     const token = getBearer(req);
+
     if (!token) {
       return NextResponse.json(
         { error: "Unauthorized" },
@@ -23,9 +23,9 @@ export async function POST(req: Request) {
       );
     }
 
-    const supabase = createSupabaseAdminClient();
+    const authClient = createSupabaseAdminClient();
+    const { data: userRes, error: userErr } = await authClient.auth.getUser(token);
 
-    const { data: userRes, error: userErr } = await supabase.auth.getUser(token);
     if (userErr || !userRes?.user) {
       return NextResponse.json(
         { error: "Unauthorized" },
@@ -34,6 +34,7 @@ export async function POST(req: Request) {
     }
 
     const userId = userRes.user.id;
+    const supabase = createSupabaseAdminClient();
 
     const { data: row, error: rowErr } = await supabase
       .from("subscriptions")
