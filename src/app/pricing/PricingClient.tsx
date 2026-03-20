@@ -125,14 +125,20 @@ export default function PricingClient() {
   const [msg, setMsg] = useState<{ type: "success" | "error" | "info"; text: string } | null>(null);
 
   // success/canceled paramy z checkoutu
-  useEffect(() => {
+    useEffect(() => {
     const success = sp.get("success");
     const canceled = sp.get("canceled");
+    const portal = sp.get("portal");
 
     if (success === "1") {
       setMsg({
         type: "success",
         text: "✅ Platba prebehla. Ak sa stav neprepne hneď, obnov stránku o pár sekúnd.",
+      });
+    } else if (portal === "1") {
+      setMsg({
+        type: "info",
+        text: "Predplatné bolo aktualizované. Obnovujem stav členstva…",
       });
     } else if (canceled === "1") {
       setMsg({ type: "info", text: "Platba bola zrušená. Ak chceš, skús to znova." });
@@ -240,23 +246,26 @@ export default function PricingClient() {
   }, [loggedIn, supabase]);
 
   // po návrate zo Stripe: refresh párkrát (webhook dobieha)
-  useEffect(() => {
+    useEffect(() => {
     if (!supabase) return;
+    if (!loggedIn) return;
 
     const success = sp.get("success");
-    if (!loggedIn) return;
-    if (success !== "1") return;
+    const portal = sp.get("portal");
 
-    const t1 = window.setTimeout(() => void fetchEntitlementsOnce(), 1200);
-    const t2 = window.setTimeout(() => void fetchEntitlementsOnce(), 3500);
-    const t3 = window.setTimeout(() => void fetchEntitlementsOnce(), 8000);
+    if (success !== "1" && portal !== "1") return;
+
+    const t1 = window.setTimeout(() => void fetchEntitlementsOnce(), 800);
+    const t2 = window.setTimeout(() => void fetchEntitlementsOnce(), 2000);
+    const t3 = window.setTimeout(() => void fetchEntitlementsOnce(), 5000);
+    const t4 = window.setTimeout(() => void fetchEntitlementsOnce(), 9000);
 
     return () => {
       window.clearTimeout(t1);
       window.clearTimeout(t2);
       window.clearTimeout(t3);
+      window.clearTimeout(t4);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loggedIn, sp, supabase]);
 
   async function startCheckout(plan: Tier) {
