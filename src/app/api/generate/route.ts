@@ -299,6 +299,23 @@ function ensurePerPersonCalories(summary: any) {
 export async function POST(req: Request) {
   try {
     const apiKey = process.env.OPENAI_API_KEY;
+
+// 🧪 TEST: simulácia výpadku OpenAI
+    const forceOpenAiError = process.env.FORCE_OPENAI_ERROR === "1";
+
+    if (forceOpenAiError) {
+      return NextResponse.json(
+        {
+          error: {
+            code: "OPENAI_UPSTREAM_ERROR",
+            status: 503,
+            message: "Simulated OpenAI outage",
+          },
+        },
+        { status: 502 }
+      );
+    }
+
     if (!apiKey) {
       return NextResponse.json({ error: { code: "MISSING_OPENAI_KEY" } }, { status: 500 });
     }
