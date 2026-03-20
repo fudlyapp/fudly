@@ -1,3 +1,4 @@
+//src/app/generate/page.tsx
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";

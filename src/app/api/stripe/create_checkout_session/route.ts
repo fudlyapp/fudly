@@ -1,3 +1,4 @@
+//src/app/api/stripe/create_checkout_session/route.ts
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
