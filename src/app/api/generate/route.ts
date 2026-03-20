@@ -305,15 +305,14 @@ export async function POST(req: Request) {
 
     if (forceOpenAiError) {
       return NextResponse.json(
-        {
-          error: {
-            code: "OPENAI_UPSTREAM_ERROR",
-            status: 503,
-            message: "Simulated OpenAI outage",
-          },
-        },
-        { status: 502 }
-      );
+  {
+    error: {
+      code: "OPENAI_UPSTREAM_ERROR",
+      message: "Service temporarily unavailable",
+    },
+  },
+  { status: 502 }
+);
     }
 
     if (!apiKey) {

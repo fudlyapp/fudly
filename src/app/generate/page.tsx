@@ -251,7 +251,7 @@ function deriveErrorMessage(status: number, api: any) {
     return {
       title: "Generovanie sa nepodarilo",
       message:
-        "AI služba je dočasne nedostupná alebo preťažená. Skús to prosím znova o chvíľu. Zostávajúci počet generovaní ostáva nezmenený.",
+        "Služba je dočasne nedostupná alebo preťažená. Skús to prosím znova o chvíľu. Zostávajúci počet generovaní ostáva nezmenený.",
       canRetry: true,
     };
   }
@@ -807,7 +807,7 @@ const remainingGenerations = useMemo(() => {
         setBanner({
           variant: "error",
           title: "Generovanie sa nepodarilo",
-          message: "AI vrátila nečitateľný výstup. Skús to prosím znova.",
+          message: "Bol vrátený nečitateľný výstup. Skús to prosím znova.",
           detail: data.text,
           canRetry: true,
         });
