@@ -1,3 +1,4 @@
+// src/app/api/stripe/webhook/route.ts
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -11,71 +12,117 @@ function toIsoFromUnix(unix?: number | null) {
   return unix ? new Date(unix * 1000).toISOString() : null;
 }
 
-function inferPlanFromSubscription(sub: Stripe.Subscription): "basic" | "plus" | null {
-  const priceIdBasic = process.env.STRIPE_PRICE_BASIC;
-  const priceIdPlus = process.env.STRIPE_PRICE_PLUS;
-  if (!priceIdBasic || !priceIdPlus) return null;
+function inferPlanFromPriceId(priceId: string | null): "basic" | "plus" {
+  return priceId === process.env.STRIPE_PRICE_PLUS ? "plus" : "basic";
+}
 
-  const first = sub.items?.data?.[0];
-  const priceId = first?.price?.id ?? null;
-  if (!priceId) return null;
+async function resolveUserIdFromCustomer(
+  supabase: ReturnType<typeof createSupabaseAdminClient>,
+  customerId: string | null
+) {
+  if (!customerId) return null;
 
-  if (priceId === priceIdPlus) return "plus";
-  if (priceId === priceIdBasic) return "basic";
+  // 1) skús DB väzbu
+  const { data: row } = await supabase
+    .from("subscriptions")
+    .select("user_id")
+    .eq("stripe_customer_id", customerId)
+    .maybeSingle();
+
+  if (row?.user_id) return row.user_id as string;
+
+  // 2) skús customer metadata
+  try {
+    const cust = await stripe.customers.retrieve(customerId);
+    if (!("deleted" in cust) && cust?.metadata?.user_id) {
+      return cust.metadata.user_id;
+    }
+  } catch {}
+
   return null;
 }
 
-function mapStripeStatus(
-  status: string
-): "inactive" | "trialing" | "active" | "past_due" | "canceled" {
-  switch (status) {
-    case "trialing":
-      return "trialing";
-    case "active":
-      return "active";
-    case "past_due":
-      return "past_due";
-    case "canceled":
-      return "canceled";
-    case "unpaid":
-    case "incomplete":
-    case "incomplete_expired":
-    case "paused":
-    default:
-      return "inactive";
-  }
+async function getCanonicalSubscriptionForCustomer(customerId: string) {
+  const subs = await stripe.subscriptions.list({
+    customer: customerId,
+    status: "all",
+    limit: 20,
+  });
+
+  return (
+    subs.data.find((s) => ["active", "trialing", "past_due", "unpaid"].includes(s.status)) ??
+    subs.data[0] ??
+    null
+  );
 }
 
-async function resolveUserIdFromStripe(
-  customerId: string | null,
-  subscriptionId: string | null,
-  fallbackUserId: string | null
+async function syncCustomerToDb(
+  supabase: ReturnType<typeof createSupabaseAdminClient>,
+  customerId: string
 ) {
-  let userId = fallbackUserId;
-
-  if (!userId && subscriptionId) {
-    try {
-      const sub = await stripe.subscriptions.retrieve(subscriptionId);
-      if (sub?.metadata?.user_id) userId = sub.metadata.user_id;
-    } catch {}
+  const userId = await resolveUserIdFromCustomer(supabase, customerId);
+  if (!userId) {
+    return { ok: false as const, reason: "missing_user_id" };
   }
 
-  if (!userId && customerId) {
-    try {
-      const cust = await stripe.customers.retrieve(customerId);
-      if (!("deleted" in cust) && cust?.metadata?.user_id) userId = cust.metadata.user_id;
-    } catch {}
+  const canonical = await getCanonicalSubscriptionForCustomer(customerId);
+
+  // customer existuje, ale subscription už žiadna nie je
+  if (!canonical) {
+    const { error } = await supabase.from("subscriptions").upsert(
+      {
+        user_id: userId,
+        stripe_customer_id: customerId,
+        stripe_subscription_id: null,
+        plan: "basic",
+        status: "inactive",
+        current_period_end: null,
+        trial_until: null,
+      },
+      { onConflict: "user_id" }
+    );
+
+    if (error) {
+      return { ok: false as const, reason: error.message };
+    }
+
+    return { ok: true as const };
   }
 
-  return userId;
+  const priceId = canonical.items.data[0]?.price?.id ?? null;
+  const plan = inferPlanFromPriceId(priceId);
+  const status = canonical.status === "unpaid" ? "past_due" : canonical.status;
+
+  const { error } = await supabase.from("subscriptions").upsert(
+    {
+      user_id: userId,
+      stripe_customer_id: customerId,
+      stripe_subscription_id: canonical.id,
+      plan,
+      status,
+      current_period_end: toIsoFromUnix((canonical as any).current_period_end ?? null),
+      trial_until: toIsoFromUnix(canonical.trial_end ?? null),
+    },
+    { onConflict: "user_id" }
+  );
+
+  if (error) {
+    return { ok: false as const, reason: error.message };
+  }
+
+  return { ok: true as const };
 }
 
 export async function POST(req: Request) {
   const sig = req.headers.get("stripe-signature");
-  if (!sig) return NextResponse.json({ error: "Missing stripe signature" }, { status: 400 });
+  if (!sig) {
+    return NextResponse.json({ error: "Missing stripe signature" }, { status: 400 });
+  }
 
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-  if (!webhookSecret) return NextResponse.json({ error: "Missing STRIPE_WEBHOOK_SECRET" }, { status: 500 });
+  if (!webhookSecret) {
+    return NextResponse.json({ error: "Missing STRIPE_WEBHOOK_SECRET" }, { status: 500 });
+  }
 
   const body = await req.text();
 
@@ -89,58 +136,24 @@ export async function POST(req: Request) {
   const supabase = createSupabaseAdminClient();
 
   try {
+    // checkout completed
     if (event.type === "checkout.session.completed") {
       const session = event.data.object as Stripe.Checkout.Session;
 
-      const subscriptionId = (session.subscription as string | null) ?? null;
-      const customerId = (session.customer as string | null) ?? null;
+      const customerId =
+        typeof session.customer === "string"
+          ? session.customer
+          : session.customer?.id ?? null;
 
-      const fallbackUserId =
-        (session.metadata?.user_id as string | undefined) ??
-        (session.client_reference_id as string | undefined) ??
-        null;
-
-      const userId = await resolveUserIdFromStripe(customerId, subscriptionId, fallbackUserId);
-
-      if (!userId || !subscriptionId || !customerId) {
-        return NextResponse.json({
-          received: true,
-          note: "missing userId/subscriptionId/customerId",
-          userId,
-          subscriptionId,
-          customerId,
-        });
+      if (!customerId) {
+        return NextResponse.json({ received: true, note: "missing customerId" });
       }
 
-      const sub = await stripe.subscriptions.retrieve(subscriptionId);
-      const plan =
-        (sub.metadata?.plan as "basic" | "plus" | undefined) ??
-        inferPlanFromSubscription(sub) ??
-        "basic";
-
-      const currentPeriodEnd = toIsoFromUnix((sub as any).current_period_end);
-      const trialUntil = toIsoFromUnix((sub as any).trial_end);
-
-      const { error } = await supabase.from("subscriptions").upsert(
-        {
-          user_id: userId,
-          stripe_customer_id: customerId,
-          stripe_subscription_id: subscriptionId,
-          plan,
-          status: mapStripeStatus(sub.status),
-          current_period_end: currentPeriodEnd,
-          trial_until: trialUntil,
-        },
-        { onConflict: "user_id" }
-      );
-
-      if (error) {
-        return NextResponse.json({ received: true, note: "db upsert failed", db_error: error.message });
-      }
-
-      return NextResponse.json({ received: true });
+      const result = await syncCustomerToDb(supabase, customerId);
+      return NextResponse.json({ received: true, sync: result });
     }
 
+    // subscription create/update/delete
     if (
       event.type === "customer.subscription.created" ||
       event.type === "customer.subscription.updated" ||
@@ -148,65 +161,17 @@ export async function POST(req: Request) {
     ) {
       const sub = event.data.object as Stripe.Subscription;
 
-      const subscriptionId = sub.id;
-      const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer?.id ?? null;
+      const customerId =
+        typeof sub.customer === "string"
+          ? sub.customer
+          : sub.customer?.id ?? null;
 
-      const fallbackUserId = (sub.metadata?.user_id as string | undefined) ?? null;
-      const userId = await resolveUserIdFromStripe(customerId, subscriptionId, fallbackUserId);
-
-      const currentPeriodEnd = toIsoFromUnix((sub as any).current_period_end);
-      const trialUntil = toIsoFromUnix((sub as any).trial_end);
-
-      if (event.type === "customer.subscription.deleted") {
-        const { error } = await supabase
-          .from("subscriptions")
-          .update({ status: "canceled", current_period_end: null, trial_until: null })
-          .eq("stripe_subscription_id", subscriptionId);
-
-        if (error) {
-          return NextResponse.json({ received: true, note: "db update failed", db_error: error.message });
-        }
-
-        return NextResponse.json({ received: true });
+      if (!customerId) {
+        return NextResponse.json({ received: true, note: "missing customerId" });
       }
 
-      const planFromSub = inferPlanFromSubscription(sub) ?? (sub.metadata?.plan as any) ?? null;
-
-      const patch: any = {
-        status: mapStripeStatus(sub.status),
-        current_period_end: currentPeriodEnd,
-        trial_until: trialUntil,
-      };
-
-      if (customerId) patch.stripe_customer_id = customerId;
-      if (planFromSub) patch.plan = planFromSub;
-
-      if (userId) {
-        const { error } = await supabase.from("subscriptions").upsert(
-          {
-            user_id: userId,
-            stripe_customer_id: customerId,
-            stripe_subscription_id: subscriptionId,
-            ...patch,
-          },
-          { onConflict: "user_id" }
-        );
-
-        if (error) {
-          return NextResponse.json({ received: true, note: "db upsert failed", db_error: error.message });
-        }
-      } else {
-        const { error } = await supabase
-          .from("subscriptions")
-          .update(patch)
-          .eq("stripe_subscription_id", subscriptionId);
-
-        if (error) {
-          return NextResponse.json({ received: true, note: "db update failed", db_error: error.message });
-        }
-      }
-
-      return NextResponse.json({ received: true });
+      const result = await syncCustomerToDb(supabase, customerId);
+      return NextResponse.json({ received: true, sync: result });
     }
 
     return NextResponse.json({ received: true });
