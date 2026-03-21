@@ -25,6 +25,7 @@ type Entitlements = {
 
 const CHECKOUT_ENDPOINT = "/api/stripe/create_checkout_session";
 const PORTAL_ENDPOINT = "/api/stripe/portal";
+const FINALIZE_CHECKOUT_ENDPOINT = "/api/stripe/finalize_checkout";
 
 function Pill({ children }: { children: React.ReactNode }) {
   return (
@@ -155,7 +156,7 @@ export default function PricingClient() {
     if (success === "1") {
       setMsg({
         type: "success",
-        text: "✅ Platba prebehla. Ak sa stav neprepne hneď, obnov stránku o pár sekúnd.",
+        text: "✅ Platba prebehla. Aktivujem členstvo…",
       });
     } else if (portal === "1") {
       setMsg({
@@ -241,7 +242,7 @@ export default function PricingClient() {
     return e;
   }
 
-  async function syncSubscriptionFromStripe() {
+  async function finalizeCheckout(sessionId: string) {
     if (!supabase) return;
 
     const { data: s } = await supabase.auth.getSession();
@@ -249,12 +250,14 @@ export default function PricingClient() {
 
     if (!token) return;
 
-    await fetch("/api/stripe/sync_subscription", {
+    await fetch(FINALIZE_CHECKOUT_ENDPOINT, {
       method: "POST",
       headers: {
+        "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
       },
       cache: "no-store",
+      body: JSON.stringify({ session_id: sessionId }),
     }).catch(() => null);
   }
 
@@ -285,28 +288,28 @@ export default function PricingClient() {
     };
   }, [loggedIn, supabase]);
 
-  // robustný refresh po návrate zo Stripe
   useEffect(() => {
     if (!supabase) return;
     if (!loggedIn) return;
 
     const success = sp.get("success");
     const portal = sp.get("portal");
+    const sessionId = sp.get("session_id");
 
     if (success !== "1" && portal !== "1") return;
 
     let stopped = false;
     let timer: number | null = null;
     let attempts = 0;
-    const maxAttempts = 15;
+    const maxAttempts = 12;
 
     async function poll() {
       if (stopped) return;
 
       attempts += 1;
 
-      if (attempts === 1) {
-        await syncSubscriptionFromStripe();
+      if (success === "1" && attempts === 1 && sessionId) {
+        await finalizeCheckout(sessionId);
       }
 
       const e = await fetchEntitlementsOnce();
@@ -325,12 +328,12 @@ export default function PricingClient() {
 
       timer = window.setTimeout(() => {
         void poll();
-      }, 2000);
+      }, 1500);
     }
 
     timer = window.setTimeout(() => {
       void poll();
-    }, 800);
+    }, 500);
 
     return () => {
       stopped = true;

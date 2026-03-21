@@ -95,9 +95,7 @@ export async function POST(req: Request) {
       customerId = created.id;
     }
 
-    // ✅ KRITICKÉ:
-    // Vždy udržuj subscriptions row ešte pred redirectom do Stripe.
-    // Tým pádom úplne nový user nebude po návrate chvíľu "ŽIADNY".
+    // predvytvor / udrž row v subscriptions
     const { error: upsertErr } = await supabase.from("subscriptions").upsert(
       {
         user_id: user.id,
@@ -116,7 +114,7 @@ export async function POST(req: Request) {
     }
 
     const site = siteUrlFromReq(req);
-    const successUrl = `${site}/pricing?success=1`;
+    const successUrl = `${site}/pricing?success=1&session_id={CHECKOUT_SESSION_ID}`;
     const cancelUrl = `${site}/pricing?canceled=1`;
 
     const session = await stripe.checkout.sessions.create({
