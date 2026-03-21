@@ -3,6 +3,23 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import React, { useEffect, useState } from "react";
+import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+
+type Entitlements = {
+  plan: "basic" | "plus" | null;
+  status: string;
+  active_like: boolean;
+  can_generate: boolean;
+  weekly_limit: number;
+  used: number;
+  remaining: number;
+  calories_enabled: boolean;
+  allowed_styles: string[];
+  trial_until: string | null;
+  current_period_end: string | null;
+  has_stripe_link: boolean;
+};
 
 function FeatureCard({ title, desc }: { title: string; desc: string }) {
   return (
@@ -95,7 +112,282 @@ function PricingCard({
   );
 }
 
+function AppActionCard({
+  title,
+  desc,
+  href,
+  primary,
+}: {
+  title: string;
+  desc: string;
+  href: string;
+  primary?: boolean;
+}) {
+  return (
+    <Link
+      href={href}
+      className={[
+        "rounded-2xl p-5 surface-same-as-nav surface-border transition block",
+        primary ? "ring-1 ring-black/10 dark:ring-white/10" : "",
+        "hover:opacity-[0.98]",
+      ].join(" ")}
+    >
+      <div className="text-base font-semibold">{title}</div>
+      <div className="mt-1 text-sm muted">{desc}</div>
+      <div className="mt-4">
+        <span
+          className={[
+            "inline-flex rounded-xl px-4 py-2 text-sm font-semibold transition",
+            primary
+              ? "btn-primary"
+              : "border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-zinc-900",
+          ].join(" ")}
+        >
+          Otvoriť
+        </span>
+      </div>
+    </Link>
+  );
+}
+
+function statusLabel(status: string) {
+  switch (status) {
+    case "trialing":
+      return "trial";
+    case "active":
+      return "active";
+    case "past_due":
+      return "past_due";
+    case "canceled":
+      return "canceled";
+    case "inactive":
+      return "inactive";
+    default:
+      return "none";
+  }
+}
+
 export default function HomePage() {
+  const [supabase, setSupabase] = useState<ReturnType<typeof createSupabaseBrowserClient> | null>(null);
+  const [checkingAuth, setCheckingAuth] = useState(true);
+  const [loggedIn, setLoggedIn] = useState(false);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [ent, setEnt] = useState<Entitlements | null>(null);
+
+  useEffect(() => {
+    setSupabase(createSupabaseBrowserClient());
+  }, []);
+
+  useEffect(() => {
+    if (!supabase) return;
+
+    let mounted = true;
+
+    (async () => {
+      try {
+        const { data } = await supabase.auth.getSession();
+        if (!mounted) return;
+
+        const sessionUser = data.session?.user ?? null;
+        setLoggedIn(!!sessionUser);
+        setUserEmail(sessionUser?.email ?? null);
+      } finally {
+        if (mounted) setCheckingAuth(false);
+      }
+    })();
+
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+      const sessionUser = session?.user ?? null;
+      setLoggedIn(!!sessionUser);
+      setUserEmail(sessionUser?.email ?? null);
+      setCheckingAuth(false);
+    });
+
+    return () => {
+      mounted = false;
+      sub.subscription.unsubscribe();
+    };
+  }, [supabase]);
+
+  useEffect(() => {
+    if (!supabase || !loggedIn) {
+      setEnt(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+
+      if (!token) {
+        if (!cancelled) setEnt(null);
+        return;
+      }
+
+      const res = await fetch(`/api/entitlements?t=${Date.now()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      });
+
+      const json = await res.json().catch(() => null);
+
+      if (!cancelled) {
+        if (res.ok && json) {
+          setEnt(json as Entitlements);
+        } else {
+          setEnt(null);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase, loggedIn]);
+
+  const planLabel = ent?.plan ? ent.plan.toUpperCase() : "ŽIADNY";
+  const remaining = ent?.remaining ?? null;
+  const weeklyLimit = ent?.weekly_limit ?? null;
+  const firstName =
+    userEmail?.split("@")[0]?.split(".")[0]?.replace(/^./, (s) => s.toUpperCase()) || "vitaj späť";
+
+  if (checkingAuth) {
+    return (
+      <main className="min-h-screen page-invert-bg">
+        <div className="mx-auto w-full max-w-6xl px-6 py-20">
+          <div className="rounded-3xl p-6 surface-same-as-nav surface-border text-sm muted">
+            Načítavam…
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (loggedIn) {
+    return (
+      <main className="min-h-screen overflow-hidden page-invert-bg">
+        <div className="mx-auto w-full max-w-6xl px-6">
+          <section className="pt-16 pb-12 relative">
+            <div className="absolute inset-0 flex justify-center -z-10">
+              <div className="w-[620px] h-[620px] bg-black/10 dark:bg-black/5 blur-[160px] rounded-full" />
+            </div>
+
+            <div className="flex flex-col items-center text-center">
+              <div className="relative w-44 h-44 md:w-56 md:h-56">
+                <Image src="/logo_black.png" alt="Fudly logo" fill className="object-contain dark:hidden" priority />
+                <Image src="/logo_white.png" alt="Fudly logo" fill className="object-contain hidden dark:block" priority />
+              </div>
+
+              <h1 className="mt-4 font-bold tracking-tight leading-[1.04] px-3">
+                <span className="block text-[clamp(24px,5vw,50px)]">Vitaj späť, {firstName}</span>
+                <span className="block text-[clamp(20px,4.5vw,40px)] muted">pokračuj tam, kde si skončil</span>
+              </h1>
+
+              <p className="mt-5 max-w-2xl text-base sm:text-lg text-black/70 dark:text-black/70">
+                Generátor, profil aj členstvo máš pripravené. Stačí si vybrať, čo chceš práve otvoriť.
+              </p>
+
+              <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+                <div className="inline-flex items-center rounded-full border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-semibold surface-same-as-nav">
+                  Aktuálny plán: {planLabel}
+                </div>
+
+                {ent?.status ? (
+                  <div className="inline-flex items-center rounded-full border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-semibold surface-same-as-nav">
+                    Stav: {statusLabel(ent.status)}
+                  </div>
+                ) : null}
+
+                {remaining !== null && weeklyLimit !== null ? (
+                  <div className="inline-flex items-center rounded-full border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-semibold surface-same-as-nav">
+                    Zostáva {remaining}/{weeklyLimit} generovaní
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </section>
+
+          <section className="pb-12">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <AppActionCard
+                title="Vygenerovať jedálniček"
+                desc="Spusť nový týždenný plán podľa svojich preferencií."
+                href="/generate"
+                primary
+              />
+              <AppActionCard
+                title="Otvoriť profil"
+                desc="Pozri si uložené plány, recepty a nákupné zoznamy."
+                href="/profile"
+              />
+              <AppActionCard
+                title="Spravovať členstvo"
+                desc="Skontroluj plán, limity a prípadne prejdi na vyššie členstvo."
+                href="/pricing"
+              />
+            </div>
+          </section>
+
+          <section className="pb-14">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <FeatureCard
+                title="Aktívny generátor"
+                desc={
+                  ent?.can_generate
+                    ? "Môžeš pokračovať v generovaní ďalších jedálničkov."
+                    : "Členstvo momentálne neumožňuje generovanie."
+                }
+              />
+              <FeatureCard
+                title="Štýly jedál"
+                desc={
+                  ent?.allowed_styles?.length
+                    ? `Dostupné: ${ent.allowed_styles.join(", ")}.`
+                    : "Štýly sa načítajú po overení členstva."
+                }
+              />
+              <FeatureCard
+                title="Kalórie a financie"
+                desc={
+                  ent?.calories_enabled
+                    ? "Kalórie aj finančný prehľad máš dostupné."
+                    : "Kalórie sú dostupné v členstve PLUS."
+                }
+              />
+            </div>
+          </section>
+
+          <section className="pb-20">
+            <div className="rounded-3xl p-6 md:p-8 surface-same-as-nav surface-border">
+              <div className="text-2xl font-semibold">Rýchly prehľad</div>
+              <div className="mt-1 text-sm muted">Všetko dôležité na jednom mieste.</div>
+
+              <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+                <Step
+                  n="1"
+                  title="Generátor"
+                  desc="Vytvor nový plán podľa počtu ľudí, rozpočtu a preferencií."
+                />
+                <Step
+                  n="2"
+                  title="Profil"
+                  desc="Vráť sa k starším plánom, receptom a nákupným zoznamom."
+                />
+                <Step
+                  n="3"
+                  title="Členstvo"
+                  desc="Skontroluj limity alebo prejdi na PLUS pre viac možností."
+                />
+              </div>
+            </div>
+          </section>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen overflow-hidden page-invert-bg">
       <div className="mx-auto w-full max-w-6xl px-6">
@@ -106,13 +398,11 @@ export default function HomePage() {
           </div>
 
           <div className="flex flex-col items-center text-center">
-            {/* logo – trochu väčšie */}
             <div className="relative w-60 h-60 md:w-80 md:h-80">
               <Image src="/logo_black.png" alt="Fudly logo" fill className="object-contain dark:hidden" priority />
               <Image src="/logo_white.png" alt="Fudly logo" fill className="object-contain hidden dark:block" priority />
             </div>
 
-            {/* ✅ Headline: 1. riadok vždy v jednom riadku + clamp aby sa na mobile nezrezával */}
             <h1 className="mt-6 font-bold tracking-tight leading-[1.02] px-3">
               <span className="block whitespace-nowrap text-[clamp(22px,6vw,56px)]">
                 Inteligentný týždenný jedálniček
@@ -120,33 +410,29 @@ export default function HomePage() {
               <span className="block text-[clamp(20px,5.2vw,48px)] muted">na jedno kliknutie</span>
             </h1>
 
-            {/* text pod tým – nech je čitateľný (nespoliehame sa tu na muted, lebo máte invertované pozadia) */}
             <p className="mt-6 max-w-2xl text-base sm:text-lg text-black/70 dark:text-black/70">
               Do 2–3 minút máš hotový plán na celý týždeň. Jedlá, nákupy, recepty, kalórie aj finančný prehľad.
             </p>
 
-            {/* ✅ TOTO NEMENÍM – nechávam presne ako máš */}
             <div className="mt-8 inline-flex items-center rounded-full border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-semibold surface-same-as-nav">
               14 dní zdarma • bez záväzkov
             </div>
 
             <div className="mt-10 flex flex-col sm:flex-row gap-4 w-full sm:w-auto">
-              {/* ✅ CTA: otočené farby podľa tvojej požiadavky */}
               <Link
                 href="/login"
-  className="
-  w-full sm:w-auto
-  rounded-2xl px-8 py-4 text-center font-semibold transition
-  bg-gradient-to-r from-amber-600 to-amber-500
-hover:from-amber-500 hover:to-amber-400
-text-white
-shadow-lg shadow-amber-600/40
-"
+                className="
+                  w-full sm:w-auto
+                  rounded-2xl px-8 py-4 text-center font-semibold transition
+                  bg-gradient-to-r from-amber-600 to-amber-500
+                  hover:from-amber-500 hover:to-amber-400
+                  text-white
+                  shadow-lg shadow-amber-600/40
+                "
               >
                 Vyskúšaj na 14 dní zadarmo
               </Link>
 
-              {/* ✅ Secondary: vždy viditeľné + hover nezmení na nečitateľnú čiernu */}
               <Link
                 href="/pricing"
                 className={[
@@ -204,7 +490,12 @@ shadow-lg shadow-amber-600/40
               period="mesačne"
               ctaLabel="Začať zdarma (14 dní)"
               ctaHref="/login"
-              features={["3 generovania týždenne", "Jedálniček + nákupný zoznam", "Recepty ku všetkým jedlám", "Uloženie do profilu"]}
+              features={[
+                "3 generovania týždenne",
+                "Jedálniček + nákupný zoznam",
+                "Recepty ku všetkým jedlám",
+                "Uloženie do profilu",
+              ]}
             />
 
             <PricingCard
@@ -216,7 +507,12 @@ shadow-lg shadow-amber-600/40
               ctaLabel="Začať zdarma (14 dní)"
               ctaHref="/login"
               highlighted
-              features={["5 generovaní týždenne", "Viac štýlov", "Kalórie na osobu", "Finančný prehľad"]}
+              features={[
+                "5 generovaní týždenne",
+                "Viac štýlov",
+                "Kalórie na osobu",
+                "Finančný prehľad",
+              ]}
             />
           </div>
         </section>
