@@ -1,24 +1,15 @@
 // src/app/api/entitlements/route.ts
 import { NextResponse } from "next/server";
+import Stripe from "stripe";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string);
+
 type Plan = "basic" | "plus";
 type Status = "inactive" | "trialing" | "active" | "past_due" | "canceled" | "none";
-
-type SubscriptionRow = {
-  user_id: string;
-  plan: string | null;
-  status: string | null;
-  current_period_end: string | null;
-  trial_until: string | null;
-  stripe_customer_id: string | null;
-  stripe_subscription_id: string | null;
-  created_at?: string | null;
-  updated_at?: string | null;
-};
 
 function planLimits(plan: Plan) {
   if (plan === "plus") {
@@ -53,27 +44,6 @@ function parseDateMs(v?: string | null) {
   return Number.isFinite(ms) ? ms : null;
 }
 
-function normalizePlan(v?: string | null): Plan {
-  return v === "plus" ? "plus" : "basic";
-}
-
-function normalizeStatus(v?: string | null): Status {
-  switch (v) {
-    case "trialing":
-      return "trialing";
-    case "active":
-      return "active";
-    case "past_due":
-      return "past_due";
-    case "canceled":
-      return "canceled";
-    case "inactive":
-      return "inactive";
-    default:
-      return "none";
-  }
-}
-
 function isActiveLike(
   status: Status,
   now: number,
@@ -101,27 +71,78 @@ function isActiveLike(
   return false;
 }
 
+function normalizeStripeStatus(status: string): Status {
+  if (status === "unpaid") return "past_due";
+  switch (status) {
+    case "trialing":
+      return "trialing";
+    case "active":
+      return "active";
+    case "past_due":
+      return "past_due";
+    case "canceled":
+      return "canceled";
+    case "inactive":
+      return "inactive";
+    default:
+      return "none";
+  }
+}
+
+function planFromPriceId(priceId: string | null): Plan {
+  return priceId === process.env.STRIPE_PRICE_PLUS ? "plus" : "basic";
+}
+
+function toIsoFromUnix(unix?: number | null) {
+  return unix ? new Date(unix * 1000).toISOString() : null;
+}
+
 function noStoreHeaders() {
   return { "Cache-Control": "no-store" };
 }
 
-async function getSubscriptionRow(
+async function findCustomerId(
   supabase: ReturnType<typeof createSupabaseAdminClient>,
-  userId: string
-): Promise<SubscriptionRow | null> {
-  const { data, error } = await supabase
+  userId: string,
+  userEmail: string | null
+) {
+  const { data: row, error } = await supabase
     .from("subscriptions")
-    .select(
-      "user_id,plan,status,current_period_end,trial_until,stripe_customer_id,stripe_subscription_id,created_at,updated_at"
-    )
+    .select("stripe_customer_id")
     .eq("user_id", userId)
-    .limit(1);
+    .maybeSingle();
 
-  if (error) {
-    throw new Error(error.message);
-  }
+  if (error) throw new Error(error.message);
 
-  return ((data?.[0] as SubscriptionRow | undefined) ?? null);
+  if (row?.stripe_customer_id) return row.stripe_customer_id as string;
+
+  if (!userEmail) return null;
+
+  const customers = await stripe.customers.list({
+    email: userEmail,
+    limit: 10,
+  });
+
+  const matched =
+    customers.data.find((c) => c.metadata?.user_id === userId) ??
+    customers.data[0] ??
+    null;
+
+  return matched?.id ?? null;
+}
+
+async function getCanonicalStripeSubscription(customerId: string) {
+  const subs = await stripe.subscriptions.list({
+    customer: customerId,
+    status: "all",
+    limit: 20,
+  });
+
+  return (
+    subs.data.find((s) => ["active", "trialing", "past_due", "unpaid"].includes(s.status)) ??
+    subs.data[0] ??
+    null
+  );
 }
 
 export async function GET(req: Request) {
@@ -151,9 +172,10 @@ export async function GET(req: Request) {
     const now = Date.now();
 
     const supabase = createSupabaseAdminClient();
-    const subRow = await getSubscriptionRow(supabase, userId);
 
-    if (!subRow) {
+    const customerId = await findCustomerId(supabase, userId, userEmail);
+
+    if (!customerId) {
       return NextResponse.json(
         {
           debug_user_id: userId,
@@ -175,15 +197,67 @@ export async function GET(req: Request) {
       );
     }
 
-    const plan = normalizePlan(subRow.plan);
-    const status = normalizeStatus(subRow.status);
-    const current_period_end = subRow.current_period_end ?? null;
-    const trial_until = subRow.trial_until ?? null;
-    const has_stripe_link = !!(subRow.stripe_customer_id || subRow.stripe_subscription_id);
+    const sub = await getCanonicalStripeSubscription(customerId);
+
+    if (!sub) {
+      // customer existuje, ale bez subscription
+      await supabase.from("subscriptions").upsert(
+        {
+          user_id: userId,
+          stripe_customer_id: customerId,
+          stripe_subscription_id: null,
+          plan: "basic",
+          status: "inactive",
+          trial_until: null,
+          current_period_end: null,
+        },
+        { onConflict: "user_id" }
+      );
+
+      return NextResponse.json(
+        {
+          debug_user_id: userId,
+          debug_email: userEmail,
+          plan: null,
+          status: "none" as const,
+          active_like: false,
+          can_generate: false,
+          weekly_limit: 0,
+          used: 0,
+          remaining: 0,
+          calories_enabled: false,
+          allowed_styles: [],
+          trial_until: null,
+          current_period_end: null,
+          has_stripe_link: true,
+        },
+        { headers: noStoreHeaders() }
+      );
+    }
+
+    const priceId = sub.items.data[0]?.price?.id ?? null;
+    const plan = planFromPriceId(priceId);
+    const status = normalizeStripeStatus(sub.status);
+
+    const trial_until = toIsoFromUnix(sub.trial_end ?? null);
+    const current_period_end = toIsoFromUnix((sub as any).current_period_end ?? null);
+
+    await supabase.from("subscriptions").upsert(
+      {
+        user_id: userId,
+        stripe_customer_id: customerId,
+        stripe_subscription_id: sub.id,
+        plan,
+        status,
+        trial_until,
+        current_period_end,
+      },
+      { onConflict: "user_id" }
+    );
 
     const limits = planLimits(plan);
     const active_like = isActiveLike(status, now, current_period_end, trial_until);
-    const can_generate = active_like && has_stripe_link;
+    const can_generate = active_like && !!customerId;
 
     const url = new URL(req.url);
     const week_start = url.searchParams.get("week_start");
@@ -229,15 +303,13 @@ export async function GET(req: Request) {
         allowed_styles: limits.allowed_styles,
         trial_until,
         current_period_end,
-        has_stripe_link,
+        has_stripe_link: true,
       },
       { headers: noStoreHeaders() }
     );
   } catch (e: any) {
     return NextResponse.json(
-      {
-        error: e?.message ?? "Unknown error",
-      },
+      { error: e?.message ?? "Unknown error" },
       { status: 500, headers: noStoreHeaders() }
     );
   }
