@@ -165,10 +165,7 @@ export default function PricingClient() {
         text: "Predplatné bolo aktualizované. Obnovujem stav členstva…",
       });
     } else if (canceled === "1") {
-      setMsg({
-        type: "info",
-        text: "Platba bola zrušená. Ak chceš, skús to znova.",
-      });
+      setMsg({ type: "info", text: "Platba bola zrušená. Ak chceš, skús to znova." });
     } else {
       setMsg(null);
     }
@@ -267,7 +264,10 @@ export default function PricingClient() {
     const data = await res.json().catch(() => null);
     if (!res.ok || !data) return null;
 
-    return await fetchEntitlementsOnce();
+    const e = data as Entitlements;
+    setEnt(e);
+    setSubStatus(normalizeSubStatusFromEnt(e));
+    return e;
   }
 
   async function fetchCurrentSubscriptionFromStripe(): Promise<Entitlements | null> {
@@ -335,7 +335,7 @@ export default function PricingClient() {
     let stopped = false;
     let timer: number | null = null;
     let attempts = 0;
-    const maxAttempts = 12;
+    const maxAttempts = 10;
 
     async function poll() {
       if (stopped) return;
@@ -364,12 +364,12 @@ export default function PricingClient() {
 
       timer = window.setTimeout(() => {
         void poll();
-      }, 1500);
+      }, 1200);
     }
 
     timer = window.setTimeout(() => {
       void poll();
-    }, 400);
+    }, 250);
 
     return () => {
       stopped = true;
@@ -411,19 +411,13 @@ export default function PricingClient() {
 
       const url = data?.url;
       if (!url) {
-        setMsg({
-          type: "error",
-          text: "Nepodarilo sa spustiť platbu. (Chýba url v odpovedi servera.)",
-        });
+        setMsg({ type: "error", text: "Nepodarilo sa spustiť platbu. (Chýba url v odpovedi servera.)" });
         return;
       }
 
       window.location.href = url;
     } catch (e: any) {
-      setMsg({
-        type: "error",
-        text: `Nepodarilo sa spustiť platbu. (${e?.message ?? "unknown"})`,
-      });
+      setMsg({ type: "error", text: `Nepodarilo sa spustiť platbu. (${e?.message ?? "unknown"})` });
     } finally {
       setBusy(null);
     }
@@ -476,10 +470,7 @@ export default function PricingClient() {
 
       window.location.href = url;
     } catch (e: any) {
-      setMsg({
-        type: "error",
-        text: `Nepodarilo sa otvoriť Stripe portal. (${e?.message ?? "unknown"})`,
-      });
+      setMsg({ type: "error", text: `Nepodarilo sa otvoriť Stripe portal. (${e?.message ?? "unknown"})` });
     } finally {
       setBusy(null);
     }
@@ -502,8 +493,7 @@ export default function PricingClient() {
   const buttonBase =
     "w-full rounded-2xl px-5 py-3 text-center text-sm font-semibold transition disabled:opacity-60 disabled:cursor-not-allowed";
   const btnPrimary = "btn-primary " + buttonBase;
-  const btnSecondary =
-    buttonBase + " border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-zinc-900";
+  const btnSecondary = buttonBase + " border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-zinc-900";
 
   const isBasic = subStatus === "basic";
   const isPlus = subStatus === "plus";
@@ -561,9 +551,7 @@ export default function PricingClient() {
         </header>
 
         {!supabase || checkingAuth ? (
-          <div className="mb-6 rounded-2xl p-4 surface-same-as-nav surface-border text-sm muted">
-            Načítavam…
-          </div>
+          <div className="mb-6 rounded-2xl p-4 surface-same-as-nav surface-border text-sm muted">Načítavam…</div>
         ) : null}
 
         {msg ? (

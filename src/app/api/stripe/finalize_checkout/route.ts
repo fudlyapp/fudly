@@ -21,6 +21,60 @@ function normalizeStripeStatus(status: string): string {
   return status;
 }
 
+function parseDateMs(v?: string | null) {
+  if (!v) return null;
+
+  let s = v.trim();
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(s)) s = s.replace(" ", "T");
+  if (/[+-]\d{2}$/.test(s)) s = s + ":00";
+
+  const ms = Date.parse(s);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function isActiveLike(
+  status: string,
+  now: number,
+  currentPeriodEnd?: string | null,
+  trialUntil?: string | null
+) {
+  if (status === "active") {
+    const cpe = parseDateMs(currentPeriodEnd);
+    if (!cpe) return true;
+    return cpe > now;
+  }
+
+  if (status === "trialing") {
+    const tu = parseDateMs(trialUntil);
+    if (!tu) return false;
+    return tu > now;
+  }
+
+  if (status === "past_due") {
+    const cpe = parseDateMs(currentPeriodEnd);
+    if (!cpe) return true;
+    return cpe > now;
+  }
+
+  return false;
+}
+
+function planLimits(plan: "basic" | "plus") {
+  if (plan === "plus") {
+    return {
+      weekly_limit: 5,
+      calories_enabled: true,
+      allowed_styles: ["lacné", "rychle", "vyvazene", "vegetarianske", "fit", "tradicne", "exoticke"],
+    };
+  }
+
+  return {
+    weekly_limit: 3,
+    calories_enabled: false,
+    allowed_styles: ["lacné", "rychle", "vyvazene", "vegetarianske"],
+  };
+}
+
 export async function POST(req: Request) {
   try {
     const auth = req.headers.get("authorization") || "";
@@ -56,8 +110,17 @@ export async function POST(req: Request) {
     }
 
     const sessionUserId = session.client_reference_id ?? session.metadata?.user_id ?? null;
+
     if (!sessionUserId || sessionUserId !== user.id) {
-      return NextResponse.json({ error: "Session does not belong to this user" }, { status: 403 });
+      return NextResponse.json(
+        {
+          error: "Session does not belong to this user",
+          debug_user_id: user.id,
+          debug_session_user_id: sessionUserId,
+          debug_session_id: sessionId,
+        },
+        { status: 403 }
+      );
     }
 
     const customerId =
@@ -109,6 +172,16 @@ export async function POST(req: Request) {
       current_period_end = currentPeriodEndUnix
         ? new Date(currentPeriodEndUnix * 1000).toISOString()
         : null;
+    } else {
+      return NextResponse.json(
+        {
+          error: "Session has no subscription",
+          debug_session_id: sessionId,
+          debug_user_id: user.id,
+          debug_customer_id: customerId,
+        },
+        { status: 400 }
+      );
     }
 
     const { error: upsertErr } = await supabase.from("subscriptions").upsert(
@@ -125,16 +198,40 @@ export async function POST(req: Request) {
     );
 
     if (upsertErr) {
-      return NextResponse.json({ error: upsertErr.message }, { status: 500 });
+      return NextResponse.json(
+        {
+          error: upsertErr.message,
+          debug_user_id: user.id,
+          debug_session_id: sessionId,
+          debug_customer_id: customerId,
+          debug_subscription_id: subscriptionId,
+          debug_plan: plan,
+          debug_status: status,
+        },
+        { status: 500 }
+      );
     }
+
+    const now = Date.now();
+    const active_like = isActiveLike(status, now, current_period_end, trial_until);
+    const limits = planLimits(plan);
 
     return NextResponse.json(
       {
-        ok: true,
+        debug_user_id: user.id,
+        debug_email: user.email ?? null,
         plan,
         status,
-        stripe_customer_id: customerId,
-        stripe_subscription_id: subscriptionId,
+        active_like,
+        can_generate: active_like && !!customerId,
+        weekly_limit: limits.weekly_limit,
+        used: 0,
+        remaining: limits.weekly_limit,
+        calories_enabled: limits.calories_enabled,
+        allowed_styles: limits.allowed_styles,
+        trial_until,
+        current_period_end,
+        has_stripe_link: !!customerId,
       },
       { headers: { "Cache-Control": "no-store" } }
     );
