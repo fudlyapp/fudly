@@ -8,16 +8,6 @@ export const runtime = "nodejs";
 type Plan = "basic" | "plus";
 type Status = "inactive" | "trialing" | "active" | "past_due" | "canceled" | "none";
 
-type SubscriptionRow = {
-  user_id: string;
-  plan: string | null;
-  status: string | null;
-  current_period_end: string | null;
-  trial_until: string | null;
-  stripe_customer_id: string | null;
-  stripe_subscription_id: string | null;
-};
-
 function planLimits(plan: Plan) {
   if (plan === "plus") {
     return {
@@ -121,6 +111,7 @@ export async function GET(req: Request) {
     }
 
     const userId = userRes.user.id;
+    const userEmail = userRes.user.email ?? null;
     const now = Date.now();
 
     // 2) na DB používaj fresh admin client
@@ -128,13 +119,21 @@ export async function GET(req: Request) {
 
     const { data: subRow, error: subErr } = await supabase
       .from("subscriptions")
-      .select("user_id,plan,status,current_period_end,trial_until,stripe_customer_id,stripe_subscription_id")
+      .select(
+        "user_id,plan,status,current_period_end,trial_until,stripe_customer_id,stripe_subscription_id,updated_at"
+      )
       .eq("user_id", userId)
+      .order("updated_at", { ascending: false })
+      .limit(1)
       .maybeSingle();
 
     if (subErr) {
       return NextResponse.json(
-        { error: subErr.message },
+        {
+          error: subErr.message,
+          debug_user_id: userId,
+          debug_email: userEmail,
+        },
         { status: 500, headers: noStoreHeaders() }
       );
     }
@@ -142,6 +141,8 @@ export async function GET(req: Request) {
     if (!subRow) {
       return NextResponse.json(
         {
+          debug_user_id: userId,
+          debug_email: userEmail,
           plan: null,
           status: "none" as const,
           active_like: false,
@@ -184,7 +185,11 @@ export async function GET(req: Request) {
 
       if (usageErr) {
         return NextResponse.json(
-          { error: usageErr.message },
+          {
+            error: usageErr.message,
+            debug_user_id: userId,
+            debug_email: userEmail,
+          },
           { status: 500, headers: noStoreHeaders() }
         );
       }
@@ -196,6 +201,8 @@ export async function GET(req: Request) {
 
     return NextResponse.json(
       {
+        debug_user_id: userId,
+        debug_email: userEmail,
         plan,
         status,
         active_like,
