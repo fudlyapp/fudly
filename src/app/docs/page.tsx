@@ -2,11 +2,6 @@
 "use client";
 
 import { useT } from "@/lib/i18n/useT";
-import type { Metadata } from "next";
-
-export const metadata: Metadata = {
-  title: "Informácie",
-};
 
 export default function LegalPage() {
   const { t } = useT();
