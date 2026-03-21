@@ -1,8 +1,9 @@
 // src/app/pricing/page.tsx
+import type { Metadata } from "next";
 import { Suspense } from "react";
 import PricingClient from "./PricingClient";
 
-export const metadata = {
+export const metadata: Metadata = {
   title: "Členstvá",
 };
 

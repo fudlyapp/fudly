@@ -1,8 +1,9 @@
 // src/app/login/page.tsx
 import { Suspense } from "react";
 import LoginClient from "./LoginClient";
+import type { Metadata } from "next";
 
-export const metadata = {
+export const metadata: Metadata = {
   title: "Prihlásenie",
 };
 

@@ -1,9 +1,10 @@
 // src/app/layout.tsx
+import type { Metadata } from "next";
 import "./globals.css";
 import { LangProvider } from "@/lib/i18n/useT";
 import TopNav from "@/components/TopNav";
 
-export const metadata = {
+export const metadata: Metadata = {
   title: {
     default: "Fudly – inteligentný plánovač",
     template: "%s | Fudly",
@@ -26,10 +27,8 @@ const themeScript = `
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="sk" suppressHydrationWarning>
-      <head>
-        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
-      </head>
       <body className="bg-white text-black dark:bg-black dark:text-white">
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
         <LangProvider>
           <TopNav />
           {children}
