@@ -241,6 +241,23 @@ export default function PricingClient() {
     return e;
   }
 
+  async function syncSubscriptionFromStripe() {
+    if (!supabase) return;
+
+    const { data: s } = await supabase.auth.getSession();
+    const token = s.session?.access_token;
+
+    if (!token) return;
+
+    await fetch("/api/stripe/sync_subscription", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      cache: "no-store",
+    }).catch(() => null);
+  }
+
   useEffect(() => {
     if (!supabase) return;
 
@@ -268,7 +285,7 @@ export default function PricingClient() {
     };
   }, [loggedIn, supabase]);
 
-  // ✅ Robustný refresh po návrate zo Stripe
+  // robustný refresh po návrate zo Stripe
   useEffect(() => {
     if (!supabase) return;
     if (!loggedIn) return;
@@ -281,16 +298,20 @@ export default function PricingClient() {
     let stopped = false;
     let timer: number | null = null;
     let attempts = 0;
-    const maxAttempts = portal === "1" ? 15 : 15;
+    const maxAttempts = 15;
 
     async function poll() {
       if (stopped) return;
 
       attempts += 1;
+
+      if (attempts === 1) {
+        await syncSubscriptionFromStripe();
+      }
+
       const e = await fetchEntitlementsOnce();
 
       if (success === "1") {
-        // po novom checkoute čakáme, kým bude subscription reálne active_like
         const ready =
           !!e &&
           !!e.has_stripe_link &&
@@ -299,8 +320,6 @@ export default function PricingClient() {
 
         if (ready || attempts >= maxAttempts) return;
       } else {
-        // po portáli polling necháme bežať celé okno,
-        // lebo prvý fetch môže vrátiť starý BASIC stav
         if (attempts >= maxAttempts) return;
       }
 
