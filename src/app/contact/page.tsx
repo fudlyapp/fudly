@@ -4,6 +4,10 @@
 import { useState } from "react";
 import { useT } from "@/lib/i18n/useT";
 
+export const metadata = {
+  title: "Kontakt",
+};
+
 export default function ContactPage() {
   const { t, lang } = useT() as any;
 

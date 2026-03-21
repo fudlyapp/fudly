@@ -4,6 +4,10 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 
+export const metadata = {
+  title: "FAQ – často kladené otázky",
+};
+
 type FaqItem = {
   q: string;
   a: string;

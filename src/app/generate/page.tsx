@@ -7,6 +7,10 @@ import type { Session } from "@supabase/supabase-js";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { useT } from "@/lib/i18n/useT";
 
+export const metadata = {
+  title: "Generátor",
+};
+
 type Recipe = {
   title: string;
   time_min: number;

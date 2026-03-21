@@ -6,6 +6,10 @@ import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { useT } from "@/lib/i18n/useT";
 
+export const metadata = {
+  title: "Profil",
+};
+
 type MealPlanRow = {
   id: string;
   week_start: string; // YYYY-MM-DD

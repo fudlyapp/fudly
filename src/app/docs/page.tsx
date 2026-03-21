@@ -3,6 +3,10 @@
 
 import { useT } from "@/lib/i18n/useT";
 
+export const metadata = {
+  title: "Informácie",
+};
+
 export default function LegalPage() {
   const { t } = useT();
   const updated = new Date().toISOString().slice(0, 10);

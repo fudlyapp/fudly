@@ -2,6 +2,10 @@
 import { Suspense } from "react";
 import LoginClient from "./LoginClient";
 
+export const metadata = {
+  title: "Prihlásenie",
+};
+
 export default function Page() {
   return (
     <div className="min-h-screen page-invert-bg">

@@ -3,6 +3,14 @@ import "./globals.css";
 import { LangProvider } from "@/lib/i18n/useT";
 import TopNav from "@/components/TopNav";
 
+export const metadata = {
+  title: {
+    default: "Fudly – inteligentný plánovač",
+    template: "%s | Fudly",
+  },
+  description: "Inteligentný týždenný jedálniček na jedno kliknutie",
+};
+
 const themeScript = `
 (function () {
   try {
