@@ -110,6 +110,25 @@ function normalizeSubStatusFromEnt(ent: Entitlements | null): SubStatus {
   return "none";
 }
 
+function displayStatus(status: string) {
+  switch (status) {
+    case "trialing":
+      return "trial";
+    case "active":
+      return "active";
+    case "past_due":
+      return "past_due";
+    case "canceled":
+      return "canceled";
+    case "inactive":
+      return "inactive";
+    case "none":
+      return "none";
+    default:
+      return status;
+  }
+}
+
 export default function PricingClient() {
   const sp = useSearchParams();
 
@@ -128,7 +147,6 @@ export default function PricingClient() {
 
   const [msg, setMsg] = useState<{ type: "success" | "error" | "info"; text: string } | null>(null);
 
-  // success/canceled/portal paramy
   useEffect(() => {
     const success = sp.get("success");
     const canceled = sp.get("canceled");
@@ -151,7 +169,6 @@ export default function PricingClient() {
     }
   }, [sp]);
 
-  // session
   useEffect(() => {
     if (!supabase) return;
 
@@ -224,7 +241,6 @@ export default function PricingClient() {
     return e;
   }
 
-  // načítaj entitlements po login
   useEffect(() => {
     if (!supabase) return;
 
@@ -256,7 +272,9 @@ export default function PricingClient() {
     };
   }, [loggedIn, supabase]);
 
-  // po návrate zo Stripe: polling, kým sa stav naozaj neprepne
+  // po návrate zo Stripe:
+  // - po checkoute čakáme, kým user vôbec dostane platné členstvo
+  // - po portáli NEKONČÍME hneď na prvom validnom stave, lebo ten môže byť ešte starý BASIC
   useEffect(() => {
     if (!supabase) return;
     if (!loggedIn) return;
@@ -269,7 +287,9 @@ export default function PricingClient() {
     let stopped = false;
     let timer: number | null = null;
     let attempts = 0;
-    const maxAttempts = 12; // cca 24 sekúnd pri 2s intervale
+
+    // po portáli nech polling beží dlhšie a neskončí na prvom "valid" stave
+    const maxAttempts = portal === "1" ? 15 : 12;
 
     async function poll() {
       if (stopped) return;
@@ -277,13 +297,19 @@ export default function PricingClient() {
       attempts += 1;
       const e = await fetchEntitlementsOnce();
 
-      const ready =
-        !!e &&
-        !!e.has_stripe_link &&
-        e.plan !== null &&
-        e.status !== "none";
+      if (success === "1") {
+        const ready =
+          !!e &&
+          !!e.has_stripe_link &&
+          e.plan !== null &&
+          e.status !== "none";
 
-      if (ready || attempts >= maxAttempts) return;
+        if (ready || attempts >= maxAttempts) return;
+      } else {
+        // pri návrate z portálu polling necháme bežať celé okno,
+        // lebo prvý fetch môže stále vrátiť starý BASIC stav
+        if (attempts >= maxAttempts) return;
+      }
 
       timer = window.setTimeout(() => {
         void poll();
@@ -399,7 +425,6 @@ export default function PricingClient() {
     }
   }
 
-  // auto-buy po login-e: /pricing?buy=basic|plus
   useEffect(() => {
     if (!supabase) return;
 
@@ -467,7 +492,7 @@ export default function PricingClient() {
               {ent?.status ? (
                 <>
                   {" "}
-                  • stav: <span className="font-semibold">{ent.status}</span>
+                  • stav: <span className="font-semibold">{displayStatus(ent.status)}</span>
                 </>
               ) : null}
             </div>
