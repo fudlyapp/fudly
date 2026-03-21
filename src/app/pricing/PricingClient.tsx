@@ -149,6 +149,11 @@ export default function PricingClient() {
 
   const [msg, setMsg] = useState<{ type: "success" | "error" | "info"; text: string } | null>(null);
 
+  function applyEntitlement(e: Entitlements | null) {
+    setEnt(e);
+    setSubStatus(normalizeSubStatusFromEnt(e));
+  }
+
   useEffect(() => {
     const success = sp.get("success");
     const canceled = sp.get("canceled");
@@ -165,7 +170,10 @@ export default function PricingClient() {
         text: "Predplatné bolo aktualizované. Obnovujem stav členstva…",
       });
     } else if (canceled === "1") {
-      setMsg({ type: "info", text: "Platba bola zrušená. Ak chceš, skús to znova." });
+      setMsg({
+        type: "info",
+        text: "Platba bola zrušená. Ak chceš, skús to znova.",
+      });
     } else {
       setMsg(null);
     }
@@ -212,6 +220,20 @@ export default function PricingClient() {
     return token;
   }
 
+  async function fetchCurrentSubscriptionRaw(token: string): Promise<Entitlements | null> {
+    const res = await fetch(CURRENT_SUBSCRIPTION_ENDPOINT, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      cache: "no-store",
+    });
+
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data) return null;
+    return data as Entitlements;
+  }
+
   async function fetchEntitlementsOnce(): Promise<Entitlements | null> {
     if (!supabase) return null;
 
@@ -219,8 +241,7 @@ export default function PricingClient() {
     const token = s.session?.access_token;
 
     if (!token) {
-      setEnt(null);
-      setSubStatus("none");
+      applyEntitlement(null);
       return null;
     }
 
@@ -231,16 +252,25 @@ export default function PricingClient() {
 
     const data = await res.json().catch(() => null);
 
-    if (!res.ok || !data) {
-      setEnt(null);
-      setSubStatus("none");
-      return null;
+    // 1) ak entitlements vrátia validný plán, použi ho
+    if (res.ok && data) {
+      const e = data as Entitlements;
+
+      if (e.plan !== null && e.status !== "none") {
+        applyEntitlement(e);
+        return e;
+      }
     }
 
-    const e = data as Entitlements;
-    setEnt(e);
-    setSubStatus(normalizeSubStatusFromEnt(e));
-    return e;
+    // 2) fallback: entitlements sú flaky -> zober live Stripe stav
+    const live = await fetchCurrentSubscriptionRaw(token);
+    if (live && live.plan !== null && live.status !== "none") {
+      applyEntitlement(live);
+      return live;
+    }
+
+    applyEntitlement(null);
+    return null;
   }
 
   async function finalizeCheckout(sessionId: string): Promise<Entitlements | null> {
@@ -265,8 +295,7 @@ export default function PricingClient() {
     if (!res.ok || !data) return null;
 
     const e = data as Entitlements;
-    setEnt(e);
-    setSubStatus(normalizeSubStatusFromEnt(e));
+    applyEntitlement(e);
     return e;
   }
 
@@ -278,21 +307,13 @@ export default function PricingClient() {
 
     if (!token) return null;
 
-    const res = await fetch(CURRENT_SUBSCRIPTION_ENDPOINT, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-      cache: "no-store",
-    });
+    const live = await fetchCurrentSubscriptionRaw(token);
+    if (live) {
+      applyEntitlement(live);
+      return live;
+    }
 
-    const data = await res.json().catch(() => null);
-    if (!res.ok || !data) return null;
-
-    const e = data as Entitlements;
-    setEnt(e);
-    setSubStatus(normalizeSubStatusFromEnt(e));
-    return e;
+    return null;
   }
 
   useEffect(() => {
@@ -302,8 +323,7 @@ export default function PricingClient() {
 
     (async () => {
       if (!loggedIn) {
-        setEnt(null);
-        setSubStatus("none");
+        applyEntitlement(null);
         return;
       }
 
@@ -311,8 +331,7 @@ export default function PricingClient() {
         await fetchEntitlementsOnce();
       } catch {
         if (mounted) {
-          setEnt(null);
-          setSubStatus("none");
+          applyEntitlement(null);
         }
       }
     })();
@@ -411,13 +430,19 @@ export default function PricingClient() {
 
       const url = data?.url;
       if (!url) {
-        setMsg({ type: "error", text: "Nepodarilo sa spustiť platbu. (Chýba url v odpovedi servera.)" });
+        setMsg({
+          type: "error",
+          text: "Nepodarilo sa spustiť platbu. (Chýba url v odpovedi servera.)",
+        });
         return;
       }
 
       window.location.href = url;
     } catch (e: any) {
-      setMsg({ type: "error", text: `Nepodarilo sa spustiť platbu. (${e?.message ?? "unknown"})` });
+      setMsg({
+        type: "error",
+        text: `Nepodarilo sa spustiť platbu. (${e?.message ?? "unknown"})`,
+      });
     } finally {
       setBusy(null);
     }
@@ -470,7 +495,10 @@ export default function PricingClient() {
 
       window.location.href = url;
     } catch (e: any) {
-      setMsg({ type: "error", text: `Nepodarilo sa otvoriť Stripe portal. (${e?.message ?? "unknown"})` });
+      setMsg({
+        type: "error",
+        text: `Nepodarilo sa otvoriť Stripe portal. (${e?.message ?? "unknown"})`,
+      });
     } finally {
       setBusy(null);
     }
@@ -493,7 +521,8 @@ export default function PricingClient() {
   const buttonBase =
     "w-full rounded-2xl px-5 py-3 text-center text-sm font-semibold transition disabled:opacity-60 disabled:cursor-not-allowed";
   const btnPrimary = "btn-primary " + buttonBase;
-  const btnSecondary = buttonBase + " border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-zinc-900";
+  const btnSecondary =
+    buttonBase + " border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-zinc-900";
 
   const isBasic = subStatus === "basic";
   const isPlus = subStatus === "plus";
@@ -551,7 +580,9 @@ export default function PricingClient() {
         </header>
 
         {!supabase || checkingAuth ? (
-          <div className="mb-6 rounded-2xl p-4 surface-same-as-nav surface-border text-sm muted">Načítavam…</div>
+          <div className="mb-6 rounded-2xl p-4 surface-same-as-nav surface-border text-sm muted">
+            Načítavam…
+          </div>
         ) : null}
 
         {msg ? (
