@@ -112,6 +112,8 @@ export async function POST(req: Request) {
 
     if (!row?.stripe_customer_id) {
       return NextResponse.json({
+        debug_user_id: user.id,
+        debug_email: user.email ?? null,
         plan: null,
         status: "none",
         active_like: false,
@@ -140,6 +142,8 @@ export async function POST(req: Request) {
 
     if (!sub) {
       return NextResponse.json({
+        debug_user_id: user.id,
+        debug_email: user.email ?? null,
         plan: null,
         status: "none",
         active_like: false,
@@ -165,7 +169,7 @@ export async function POST(req: Request) {
     const customerId =
       typeof sub.customer === "string" ? sub.customer : sub.customer?.id ?? null;
 
-    await supabase.from("subscriptions").upsert(
+    const { error: upsertErr } = await supabase.from("subscriptions").upsert(
       {
         user_id: user.id,
         stripe_customer_id: customerId,
@@ -178,23 +182,64 @@ export async function POST(req: Request) {
       { onConflict: "user_id" }
     );
 
+    if (upsertErr) {
+      return NextResponse.json(
+        {
+          error: upsertErr.message,
+          debug_user_id: user.id,
+          debug_email: user.email ?? null,
+          debug_plan: plan,
+          debug_status: status,
+          debug_customer_id: customerId,
+          debug_subscription_id: sub.id,
+        },
+        { status: 500 }
+      );
+    }
+
+    // ✅ po zápise si row z DB ešte raz prečítaj a vráť DB truth
+    const { data: freshRow, error: freshErr } = await supabase
+      .from("subscriptions")
+      .select("plan,status,trial_until,current_period_end,stripe_customer_id,stripe_subscription_id")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (freshErr) {
+      return NextResponse.json(
+        {
+          error: freshErr.message,
+          debug_user_id: user.id,
+          debug_email: user.email ?? null,
+        },
+        { status: 500 }
+      );
+    }
+
+    const finalPlan = (freshRow?.plan === "plus" ? "plus" : "basic") as "basic" | "plus";
+    const finalStatus = (freshRow?.status ?? "none") as string;
+    const finalTrialUntil = freshRow?.trial_until ?? null;
+    const finalCurrentPeriodEnd = freshRow?.current_period_end ?? null;
+    const hasStripeLink = !!(freshRow?.stripe_customer_id || freshRow?.stripe_subscription_id);
+
     const now = Date.now();
-    const active_like = isActiveLike(status, now, current_period_end, trial_until);
-    const limits = planLimits(plan);
+    const active_like = isActiveLike(finalStatus, now, finalCurrentPeriodEnd, finalTrialUntil);
+    const limits = planLimits(finalPlan);
 
     return NextResponse.json({
-      plan,
-      status,
+      debug_user_id: user.id,
+      debug_email: user.email ?? null,
+      plan: finalPlan,
+      status: finalStatus,
       active_like,
-      can_generate: active_like && !!customerId,
+      can_generate: active_like && hasStripeLink,
       weekly_limit: limits.weekly_limit,
       used: 0,
       remaining: limits.weekly_limit,
       calories_enabled: limits.calories_enabled,
       allowed_styles: limits.allowed_styles,
-      trial_until,
-      current_period_end,
-      has_stripe_link: !!customerId,
+      trial_until: finalTrialUntil,
+      current_period_end: finalCurrentPeriodEnd,
+      has_stripe_link: hasStripeLink,
     });
   } catch (e: any) {
     return NextResponse.json(
