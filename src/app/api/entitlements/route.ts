@@ -1,12 +1,9 @@
 // src/app/api/entitlements/route.ts
 import { NextResponse } from "next/server";
-import Stripe from "stripe";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string);
 
 type Plan = "basic" | "plus";
 type Status = "inactive" | "trialing" | "active" | "past_due" | "canceled" | "none";
@@ -19,6 +16,7 @@ type SubscriptionRow = {
   trial_until: string | null;
   stripe_customer_id: string | null;
   stripe_subscription_id: string | null;
+  created_at?: string | null;
   updated_at?: string | null;
 };
 
@@ -107,114 +105,23 @@ function noStoreHeaders() {
   return { "Cache-Control": "no-store" };
 }
 
-function inferPlanFromPriceId(priceId: string | null): Plan {
-  if (priceId && priceId === process.env.STRIPE_PRICE_PLUS) return "plus";
-  return "basic";
-}
-
-async function getLatestDbSubscription(
+async function getSubscriptionRow(
   supabase: ReturnType<typeof createSupabaseAdminClient>,
   userId: string
-) {
+): Promise<SubscriptionRow | null> {
   const { data, error } = await supabase
     .from("subscriptions")
     .select(
-      "user_id,plan,status,current_period_end,trial_until,stripe_customer_id,stripe_subscription_id,updated_at"
+      "user_id,plan,status,current_period_end,trial_until,stripe_customer_id,stripe_subscription_id,created_at,updated_at"
     )
     .eq("user_id", userId)
-    .order("updated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .limit(1);
 
-  return { data: (data as SubscriptionRow | null) ?? null, error };
-}
-
-async function syncFromStripe(
-  supabase: ReturnType<typeof createSupabaseAdminClient>,
-  userId: string,
-  userEmail: string | null,
-  existingCustomerId: string | null
-): Promise<SubscriptionRow | null> {
-  let customerId = existingCustomerId ?? null;
-
-  // 1) keď customer_id v DB nie je, skús ho nájsť podľa emailu
-  if (!customerId && userEmail) {
-    const customers = await stripe.customers.list({
-      email: userEmail,
-      limit: 10,
-    });
-
-    const matched =
-      customers.data.find((c) => c.metadata?.user_id === userId) ??
-      customers.data[0] ??
-      null;
-
-    customerId = matched?.id ?? null;
+  if (error) {
+    throw new Error(error.message);
   }
 
-  if (!customerId) return null;
-
-  // 2) dotiahni subscriptions zo Stripe
-  const subs = await stripe.subscriptions.list({
-    customer: customerId,
-    status: "all",
-    limit: 20,
-  });
-
-  const sub =
-    subs.data.find((s) => ["active", "trialing", "past_due", "unpaid"].includes(s.status)) ??
-    subs.data[0] ??
-    null;
-
-  if (!sub) {
-    // máme customer, ale žiadne subscription - aspoň ulož customer väzbu
-    await supabase.from("subscriptions").upsert(
-      {
-        user_id: userId,
-        stripe_customer_id: customerId,
-        stripe_subscription_id: null,
-        plan: "basic",
-        status: "inactive",
-        current_period_end: null,
-        trial_until: null,
-      },
-      { onConflict: "user_id" }
-    );
-
-    const { data } = await getLatestDbSubscription(supabase, userId);
-    return data;
-  }
-
-  const priceId = sub.items.data[0]?.price?.id ?? null;
-  const plan = inferPlanFromPriceId(priceId);
-  const status = sub.status === "unpaid" ? "past_due" : sub.status;
-
-  const trialUntilUnix = sub.trial_end ?? null;
-  const currentPeriodEndUnix = (sub as any).current_period_end ?? null;
-
-  const trial_until = trialUntilUnix
-    ? new Date(trialUntilUnix * 1000).toISOString()
-    : null;
-
-  const current_period_end = currentPeriodEndUnix
-    ? new Date(currentPeriodEndUnix * 1000).toISOString()
-    : null;
-
-  await supabase.from("subscriptions").upsert(
-    {
-      user_id: userId,
-      stripe_customer_id: customerId,
-      stripe_subscription_id: sub.id,
-      plan,
-      status,
-      current_period_end,
-      trial_until,
-    },
-    { onConflict: "user_id" }
-  );
-
-  const { data } = await getLatestDbSubscription(supabase, userId);
-  return data;
+  return ((data?.[0] as SubscriptionRow | undefined) ?? null);
 }
 
 export async function GET(req: Request) {
@@ -229,6 +136,7 @@ export async function GET(req: Request) {
       );
     }
 
+    // 1) over usera
     const authClient = createSupabaseAdminClient();
     const { data: userRes, error: userErr } = await authClient.auth.getUser(token);
 
@@ -243,31 +151,11 @@ export async function GET(req: Request) {
     const userEmail = userRes.user.email ?? null;
     const now = Date.now();
 
+    // 2) fresh admin client na DB
     const supabase = createSupabaseAdminClient();
 
-    // 1) najprv DB
-    let { data: subRow, error: subErr } = await getLatestDbSubscription(supabase, userId);
-
-    if (subErr) {
-      return NextResponse.json(
-        {
-          error: subErr.message,
-          debug_user_id: userId,
-          debug_email: userEmail,
-        },
-        { status: 500, headers: noStoreHeaders() }
-      );
-    }
-
-    // 2) fallback sync zo Stripe, ak row chýba alebo nemá Stripe väzbu
-    if (!subRow || (!subRow.stripe_customer_id && !subRow.stripe_subscription_id)) {
-      subRow = await syncFromStripe(
-        supabase,
-        userId,
-        userEmail,
-        subRow?.stripe_customer_id ?? null
-      );
-    }
+    // 3) tvrdý read podľa user_id
+    const subRow = await getSubscriptionRow(supabase, userId);
 
     if (!subRow) {
       return NextResponse.json(
