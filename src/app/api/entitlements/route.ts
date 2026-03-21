@@ -1,12 +1,9 @@
 // src/app/api/entitlements/route.ts
 import { NextResponse } from "next/server";
-import Stripe from "stripe";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string);
 
 type Plan = "basic" | "plus";
 type Status = "inactive" | "trialing" | "active" | "past_due" | "canceled" | "none";
@@ -108,20 +105,7 @@ function noStoreHeaders() {
   return { "Cache-Control": "no-store" };
 }
 
-function planFromPriceId(priceId: string | null): Plan {
-  return priceId === process.env.STRIPE_PRICE_PLUS ? "plus" : "basic";
-}
-
-function statusFromStripe(status: string): Status {
-  if (status === "unpaid") return "past_due";
-  return normalizeStatus(status);
-}
-
-function toIsoFromUnix(unix?: number | null) {
-  return unix ? new Date(unix * 1000).toISOString() : null;
-}
-
-async function getDbRow(
+async function getSubscriptionRow(
   supabase: ReturnType<typeof createSupabaseAdminClient>,
   userId: string
 ): Promise<SubscriptionRow | null> {
@@ -133,97 +117,11 @@ async function getDbRow(
     .eq("user_id", userId)
     .limit(1);
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    throw new Error(error.message);
+  }
+
   return ((data?.[0] as SubscriptionRow | undefined) ?? null);
-}
-
-async function findCustomerId(
-  userId: string,
-  userEmail: string | null,
-  dbRow: SubscriptionRow | null
-) {
-  if (dbRow?.stripe_customer_id) return dbRow.stripe_customer_id;
-
-  if (!userEmail) return null;
-
-  const customers = await stripe.customers.list({
-    email: userEmail,
-    limit: 10,
-  });
-
-  const matched =
-    customers.data.find((c) => c.metadata?.user_id === userId) ??
-    customers.data[0] ??
-    null;
-
-  return matched?.id ?? null;
-}
-
-async function getCanonicalStripeSubscription(customerId: string) {
-  const subs = await stripe.subscriptions.list({
-    customer: customerId,
-    status: "all",
-    limit: 20,
-  });
-
-  return (
-    subs.data.find((s) => ["active", "trialing", "past_due", "unpaid"].includes(s.status)) ??
-    subs.data[0] ??
-    null
-  );
-}
-
-async function syncLiveStripeState(
-  supabase: ReturnType<typeof createSupabaseAdminClient>,
-  userId: string,
-  userEmail: string | null,
-  dbRow: SubscriptionRow | null
-): Promise<SubscriptionRow | null> {
-  const customerId = await findCustomerId(userId, userEmail, dbRow);
-  if (!customerId) return dbRow;
-
-  const sub = await getCanonicalStripeSubscription(customerId);
-  if (!sub) {
-    // Nemá subscription, ale aspoň ulož customer väzbu ak chýba
-    if (!dbRow?.stripe_customer_id) {
-      await supabase.from("subscriptions").upsert(
-        {
-          user_id: userId,
-          stripe_customer_id: customerId,
-          stripe_subscription_id: null,
-          plan: dbRow?.plan ?? null,
-          status: dbRow?.status ?? "inactive",
-          current_period_end: dbRow?.current_period_end ?? null,
-          trial_until: dbRow?.trial_until ?? null,
-        },
-        { onConflict: "user_id" }
-      );
-    }
-    return await getDbRow(supabase, userId);
-  }
-
-  const priceId = sub.items.data[0]?.price?.id ?? null;
-  const plan = planFromPriceId(priceId);
-  const status = statusFromStripe(sub.status);
-
-  const { error: upsertErr } = await supabase.from("subscriptions").upsert(
-    {
-      user_id: userId,
-      stripe_customer_id: customerId,
-      stripe_subscription_id: sub.id,
-      plan,
-      status,
-      current_period_end: toIsoFromUnix((sub as any).current_period_end ?? null),
-      trial_until: toIsoFromUnix(sub.trial_end ?? null),
-    },
-    { onConflict: "user_id" }
-  );
-
-  if (upsertErr) {
-    throw new Error(upsertErr.message);
-  }
-
-  return await getDbRow(supabase, userId);
 }
 
 export async function GET(req: Request) {
@@ -253,23 +151,8 @@ export async function GET(req: Request) {
     const now = Date.now();
 
     const supabase = createSupabaseAdminClient();
+    const subRow = await getSubscriptionRow(supabase, userId);
 
-    // 1) DB read
-    let subRow = await getDbRow(supabase, userId);
-
-    // 2) Keď nič nie je, alebo je row neúplný, alebo potrebujeme live pravdu, syncni zo Stripe
-    if (
-      !subRow ||
-      !subRow.stripe_customer_id ||
-      !subRow.stripe_subscription_id ||
-      !subRow.plan ||
-      !subRow.status ||
-      subRow.status === "inactive"
-    ) {
-      subRow = await syncLiveStripeState(supabase, userId, userEmail, subRow);
-    }
-
-    // 3) Ak stále nič, tak naozaj nemá členstvo
     if (!subRow) {
       return NextResponse.json(
         {
