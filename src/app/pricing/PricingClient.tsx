@@ -26,6 +26,7 @@ type Entitlements = {
 const CHECKOUT_ENDPOINT = "/api/stripe/create_checkout_session";
 const PORTAL_ENDPOINT = "/api/stripe/portal";
 const FINALIZE_CHECKOUT_ENDPOINT = "/api/stripe/finalize_checkout";
+const CURRENT_SUBSCRIPTION_ENDPOINT = "/api/stripe/current_subscription";
 
 function Pill({ children }: { children: React.ReactNode }) {
   return (
@@ -164,7 +165,10 @@ export default function PricingClient() {
         text: "Predplatné bolo aktualizované. Obnovujem stav členstva…",
       });
     } else if (canceled === "1") {
-      setMsg({ type: "info", text: "Platba bola zrušená. Ak chceš, skús to znova." });
+      setMsg({
+        type: "info",
+        text: "Platba bola zrušená. Ak chceš, skús to znova.",
+      });
     } else {
       setMsg(null);
     }
@@ -242,15 +246,15 @@ export default function PricingClient() {
     return e;
   }
 
-  async function finalizeCheckout(sessionId: string) {
-    if (!supabase) return;
+  async function finalizeCheckout(sessionId: string): Promise<Entitlements | null> {
+    if (!supabase) return null;
 
     const { data: s } = await supabase.auth.getSession();
     const token = s.session?.access_token;
 
-    if (!token) return;
+    if (!token) return null;
 
-    await fetch(FINALIZE_CHECKOUT_ENDPOINT, {
+    const res = await fetch(FINALIZE_CHECKOUT_ENDPOINT, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -258,7 +262,37 @@ export default function PricingClient() {
       },
       cache: "no-store",
       body: JSON.stringify({ session_id: sessionId }),
-    }).catch(() => null);
+    });
+
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data) return null;
+
+    return await fetchEntitlementsOnce();
+  }
+
+  async function fetchCurrentSubscriptionFromStripe(): Promise<Entitlements | null> {
+    if (!supabase) return null;
+
+    const { data: s } = await supabase.auth.getSession();
+    const token = s.session?.access_token;
+
+    if (!token) return null;
+
+    const res = await fetch(CURRENT_SUBSCRIPTION_ENDPOINT, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      cache: "no-store",
+    });
+
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data) return null;
+
+    const e = data as Entitlements;
+    setEnt(e);
+    setSubStatus(normalizeSubStatusFromEnt(e));
+    return e;
   }
 
   useEffect(() => {
@@ -308,23 +342,25 @@ export default function PricingClient() {
 
       attempts += 1;
 
-      if (success === "1" && attempts === 1 && sessionId) {
-        await finalizeCheckout(sessionId);
-      }
-
-      const e = await fetchEntitlementsOnce();
+      let e: Entitlements | null = null;
 
       if (success === "1") {
-        const ready =
-          !!e &&
-          !!e.has_stripe_link &&
-          e.plan !== null &&
-          e.active_like === true;
-
-        if (ready || attempts >= maxAttempts) return;
+        if (attempts === 1 && sessionId) {
+          e = await finalizeCheckout(sessionId);
+        } else {
+          e = await fetchEntitlementsOnce();
+        }
       } else {
-        if (attempts >= maxAttempts) return;
+        e = await fetchCurrentSubscriptionFromStripe();
       }
+
+      const ready =
+        !!e &&
+        !!e.has_stripe_link &&
+        e.plan !== null &&
+        e.active_like === true;
+
+      if (ready || attempts >= maxAttempts) return;
 
       timer = window.setTimeout(() => {
         void poll();
@@ -333,7 +369,7 @@ export default function PricingClient() {
 
     timer = window.setTimeout(() => {
       void poll();
-    }, 500);
+    }, 400);
 
     return () => {
       stopped = true;
@@ -375,13 +411,19 @@ export default function PricingClient() {
 
       const url = data?.url;
       if (!url) {
-        setMsg({ type: "error", text: "Nepodarilo sa spustiť platbu. (Chýba url v odpovedi servera.)" });
+        setMsg({
+          type: "error",
+          text: "Nepodarilo sa spustiť platbu. (Chýba url v odpovedi servera.)",
+        });
         return;
       }
 
       window.location.href = url;
     } catch (e: any) {
-      setMsg({ type: "error", text: `Nepodarilo sa spustiť platbu. (${e?.message ?? "unknown"})` });
+      setMsg({
+        type: "error",
+        text: `Nepodarilo sa spustiť platbu. (${e?.message ?? "unknown"})`,
+      });
     } finally {
       setBusy(null);
     }
@@ -434,7 +476,10 @@ export default function PricingClient() {
 
       window.location.href = url;
     } catch (e: any) {
-      setMsg({ type: "error", text: `Nepodarilo sa otvoriť Stripe portal. (${e?.message ?? "unknown"})` });
+      setMsg({
+        type: "error",
+        text: `Nepodarilo sa otvoriť Stripe portal. (${e?.message ?? "unknown"})`,
+      });
     } finally {
       setBusy(null);
     }
@@ -457,7 +502,8 @@ export default function PricingClient() {
   const buttonBase =
     "w-full rounded-2xl px-5 py-3 text-center text-sm font-semibold transition disabled:opacity-60 disabled:cursor-not-allowed";
   const btnPrimary = "btn-primary " + buttonBase;
-  const btnSecondary = buttonBase + " border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-zinc-900";
+  const btnSecondary =
+    buttonBase + " border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-zinc-900";
 
   const isBasic = subStatus === "basic";
   const isPlus = subStatus === "plus";
@@ -515,7 +561,9 @@ export default function PricingClient() {
         </header>
 
         {!supabase || checkingAuth ? (
-          <div className="mb-6 rounded-2xl p-4 surface-same-as-nav surface-border text-sm muted">Načítavam…</div>
+          <div className="mb-6 rounded-2xl p-4 surface-same-as-nav surface-border text-sm muted">
+            Načítavam…
+          </div>
         ) : null}
 
         {msg ? (
