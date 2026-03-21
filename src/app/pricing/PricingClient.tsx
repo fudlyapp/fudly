@@ -9,8 +9,8 @@ type Tier = "basic" | "plus";
 type SubStatus = "none" | "basic" | "plus";
 
 type Entitlements = {
-  plan: "basic" | "plus" | null; // ✅ môže byť null (ŽIADNY)
-  status: string; // "none" | "trialing" | ...
+  plan: "basic" | "plus" | null;
+  status: string;
   active_like: boolean;
   can_generate: boolean;
   weekly_limit: number;
@@ -88,7 +88,11 @@ function Card({
         </div>
       </div>
 
-      <ul className="mt-5 space-y-2">{features.map((f, i) => <Feature key={i}>{f}</Feature>)}</ul>
+      <ul className="mt-5 space-y-2">
+        {features.map((f, i) => (
+          <Feature key={i}>{f}</Feature>
+        ))}
+      </ul>
 
       <div className="mt-6">
         {cta}
@@ -124,8 +128,8 @@ export default function PricingClient() {
 
   const [msg, setMsg] = useState<{ type: "success" | "error" | "info"; text: string } | null>(null);
 
-  // success/canceled paramy z checkoutu
-    useEffect(() => {
+  // success/canceled/portal paramy
+  useEffect(() => {
     const success = sp.get("success");
     const canceled = sp.get("canceled");
     const portal = sp.get("portal");
@@ -142,6 +146,8 @@ export default function PricingClient() {
       });
     } else if (canceled === "1") {
       setMsg({ type: "info", text: "Platba bola zrušená. Ak chceš, skús to znova." });
+    } else {
+      setMsg(null);
     }
   }, [sp]);
 
@@ -187,8 +193,8 @@ export default function PricingClient() {
     return token;
   }
 
-  async function fetchEntitlementsOnce() {
-    if (!supabase) return;
+  async function fetchEntitlementsOnce(): Promise<Entitlements | null> {
+    if (!supabase) return null;
 
     const { data: s } = await supabase.auth.getSession();
     const token = s.session?.access_token;
@@ -196,25 +202,26 @@ export default function PricingClient() {
     if (!token) {
       setEnt(null);
       setSubStatus("none");
-      return;
+      return null;
     }
 
-    // cache-bust + no-store
     const res = await fetch(`/api/entitlements?t=${Date.now()}`, {
       headers: { Authorization: `Bearer ${token}` },
       cache: "no-store",
     });
 
     const data = await res.json().catch(() => null);
+
     if (!res.ok || !data) {
       setEnt(null);
       setSubStatus("none");
-      return;
+      return null;
     }
 
     const e = data as Entitlements;
     setEnt(e);
     setSubStatus(normalizeSubStatusFromEnt(e));
+    return e;
   }
 
   // načítaj entitlements po login
@@ -229,8 +236,13 @@ export default function PricingClient() {
         setSubStatus("none");
         return;
       }
+
       try {
-        await fetchEntitlementsOnce();
+        const e = await fetchEntitlementsOnce();
+        if (!mounted && !e) {
+          setEnt(null);
+          setSubStatus("none");
+        }
       } catch {
         if (mounted) {
           setEnt(null);
@@ -242,11 +254,10 @@ export default function PricingClient() {
     return () => {
       mounted = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loggedIn, supabase]);
 
-  // po návrate zo Stripe: refresh párkrát (webhook dobieha)
-    useEffect(() => {
+  // po návrate zo Stripe: polling, kým sa stav naozaj neprepne
+  useEffect(() => {
     if (!supabase) return;
     if (!loggedIn) return;
 
@@ -255,16 +266,37 @@ export default function PricingClient() {
 
     if (success !== "1" && portal !== "1") return;
 
-    const t1 = window.setTimeout(() => void fetchEntitlementsOnce(), 800);
-    const t2 = window.setTimeout(() => void fetchEntitlementsOnce(), 2000);
-    const t3 = window.setTimeout(() => void fetchEntitlementsOnce(), 5000);
-    const t4 = window.setTimeout(() => void fetchEntitlementsOnce(), 9000);
+    let stopped = false;
+    let timer: number | null = null;
+    let attempts = 0;
+    const maxAttempts = 12; // cca 24 sekúnd pri 2s intervale
+
+    async function poll() {
+      if (stopped) return;
+
+      attempts += 1;
+      const e = await fetchEntitlementsOnce();
+
+      const ready =
+        !!e &&
+        !!e.has_stripe_link &&
+        e.plan !== null &&
+        e.status !== "none";
+
+      if (ready || attempts >= maxAttempts) return;
+
+      timer = window.setTimeout(() => {
+        void poll();
+      }, 2000);
+    }
+
+    timer = window.setTimeout(() => {
+      void poll();
+    }, 800);
 
     return () => {
-      window.clearTimeout(t1);
-      window.clearTimeout(t2);
-      window.clearTimeout(t3);
-      window.clearTimeout(t4);
+      stopped = true;
+      if (timer) window.clearTimeout(timer);
     };
   }, [loggedIn, sp, supabase]);
 
@@ -379,8 +411,7 @@ export default function PricingClient() {
     url.searchParams.delete("buy");
     window.history.replaceState({}, "", url.toString());
 
-    startCheckout(buy);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    void startCheckout(buy);
   }, [loggedIn, sp, supabase]);
 
   const buttonBase =
@@ -413,7 +444,6 @@ export default function PricingClient() {
       {busy === "portal" ? "Otváram…" : "Spravovať predplatné"}
     </button>
   ) : isBasic ? (
-    // ✅ upgrade rieš cez portal (nie cez checkout)
     <button type="button" className={btnPrimary} disabled={busy !== null} onClick={openPortal}>
       {busy === "portal" ? "Otváram…" : "Prejsť na PLUS"}
     </button>
@@ -434,7 +464,12 @@ export default function PricingClient() {
           {loggedIn ? (
             <div className="mt-3 text-xs muted-2">
               Aktuálny plán: <span className="font-semibold">{planLabel}</span>
-              {ent?.status ? <> • stav: <span className="font-semibold">{ent.status}</span></> : null}
+              {ent?.status ? (
+                <>
+                  {" "}
+                  • stav: <span className="font-semibold">{ent.status}</span>
+                </>
+              ) : null}
             </div>
           ) : null}
         </header>

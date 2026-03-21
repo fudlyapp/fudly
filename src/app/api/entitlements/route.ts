@@ -126,10 +126,11 @@ export async function GET(req: Request) {
     // 2) na DB používaj fresh admin client
     const supabase = createSupabaseAdminClient();
 
-    const { data: subRows, error: subErr } = await supabase
+    const { data: subRow, error: subErr } = await supabase
       .from("subscriptions")
       .select("user_id,plan,status,current_period_end,trial_until,stripe_customer_id,stripe_subscription_id")
-      .eq("user_id", userId);
+      .eq("user_id", userId)
+      .maybeSingle();
 
     if (subErr) {
       return NextResponse.json(
@@ -137,8 +138,6 @@ export async function GET(req: Request) {
         { status: 500, headers: noStoreHeaders() }
       );
     }
-
-    const subRow = (subRows?.[0] ?? null) as SubscriptionRow | null;
 
     if (!subRow) {
       return NextResponse.json(
