@@ -254,11 +254,7 @@ export default function PricingClient() {
       }
 
       try {
-        const e = await fetchEntitlementsOnce();
-        if (!mounted && !e) {
-          setEnt(null);
-          setSubStatus("none");
-        }
+        await fetchEntitlementsOnce();
       } catch {
         if (mounted) {
           setEnt(null);
@@ -272,9 +268,7 @@ export default function PricingClient() {
     };
   }, [loggedIn, supabase]);
 
-  // po návrate zo Stripe:
-  // - po checkoute čakáme, kým user vôbec dostane platné členstvo
-  // - po portáli NEKONČÍME hneď na prvom validnom stave, lebo ten môže byť ešte starý BASIC
+  // ✅ Robustný refresh po návrate zo Stripe
   useEffect(() => {
     if (!supabase) return;
     if (!loggedIn) return;
@@ -287,9 +281,7 @@ export default function PricingClient() {
     let stopped = false;
     let timer: number | null = null;
     let attempts = 0;
-
-    // po portáli nech polling beží dlhšie a neskončí na prvom "valid" stave
-    const maxAttempts = portal === "1" ? 15 : 12;
+    const maxAttempts = portal === "1" ? 15 : 15;
 
     async function poll() {
       if (stopped) return;
@@ -298,16 +290,17 @@ export default function PricingClient() {
       const e = await fetchEntitlementsOnce();
 
       if (success === "1") {
+        // po novom checkoute čakáme, kým bude subscription reálne active_like
         const ready =
           !!e &&
           !!e.has_stripe_link &&
           e.plan !== null &&
-          e.status !== "none";
+          e.active_like === true;
 
         if (ready || attempts >= maxAttempts) return;
       } else {
-        // pri návrate z portálu polling necháme bežať celé okno,
-        // lebo prvý fetch môže stále vrátiť starý BASIC stav
+        // po portáli polling necháme bežať celé okno,
+        // lebo prvý fetch môže vrátiť starý BASIC stav
         if (attempts >= maxAttempts) return;
       }
 

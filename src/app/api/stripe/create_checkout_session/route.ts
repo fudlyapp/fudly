@@ -1,4 +1,4 @@
-//src/app/api/stripe/create_checkout_session/route.ts
+// src/app/api/stripe/create_checkout_session/route.ts
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -57,7 +57,7 @@ export async function POST(req: Request) {
 
     const { data: subRow, error: subErr } = await supabase
       .from("subscriptions")
-      .select("stripe_customer_id,stripe_subscription_id,status")
+      .select("stripe_customer_id,stripe_subscription_id,status,plan,current_period_end,trial_until")
       .eq("user_id", user.id)
       .maybeSingle();
 
@@ -93,23 +93,26 @@ export async function POST(req: Request) {
       });
 
       customerId = created.id;
+    }
 
-      const { error: upsertErr } = await supabase.from("subscriptions").upsert(
-        {
-          user_id: user.id,
-          stripe_customer_id: customerId,
-          stripe_subscription_id: null,
-          plan,
-          status: "inactive",
-          current_period_end: null,
-          trial_until: null,
-        },
-        { onConflict: "user_id" }
-      );
+    // ✅ KRITICKÉ:
+    // Vždy udržuj subscriptions row ešte pred redirectom do Stripe.
+    // Tým pádom úplne nový user nebude po návrate chvíľu "ŽIADNY".
+    const { error: upsertErr } = await supabase.from("subscriptions").upsert(
+      {
+        user_id: user.id,
+        stripe_customer_id: customerId,
+        stripe_subscription_id: subRow?.stripe_subscription_id ?? null,
+        plan,
+        status: subRow?.status ?? "inactive",
+        current_period_end: subRow?.current_period_end ?? null,
+        trial_until: subRow?.trial_until ?? null,
+      },
+      { onConflict: "user_id" }
+    );
 
-      if (upsertErr) {
-        return NextResponse.json({ error: upsertErr.message }, { status: 500 });
-      }
+    if (upsertErr) {
+      return NextResponse.json({ error: upsertErr.message }, { status: 500 });
     }
 
     const site = siteUrlFromReq(req);
