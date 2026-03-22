@@ -1,4 +1,3 @@
-// src/app/profile/[week_start]/page.tsx
 "use client";
 
 import Link from "next/link";
@@ -19,6 +18,7 @@ type ShoppingItem = {
   name: string;
   quantity: string;
   category_key?: string;
+  estimated_price_eur?: number | null;
 };
 
 type ShoppingTrip = {
@@ -32,7 +32,7 @@ type ShoppingTrip = {
 type PlanDay = {
   day: number;
   day_name?: string;
-  date?: string; // YYYY-MM-DD
+  date?: string;
   breakfast: string;
   lunch: string;
   dinner: string;
@@ -109,17 +109,24 @@ function deepClone<T>(x: T): T {
   return JSON.parse(JSON.stringify(x));
 }
 
+function round2(n: number) {
+  return Math.round(n * 100) / 100;
+}
+
 function pad2(n: number) {
   return String(n).padStart(2, "0");
 }
+
 function toISODate(d: Date) {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
+
 function addDaysISO(iso: string, add: number) {
   const d = new Date(iso + "T00:00:00");
   d.setDate(d.getDate() + add);
   return toISODate(d);
 }
+
 function formatDateSK(iso?: string) {
   if (!iso) return "";
   const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -182,11 +189,67 @@ function shoppingToTXT(weekStart: string, shopping: ShoppingTrip[]) {
     lines.push(
       `Nákup ${t.trip} (dni ${t.covers_days}) – odhad: ${t.estimated_cost_eur ?? "—"} € – reálna: ${t.actual_cost_eur ?? "—"} €`
     );
-    for (const it of t.items || []) lines.push(`- ${it.name} — ${it.quantity}`);
+    for (const it of t.items || []) {
+      lines.push(
+        `- ${it.name} — ${it.quantity}${typeof it.estimated_price_eur === "number" ? ` — ${it.estimated_price_eur.toFixed(2)} €` : ""}`
+      );
+    }
     lines.push("");
   }
 
   return lines.join("\n");
+}
+
+function recalcShoppingEstimates(plan: PlanJSON): PlanJSON {
+  const next = deepClone(plan);
+
+  const trips = Array.isArray(next.shopping) ? next.shopping : [];
+  let weeklyEstimatedTotal = 0;
+
+  for (const trip of trips) {
+    const items = Array.isArray(trip.items) ? trip.items : [];
+
+    const tripEstimated = items.reduce((sum, item) => {
+      const v = item?.estimated_price_eur;
+      if (typeof v === "number" && Number.isFinite(v) && v >= 0) return sum + v;
+      return sum;
+    }, 0);
+
+    trip.estimated_cost_eur = round2(tripEstimated);
+    weeklyEstimatedTotal += tripEstimated;
+  }
+
+  next.summary = next.summary ?? {};
+  next.summary.estimated_total_cost_eur = round2(weeklyEstimatedTotal);
+
+  return next;
+}
+
+function backfillItemEstimatedPrices(plan: PlanJSON): PlanJSON {
+  const next = deepClone(plan);
+  const trips = Array.isArray(next.shopping) ? next.shopping : [];
+
+  for (const trip of trips) {
+    const items = Array.isArray(trip.items) ? trip.items : [];
+    if (!items.length) continue;
+
+    const hasAnyItemPrice = items.some(
+      (it) => typeof it?.estimated_price_eur === "number" && Number.isFinite(it.estimated_price_eur)
+    );
+
+    if (hasAnyItemPrice) continue;
+
+    const tripEstimate = trip?.estimated_cost_eur;
+    if (typeof tripEstimate !== "number" || !Number.isFinite(tripEstimate) || tripEstimate < 0) continue;
+
+    const perItem = round2(tripEstimate / items.length);
+
+    for (const item of items) {
+      item.estimated_price_eur = perItem;
+    }
+  }
+
+  return recalcShoppingEstimates(next);
 }
 
 function KcalValue({
@@ -196,9 +259,19 @@ function KcalValue({
   isPlus: boolean;
   value: number | null;
 }) {
-  if (!isPlus) return <span className="font-semibold">PLUS</span>;
-  if (typeof value === "number") return <span className="font-semibold">{value}</span>;
-  return <span className="muted-2">—</span>;
+  if (!isPlus) {
+    return (
+      <span className="inline-flex items-center rounded-full border border-gray-300 dark:border-gray-700 px-2 py-0.5 text-xs font-bold text-gray-900 dark:text-white">
+        PLUS
+      </span>
+    );
+  }
+
+  if (typeof value === "number") {
+    return <span className="font-bold text-gray-900 dark:text-white">{value}</span>;
+  }
+
+  return <span className="text-gray-500 dark:text-gray-400">—</span>;
 }
 
 export default function WeekDetailPage() {
@@ -207,7 +280,6 @@ export default function WeekDetailPage() {
   const weekStart = (params?.week_start || "").toString();
   const noteRefs = useRef<Record<number, HTMLTextAreaElement | null>>({});
 
-  // ✅ SOURCE OF TRUTH: session
   const [authLoading, setAuthLoading] = useState(true);
   const [session, setSession] = useState<Session | null>(null);
   const accessToken = session?.access_token ?? null;
@@ -220,17 +292,14 @@ export default function WeekDetailPage() {
 
   const [dirty, setDirty] = useState(false);
 
-  // recept modal
   const [recipeOpen, setRecipeOpen] = useState(false);
   const [recipeTitle, setRecipeTitle] = useState("Recept");
   const [recipeBody, setRecipeBody] = useState<React.ReactNode>(null);
 
-  // ✅ entitlements
   const [ent, setEnt] = useState<Entitlements | null>(null);
   const isPlus = ent?.plan === "plus";
   const caloriesAllowed = !!ent?.calories_enabled && isPlus;
 
-  // ✅ init auth + listener (len raz)
   useEffect(() => {
     let alive = true;
 
@@ -263,7 +332,6 @@ export default function WeekDetailPage() {
     };
   }, [supabase]);
 
-  // ✅ entitlements fetch (week_start + no-store + cache-buster)
   useEffect(() => {
     if (!accessToken) {
       setEnt(null);
@@ -294,7 +362,6 @@ export default function WeekDetailPage() {
     return () => ac.abort();
   }, [accessToken, weekStart]);
 
-  // ✅ load meal plan row (bez getSession)
   useEffect(() => {
     (async () => {
       setLoading(true);
@@ -331,7 +398,8 @@ export default function WeekDetailPage() {
       }
 
       const r = data as unknown as MealPlanRow;
-      const cloned = deepClone((r.plan ?? r.plan_generated) as PlanJSON);
+      let cloned = deepClone((r.plan ?? r.plan_generated) as PlanJSON);
+      cloned = backfillItemEstimatedPrices(cloned);
 
       cloned.meta = cloned.meta ?? {};
       cloned.meta.edited_meals = cloned.meta.edited_meals ?? {};
@@ -369,8 +437,8 @@ export default function WeekDetailPage() {
   }, [row?.week_end, weekStart]);
 
   const caloriesPresent = useMemo(() => planHasCalories(plan), [plan]);
-
   const shopping = useMemo(() => plan?.shopping ?? [], [plan]);
+
   const anyShoppingEdited = useMemo(() => {
     const m = plan?.meta?.shopping_edited_trips ?? {};
     return Object.keys(m).length > 0;
@@ -502,7 +570,7 @@ export default function WeekDetailPage() {
     setDirty(true);
     setPlan((prev) => {
       if (!prev) return prev;
-      const next = deepClone(prev);
+      let next = deepClone(prev);
 
       next.shopping = Array.isArray(next.shopping) ? next.shopping : [];
       if (!next.shopping[tripIdx]) return prev;
@@ -517,6 +585,7 @@ export default function WeekDetailPage() {
       const tripNo = next.shopping[tripIdx].trip;
       next.meta.shopping_edited_trips[String(tripNo)] = true;
 
+      next = recalcShoppingEstimates(next);
       return next;
     });
   }
@@ -525,7 +594,7 @@ export default function WeekDetailPage() {
     setDirty(true);
     setPlan((prev) => {
       if (!prev) return prev;
-      const next = deepClone(prev);
+      let next = deepClone(prev);
 
       next.shopping = Array.isArray(next.shopping) ? next.shopping : [];
       if (!next.shopping[tripIdx]) return prev;
@@ -538,6 +607,7 @@ export default function WeekDetailPage() {
       const tripNo = next.shopping[tripIdx].trip;
       next.meta.shopping_edited_trips[String(tripNo)] = true;
 
+      next = recalcShoppingEstimates(next);
       return next;
     });
   }
@@ -545,34 +615,47 @@ export default function WeekDetailPage() {
   const [addCat, setAddCat] = useState<Record<number, CategoryKey>>({});
   const [addName, setAddName] = useState<Record<number, string>>({});
   const [addQty, setAddQty] = useState<Record<number, string>>({});
+  const [addPrice, setAddPrice] = useState<Record<number, string>>({});
 
   function addShoppingItem(tripIdx: number) {
     const cat = addCat[tripIdx] ?? "other";
     const name = (addName[tripIdx] ?? "").trim();
     const qty = (addQty[tripIdx] ?? "").trim();
+    const rawPrice = (addPrice[tripIdx] ?? "").trim();
+
     if (!name) return;
+
+    const parsedPrice =
+      rawPrice === "" ? null : Number.isFinite(Number(rawPrice)) && Number(rawPrice) >= 0 ? Number(rawPrice) : null;
 
     setDirty(true);
     setPlan((prev) => {
       if (!prev) return prev;
-      const next = deepClone(prev);
+      let next = deepClone(prev);
 
       next.shopping = Array.isArray(next.shopping) ? next.shopping : [];
       if (!next.shopping[tripIdx]) return prev;
 
       next.shopping[tripIdx].items = Array.isArray(next.shopping[tripIdx].items) ? next.shopping[tripIdx].items : [];
-      next.shopping[tripIdx].items.push({ name, quantity: qty || "—", category_key: cat });
+      next.shopping[tripIdx].items.push({
+        name,
+        quantity: qty || "—",
+        category_key: cat,
+        estimated_price_eur: parsedPrice,
+      });
 
       next.meta = next.meta ?? {};
       next.meta.shopping_edited_trips = next.meta.shopping_edited_trips ?? {};
       const tripNo = next.shopping[tripIdx].trip;
       next.meta.shopping_edited_trips[String(tripNo)] = true;
 
+      next = recalcShoppingEstimates(next);
       return next;
     });
 
     setAddName((p) => ({ ...p, [tripIdx]: "" }));
     setAddQty((p) => ({ ...p, [tripIdx]: "" }));
+    setAddPrice((p) => ({ ...p, [tripIdx]: "" }));
   }
 
   async function saveEdits() {
@@ -585,12 +668,14 @@ export default function WeekDetailPage() {
       return;
     }
 
-    if (!Array.isArray(plan.days) || plan.days.length !== 7) {
+    const normalizedPlan = recalcShoppingEstimates(plan);
+
+    if (!Array.isArray(normalizedPlan.days) || normalizedPlan.days.length !== 7) {
       setMsg("Plán vyzerá poškodený (days nie je 7).");
       return;
     }
 
-    const trips = Array.isArray(plan.shopping) ? plan.shopping : [];
+    const trips = Array.isArray(normalizedPlan.shopping) ? normalizedPlan.shopping : [];
     for (const t of trips) {
       if (t.actual_cost_eur == null) continue;
       if (typeof t.actual_cost_eur !== "number" || !Number.isFinite(t.actual_cost_eur) || t.actual_cost_eur < 0) {
@@ -604,15 +689,17 @@ export default function WeekDetailPage() {
       const nowIso = new Date().toISOString();
       const { error } = await supabase
         .from("meal_plans")
-        .update({ plan, is_edited: true, edited_at: nowIso } as any)
+        .update({ plan: normalizedPlan, is_edited: true, edited_at: nowIso } as any)
         .eq("user_id", user.id)
         .eq("week_start", row.week_start);
 
-      if (error) setMsg("Chyba pri ukladaní: " + error.message);
-      else {
+      if (error) {
+        setMsg("Chyba pri ukladaní: " + error.message);
+      } else {
+        setPlan(normalizedPlan);
         setMsg("✅ Uložené.");
         setDirty(false);
-        setRow((prev) => (prev ? { ...prev, plan: deepClone(plan), is_edited: true, edited_at: nowIso } : prev));
+        setRow((prev) => (prev ? { ...prev, plan: deepClone(normalizedPlan), is_edited: true, edited_at: nowIso } : prev));
       }
     } catch (e: any) {
       setMsg("Chyba pri ukladaní: " + (e?.message ?? "unknown"));
@@ -676,7 +763,7 @@ export default function WeekDetailPage() {
 
             {anyShoppingEdited ? (
               <div className="mt-3 text-xs muted-2">
-                Pozn.: Aspoň jeden nákup bol upravený — odhadovaná cena nemusí zodpovedať aktuálnemu zoznamu.
+                Pozn.: Aspoň jeden nákup bol upravený — odhadovaná cena sa teraz počíta automaticky zo súčtu cien položiek.
               </div>
             ) : null}
           </div>
@@ -717,7 +804,6 @@ export default function WeekDetailPage() {
           <h2 className="text-xl font-semibold">Jedálniček</h2>
           <div className="mt-2 text-sm muted">Klikni do jedla a uprav text. Ak upravíš jedlo, recept preň nebude dostupný.</div>
 
-          {/* ✅ v BASIC iba info box (čísla nikdy neukazuj) */}
           {!isPlus ? (
             <div className="mt-4 rounded-2xl p-4 border border-gray-200 dark:border-gray-800 text-sm muted">
               Kalórie sú dostupné iba v členstve <span className="font-semibold">PLUS</span>.
@@ -727,35 +813,34 @@ export default function WeekDetailPage() {
             </div>
           ) : null}
 
-          {/* ✅ v PLUS ukáž sumáre (ak existujú) */}
           {isPlus && caloriesAllowed && caloriesPresent ? (
-            <div className="mt-4 rounded-2xl p-4 border border-gray-200 dark:border-gray-800">
-              <div className="text-sm font-semibold">Kalórie</div>
-              <div className="mt-2 text-sm muted">
+            <div className="mt-4 rounded-2xl p-4 border border-gray-200 dark:border-gray-800 bg-white/40 dark:bg-white/[0.03]">
+              <div className="text-sm font-semibold text-gray-900 dark:text-white">Kalórie</div>
+              <div className="mt-2 text-sm text-gray-800 dark:text-gray-100">
                 {weeklyTotal != null ? (
                   <>
-                    Týždeň spolu: <span className="font-semibold">{weeklyTotal}</span> kcal
+                    Týždeň spolu: <span className="font-bold text-gray-900 dark:text-white">{weeklyTotal}</span> kcal
                   </>
                 ) : (
-                  <span className="muted-2">Týždenný súčet nie je k dispozícii.</span>
+                  <span className="text-gray-500 dark:text-gray-400">Týždenný súčet nie je k dispozícii.</span>
                 )}
                 {avgDaily != null ? (
                   <>
-                    {" • "}Priemer denne (domácnosť): <span className="font-semibold">{avgDaily}</span> kcal
+                    {" • "}Priemer denne (domácnosť): <span className="font-bold text-gray-900 dark:text-white">{avgDaily}</span> kcal
                   </>
                 ) : null}
               </div>
               {avgDailyPerPerson != null || weeklyPerPerson != null ? (
-                <div className="mt-1 text-xs muted-2">
+                <div className="mt-1 text-xs text-gray-700 dark:text-gray-200">
                   {avgDailyPerPerson != null ? (
                     <>
-                      Priemer denne na osobu: <span className="font-semibold">{avgDailyPerPerson}</span> kcal
+                      Priemer denne na osobu: <span className="font-bold text-gray-900 dark:text-white">{avgDailyPerPerson}</span> kcal
                     </>
                   ) : null}
                   {weeklyPerPerson != null ? (
                     <>
                       {avgDailyPerPerson != null ? " • " : ""}
-                      Týždeň na osobu: <span className="font-semibold">{weeklyPerPerson}</span> kcal
+                      Týždeň na osobu: <span className="font-bold text-gray-900 dark:text-white">{weeklyPerPerson}</span> kcal
                     </>
                   ) : null}
                 </div>
@@ -776,9 +861,8 @@ export default function WeekDetailPage() {
                         {d.date ? <span className="text-xs muted-2">({formatDateSK(d.date)})</span> : null}
                       </div>
 
-                      {/* ✅ Spolu za deň: PLUS -> číslo, BASIC -> "PLUS" */}
-                      <div className="mt-1 text-xs muted-2">
-                        Spolu za deň: <KcalValue isPlus={!!isPlus} value={dayTotal} /> kcal
+                      <div className="mt-2 text-sm text-gray-800 dark:text-gray-100">
+                        Spolu za deň: <KcalValue isPlus={!!isPlus} value={dayTotal} /> <span className="font-semibold">kcal</span>
                       </div>
                     </div>
                   </div>
@@ -821,8 +905,7 @@ export default function WeekDetailPage() {
                             onChange={(e) => updateMealText(dayIdx, meal, e.target.value)}
                           />
 
-                          {/* ✅ kcal/porcia: PLUS číslo, BASIC "PLUS" */}
-                          <div className="mt-2 text-xs muted-2">
+                          <div className="mt-3 text-sm text-gray-800 dark:text-gray-100">
                             kcal / porcia: <KcalValue isPlus={!!isPlus} value={kcal} />
                           </div>
                         </div>
@@ -861,11 +944,10 @@ export default function WeekDetailPage() {
           </div>
         </section>
 
-        {/* Shopping – ponechané (tvoje) */}
         <section className="rounded-2xl p-4 sm:p-6 surface-same-as-nav surface-border">
           <h2 className="text-base font-semibold">Nákupy</h2>
           <div className="mt-1 text-xs muted">
-            Položky môžeš upravovať, pridávať aj mazať. Keď upravíš nákup, označí sa ako „upravený“.
+            Položky môžeš upravovať, pridávať aj mazať. Odhad nákupu sa počíta automaticky zo súčtu cien položiek.
           </div>
 
           <div className="mt-4 space-y-4">
@@ -883,8 +965,8 @@ export default function WeekDetailPage() {
                     </div>
                     <div className="text-xs muted-2">Dni: {t.covers_days}</div>
                     <div className="mt-1 text-xs muted-2">
-                      Odhad: <span className="font-semibold">{t.estimated_cost_eur ?? "—"}</span> €
-                      {isTripEdited(t.trip) ? <span className="ml-2">• odhad nemusí sedieť</span> : null}
+                      Odhad: <span className="font-semibold">{typeof t.estimated_cost_eur === "number" ? t.estimated_cost_eur.toFixed(2) : "—"}</span> €
+                      {isTripEdited(t.trip) ? <span className="ml-2">• prepočítané z cien položiek</span> : null}
                     </div>
                   </div>
 
@@ -906,7 +988,7 @@ export default function WeekDetailPage() {
 
                       <div className="mt-2 space-y-2">
                         {c.items.map(({ item, originalIndex }) => (
-                          <div key={originalIndex} className="grid grid-cols-1 md:grid-cols-[1fr_180px_110px] gap-2 items-start min-w-0">
+                          <div key={originalIndex} className="grid grid-cols-1 md:grid-cols-[1fr_180px_140px_110px] gap-2 items-start min-w-0">
                             <input
                               className="input-surface !text-xs !leading-tight py-2 min-w-0"
                               value={item.name}
@@ -916,6 +998,21 @@ export default function WeekDetailPage() {
                               className="input-surface !text-xs !leading-tight py-2 min-w-0"
                               value={item.quantity}
                               onChange={(e) => updateShoppingItem(tripIdx, originalIndex, { quantity: e.target.value })}
+                            />
+                            <input
+                              className="input-surface !text-xs !leading-tight py-2 min-w-0"
+                              value={item.estimated_price_eur ?? ""}
+                              onChange={(e) =>
+                                updateShoppingItem(tripIdx, originalIndex, {
+                                  estimated_price_eur:
+                                    e.target.value.trim() === ""
+                                      ? null
+                                      : Number.isFinite(Number(e.target.value)) && Number(e.target.value) >= 0
+                                      ? Number(e.target.value)
+                                      : null,
+                                })
+                              }
+                              placeholder="Cena €"
                             />
                             <button
                               type="button"
@@ -933,7 +1030,7 @@ export default function WeekDetailPage() {
 
                 <div className="mt-3 rounded-2xl border border-gray-200 dark:border-gray-800 p-2.5 min-w-0">
                   <div className="text-sm font-semibold">Pridať položku</div>
-                  <div className="mt-2 grid grid-cols-1 md:grid-cols-[180px_1fr_180px_140px] gap-2 min-w-0">
+                  <div className="mt-2 grid grid-cols-1 md:grid-cols-[180px_1fr_180px_140px_140px] gap-2 min-w-0">
                     <select
                       className="input-surface !text-xs !leading-tight py-2 min-w-0"
                       value={addCat[tripIdx] ?? "other"}
@@ -956,6 +1053,12 @@ export default function WeekDetailPage() {
                       value={addQty[tripIdx] ?? ""}
                       onChange={(e) => setAddQty((p) => ({ ...p, [tripIdx]: e.target.value }))}
                       placeholder="Množstvo"
+                    />
+                    <input
+                      className="input-surface !text-xs !leading-tight py-2 min-w-0"
+                      value={addPrice[tripIdx] ?? ""}
+                      onChange={(e) => setAddPrice((p) => ({ ...p, [tripIdx]: e.target.value }))}
+                      placeholder="Cena €"
                     />
                     <button type="button" onClick={() => addShoppingItem(tripIdx)} className="btn-primary w-full md:w-auto text-xs px-4 py-2">
                       Pridať

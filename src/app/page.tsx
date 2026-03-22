@@ -282,7 +282,7 @@ export default function HomePage() {
 
               <h1 className="mt-4 font-bold tracking-tight leading-[1.04] px-3">
                 <span className="block text-[clamp(24px,5vw,50px)]">Vitaj späť, {firstName}</span>
-                <span className="block text-[clamp(20px,4.5vw,40px)] muted">pokračuj tam, kde si skončil</span>
+                <span className="block text-[clamp(20px,4.5vw,40px)] muted">pokračuj tam, kde si skončil/a</span>
               </h1>
 
               <p className="mt-5 max-w-2xl text-base sm:text-lg text-black/70 dark:text-black/70">
@@ -300,11 +300,6 @@ export default function HomePage() {
                   </div>
                 ) : null}
 
-                {remaining !== null && weeklyLimit !== null ? (
-                  <div className="inline-flex items-center rounded-full border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-semibold surface-same-as-nav">
-                    Zostáva {remaining}/{weeklyLimit} generovaní
-                  </div>
-                ) : null}
               </div>
             </div>
           </section>
@@ -359,30 +354,6 @@ export default function HomePage() {
             </div>
           </section>
 
-          <section className="pb-20">
-            <div className="rounded-3xl p-6 md:p-8 surface-same-as-nav surface-border">
-              <div className="text-2xl font-semibold">Rýchly prehľad</div>
-              <div className="mt-1 text-sm muted">Všetko dôležité na jednom mieste.</div>
-
-              <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
-                <Step
-                  n="1"
-                  title="Generátor"
-                  desc="Vytvor nový plán podľa počtu ľudí, rozpočtu a preferencií."
-                />
-                <Step
-                  n="2"
-                  title="Profil"
-                  desc="Vráť sa k starším plánom, receptom a nákupným zoznamom."
-                />
-                <Step
-                  n="3"
-                  title="Členstvo"
-                  desc="Skontroluj limity alebo prejdi na PLUS pre viac možností."
-                />
-              </div>
-            </div>
-          </section>
         </div>
       </main>
     );

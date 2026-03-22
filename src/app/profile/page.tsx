@@ -1,4 +1,3 @@
-// src/app/profile/page.tsx
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -6,9 +5,24 @@ import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { useT } from "@/lib/i18n/useT";
 
+type ShoppingItem = {
+  name: string;
+  quantity: string;
+  category_key?: string;
+  estimated_price_eur?: number | null;
+};
+
+type ShoppingTrip = {
+  trip: number;
+  covers_days: string;
+  estimated_cost_eur?: number | null;
+  actual_cost_eur?: number | null;
+  items: ShoppingItem[];
+};
+
 type MealPlanRow = {
   id: string;
-  week_start: string; // YYYY-MM-DD
+  week_start: string;
   plan: any;
   plan_generated: any;
   is_edited: boolean | null;
@@ -19,15 +33,12 @@ type MealPlanRow = {
 type ProfileRow = {
   user_id: string;
   full_name: string | null;
-
   language: string | null;
-
   people_default: number | null;
   weekly_budget_eur_default: number | null;
   shopping_trips_default: number | null;
   repeat_days_default: number | null;
   style_default: string | null;
-
   intolerances: string | null;
   avoid: string | null;
   have: string | null;
@@ -35,7 +46,7 @@ type ProfileRow = {
 };
 
 type Entitlements = {
-  plan: "basic" | "plus" | null; // ✅ NOVÉ: môže byť null (žiadny plán)
+  plan: "basic" | "plus" | null;
   status: string;
   active_like?: boolean;
   can_generate: boolean;
@@ -57,6 +68,33 @@ type StyleOption = {
   emoji: string;
   desc: string;
 };
+
+type CategoryKey =
+  | "veg"
+  | "fruit"
+  | "meat"
+  | "fish"
+  | "dairy"
+  | "bakery"
+  | "dry"
+  | "frozen"
+  | "spices"
+  | "other";
+
+const CATEGORY_LABEL: Record<CategoryKey, string> = {
+  veg: "Zelenina",
+  fruit: "Ovocie",
+  meat: "Mäso",
+  fish: "Ryby",
+  dairy: "Mliečne",
+  bakery: "Pečivo",
+  dry: "Trvanlivé",
+  frozen: "Mrazené",
+  spices: "Koreničky",
+  other: "Ostatné",
+};
+
+const CATEGORY_ORDER: CategoryKey[] = ["veg", "fruit", "meat", "fish", "dairy", "bakery", "dry", "frozen", "spices", "other"];
 
 const STYLE_OPTIONS: StyleOption[] = [
   { value: "lacné", label: "Lacné", emoji: "💰", desc: "čo najnižšia cena" },
@@ -87,7 +125,7 @@ function addDaysISO(iso: string, add: number) {
 
 function yearMonthKey(iso: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return "Neznámy";
-  return iso.slice(0, 7); // YYYY-MM
+  return iso.slice(0, 7);
 }
 
 function ymLabel(ym: string) {
@@ -96,6 +134,15 @@ function ymLabel(ym: string) {
   const y = m[1];
   const mm = m[2];
   return `${mm}.${y}`;
+}
+
+function round2(n: number) {
+  return Math.round(n * 100) / 100;
+}
+
+function moneyFmt(v: number | null | undefined) {
+  if (typeof v !== "number" || !Number.isFinite(v)) return "—";
+  return `${v.toFixed(2)} €`;
 }
 
 function downloadText(filename: string, text: string, mime = "text/plain;charset=utf-8") {
@@ -110,7 +157,7 @@ function downloadText(filename: string, text: string, mime = "text/plain;charset
   URL.revokeObjectURL(url);
 }
 
-function shoppingToTXT(weekStart: string, shopping: any[]) {
+function shoppingToTXT(weekStart: string, shopping: ShoppingTrip[]) {
   const lines: string[] = [];
   lines.push(`Fudly – Nákupný zoznam`);
   lines.push(`Týždeň: ${weekStart}`);
@@ -122,7 +169,11 @@ function shoppingToTXT(weekStart: string, shopping: any[]) {
         t.actual_cost_eur ?? "—"
       } €`
     );
-    for (const it of t.items || []) lines.push(`- ${it.name} — ${it.quantity}`);
+    for (const it of t.items || []) {
+      lines.push(
+        `- ${it.name} — ${it.quantity}${typeof it.estimated_price_eur === "number" ? ` — ${it.estimated_price_eur.toFixed(2)} €` : ""}`
+      );
+    }
     lines.push("");
   }
   return lines.join("\n");
@@ -186,33 +237,21 @@ function iconForIngredient(rawName: string) {
   return "🛒";
 }
 
-function TabButton({
-  active,
-  onClick,
-  children,
-  locked,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-  locked?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={[
-        "rounded-full px-4 py-2 text-sm font-semibold transition border whitespace-nowrap flex items-center gap-2",
-        active
-          ? "bg-black text-white border-black dark:bg-white dark:text-black dark:border-white"
-          : "bg-transparent border-gray-300 text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-zinc-900",
-        locked ? "opacity-80" : "",
-      ].join(" ")}
-    >
-      {locked ? <span title="Len pre PLUS">🔒</span> : null}
-      {children}
-    </button>
-  );
+function inferCategoryKey(name: string): CategoryKey {
+  const n = normalizeItemName(name);
+
+  if (/(paradajk|uhork|paprik|cibuľ|cibul|cesnak|mrkv|zemiak|šalát|salat|brokolic|karfiol|cuketa|špenát|spenat)/.test(n))
+    return "veg";
+  if (/(jablk|banán|banan|hrušk|pomaranč|pomaranc|citrón|citron|kiwi|jahod|malin|hrozno)/.test(n)) return "fruit";
+  if (/(kurac|hovädz|hovedz|bravč|bravc|mlet|slan|šunka|sunka|klobás|klobas)/.test(n)) return "meat";
+  if (/(losos|tuniak|tresk|ryb)/.test(n)) return "fish";
+  if (/(mliek|jogurt|syr|tvaroh|smotan|maslo|mozarel|parmez|vajc)/.test(n)) return "dairy";
+  if (/(chlieb|rožok|rozok|baget|tortill|toast|žeml|zeml)/.test(n)) return "bakery";
+  if (/(ryža|ryza|cestov|múka|muka|ovsen|šošov|sosov|cícer|cicer|fazuľ|fazul|konzerv|olej)/.test(n)) return "dry";
+  if (/(mrazen)/.test(n)) return "frozen";
+  if (/(soľ|sol|koren|paprika mletá|rasca|kari|oregano|bazalk)/.test(n)) return "spices";
+
+  return "other";
 }
 
 function computeActualFromTrips(plan: any) {
@@ -248,7 +287,6 @@ function toIntOrNull(raw: string, opts?: { min?: number; max?: number }) {
   return i;
 }
 
-// vezmeme "nejaký" week_start len na entitlements call (ak nemá nič, dáme dnešný pondelok fallback)
 function mondayISO(d: Date) {
   const x = new Date(d);
   const day = x.getDay();
@@ -258,6 +296,257 @@ function mondayISO(d: Date) {
   const mm = String(x.getMonth() + 1).padStart(2, "0");
   const dd = String(x.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
+}
+
+function TabButton({
+  active,
+  onClick,
+  children,
+  locked,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+  locked?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={[
+        "rounded-full px-4 py-2 text-sm font-semibold transition border whitespace-nowrap flex items-center gap-2",
+        active
+          ? "bg-black text-white border-black dark:bg-white dark:text-black dark:border-white"
+          : "bg-transparent border-gray-300 text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-zinc-900",
+        locked ? "opacity-80" : "",
+      ].join(" ")}
+    >
+      {locked ? <span title="Len pre PLUS">🔒</span> : null}
+      {children}
+    </button>
+  );
+}
+
+function WeekCompareChart({
+  rows,
+}: {
+  rows: Array<{ label: string; budget: number | null; actual: number | null }>;
+}) {
+  const maxValue = Math.max(
+    1,
+    ...rows.flatMap((r) => [
+      typeof r.budget === "number" ? r.budget : 0,
+      typeof r.actual === "number" ? r.actual : 0,
+    ])
+  );
+
+  return (
+    <div className="rounded-2xl p-4 page-invert-bg border border-gray-200 dark:border-gray-800">
+      <div className="text-sm font-semibold">Týždenný graf: budget vs reálne minuté</div>
+      <div className="mt-1 text-xs muted-2">Každý týždeň porovnáva plánovaný budget s reálne zadanými nákupmi.</div>
+
+      <div className="mt-4 space-y-4">
+        {rows.map((r) => {
+          const budgetPct = typeof r.budget === "number" ? Math.max(4, (r.budget / maxValue) * 100) : 0;
+          const actualPct = typeof r.actual === "number" ? Math.max(4, (r.actual / maxValue) * 100) : 0;
+          const diff =
+            typeof r.budget === "number" && typeof r.actual === "number" ? Number((r.actual - r.budget).toFixed(2)) : null;
+
+          return (
+            <div key={r.label} className="space-y-2">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                <div className="text-sm font-semibold">{r.label}</div>
+                <div className="text-xs muted-2">
+                  Budget: <span className="font-semibold">{moneyFmt(r.budget)}</span>
+                  {" • "}
+                  Reálne: <span className="font-semibold">{moneyFmt(r.actual)}</span>
+                  {diff != null ? (
+                    <>
+                      {" • "}Rozdiel:{" "}
+                      <span className={diff > 0 ? "text-red-500 font-semibold" : "text-green-600 font-semibold"}>
+                        {diff > 0 ? "+" : ""}
+                        {diff.toFixed(2)} €
+                      </span>
+                    </>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div>
+                  <div className="mb-1 flex items-center justify-between text-[11px] uppercase tracking-wide muted-2">
+                    <span>Budget</span>
+                    <span>{moneyFmt(r.budget)}</span>
+                  </div>
+                  <div className="h-3 rounded-full bg-gray-200 dark:bg-zinc-800 overflow-hidden">
+                    <div className="h-full rounded-full bg-gray-900 dark:bg-white" style={{ width: `${budgetPct}%` }} />
+                  </div>
+                </div>
+
+                <div>
+                  <div className="mb-1 flex items-center justify-between text-[11px] uppercase tracking-wide muted-2">
+                    <span>Reálne minuté</span>
+                    <span>{moneyFmt(r.actual)}</span>
+                  </div>
+                  <div className="h-3 rounded-full bg-gray-200 dark:bg-zinc-800 overflow-hidden">
+                    {typeof r.actual === "number" ? (
+                      <div className="h-full rounded-full bg-green-600 dark:bg-green-500" style={{ width: `${actualPct}%` }} />
+                    ) : (
+                      <div className="h-full w-full flex items-center px-2 text-[10px] muted-2">Bez reálnej ceny</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function CategoryBreakdown({
+  rows,
+}: {
+  rows: Array<{ label: string; amount: number; pct: number }>;
+}) {
+  const maxValue = Math.max(1, ...rows.map((r) => r.amount));
+
+  return (
+    <div className="rounded-2xl p-4 page-invert-bg border border-gray-200 dark:border-gray-800">
+      <div className="text-sm font-semibold">PLUS detail: odhad výdavkov podľa kategórií</div>
+      <div className="mt-1 text-xs muted-2">
+        Výpočet vychádza priamo z cien jednotlivých položiek v nákupnom zozname.
+      </div>
+
+      <div className="mt-4 space-y-3">
+        {rows.map((r) => {
+          const width = Math.max(6, (r.amount / maxValue) * 100);
+
+          return (
+            <div key={r.label}>
+              <div className="mb-1 flex items-center justify-between gap-3 text-sm">
+                <span className="font-semibold">{r.label}</span>
+                <span className="muted-2">
+                  {r.pct.toFixed(1)} % • <span className="font-semibold">{r.amount.toFixed(2)} €</span>
+                </span>
+              </div>
+              <div className="h-3 rounded-full bg-gray-200 dark:bg-zinc-800 overflow-hidden">
+                <div className="h-full rounded-full bg-black dark:bg-white" style={{ width: `${width}%` }} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function FinanceMonthSummary({
+  items,
+  isPlus,
+}: {
+  items: Array<{
+    r: MealPlanRow;
+    plan: any;
+    bud: number | null | undefined;
+    est: number | null | undefined;
+    act: number | null;
+    missing: number;
+    totalTrips: number;
+    has: boolean;
+  }>;
+  isPlus: boolean;
+}) {
+  const weeklyRows = useMemo(() => {
+    return items.map((x) => ({
+      label: `${formatDateSK(x.r.week_start)} – ${formatDateSK(addDaysISO(x.r.week_start, 6))}`,
+      budget: typeof x.bud === "number" ? x.bud : null,
+      actual: typeof x.act === "number" ? x.act : null,
+    }));
+  }, [items]);
+
+  const categoryRows = useMemo(() => {
+    const totals = new Map<CategoryKey, number>();
+
+    for (const x of items) {
+      const shopping = x.plan?.shopping;
+      if (!Array.isArray(shopping)) continue;
+
+      for (const trip of shopping as ShoppingTrip[]) {
+        const tripItems = Array.isArray(trip?.items) ? trip.items : [];
+        if (!tripItems.length) continue;
+
+        let usedItemPrices = false;
+        for (const item of tripItems) {
+          const price = item?.estimated_price_eur;
+          if (typeof price === "number" && Number.isFinite(price) && price >= 0) {
+            const key = inferCategoryKey(item?.name || "");
+            totals.set(key, round2((totals.get(key) ?? 0) + price));
+            usedItemPrices = true;
+          }
+        }
+
+        if (usedItemPrices) continue;
+
+        const fallbackTripCost =
+          typeof trip?.estimated_cost_eur === "number" && Number.isFinite(trip.estimated_cost_eur)
+            ? trip.estimated_cost_eur
+            : null;
+
+        if (fallbackTripCost == null || fallbackTripCost < 0) continue;
+
+        const perItem = fallbackTripCost / tripItems.length;
+        for (const item of tripItems) {
+          const key = inferCategoryKey(item?.name || "");
+          totals.set(key, round2((totals.get(key) ?? 0) + perItem));
+        }
+      }
+    }
+
+    const total = Array.from(totals.values()).reduce((a, b) => a + b, 0);
+    if (!total) return [];
+
+    return CATEGORY_ORDER.map((key) => ({
+      key,
+      label: CATEGORY_LABEL[key],
+      amount: Number((totals.get(key) ?? 0).toFixed(2)),
+    }))
+      .filter((x) => x.amount > 0)
+      .sort((a, b) => b.amount - a.amount)
+      .map((x) => ({
+        label: x.label,
+        amount: x.amount,
+        pct: Number(((x.amount / total) * 100).toFixed(1)),
+      }));
+  }, [items]);
+
+  return (
+    <div className="space-y-4">
+      <WeekCompareChart rows={weeklyRows} />
+
+      {isPlus ? (
+        categoryRows.length ? (
+          <CategoryBreakdown rows={categoryRows} />
+        ) : (
+          <div className="rounded-2xl p-4 page-invert-bg border border-gray-200 dark:border-gray-800">
+            <div className="text-sm font-semibold">PLUS detail: odhad výdavkov podľa kategórií</div>
+            <div className="mt-1 text-sm muted">Zatiaľ nie je dosť dát na kategórie výdavkov.</div>
+          </div>
+        )
+      ) : (
+        <div className="rounded-2xl p-4 page-invert-bg border border-gray-200 dark:border-gray-800">
+          <div className="text-sm font-semibold">PLUS detail: odhad výdavkov podľa kategórií</div>
+          <div className="mt-1 text-sm muted">
+            Percentuálne rozdelenie výdavkov podľa kategórií je dostupné iba v členstve <span className="font-semibold">PLUS</span>.
+            <Link href="/pricing" className="ml-2 underline font-semibold">
+              Prejsť na PLUS
+            </Link>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function ProfilePage() {
@@ -291,13 +580,11 @@ export default function ProfilePage() {
   const [yearFilter, setYearFilter] = useState<string>("all");
   const [monthFilter, setMonthFilter] = useState<string>("all");
 
-  // ✅ entitlements (na zamknutie tabov)
   const [entLoading, setEntLoading] = useState(false);
   const [ent, setEnt] = useState<Entitlements | null>(null);
 
   const isPlus = ent?.plan === "plus";
-  const caloriesEnabled = !!ent?.calories_enabled; // entitlements rozhodujú
-
+  const caloriesEnabled = !!ent?.calories_enabled;
   const planLabel = ent?.plan ? ent.plan.toUpperCase() : "ŽIADNY";
 
   async function fetchEntitlements(signal?: AbortSignal) {
@@ -368,7 +655,6 @@ export default function ProfilePage() {
     })();
   }, [supabase, email]);
 
-  // ✅ po načítaní session/token alebo zoznamu plánov: natiahni entitlements
   useEffect(() => {
     const ac = new AbortController();
     fetchEntitlements(ac.signal);
@@ -376,7 +662,6 @@ export default function ProfilePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accessToken, rows.length]);
 
-  // ✅ ak nie je PLUS, nedovoľ aby zostal zvolený calories tab
   useEffect(() => {
     if (tab === "calories" && (!caloriesEnabled || !isPlus)) setTab("plans");
   }, [tab, caloriesEnabled, isPlus]);
@@ -474,7 +759,7 @@ export default function ProfilePage() {
       })
       .map((r) => {
         const plan = r.plan ?? r.plan_generated ?? null;
-        const shopping = plan?.shopping ?? [];
+        const shopping = (plan?.shopping ?? []) as ShoppingTrip[];
         const has = Array.isArray(shopping) && shopping.length > 0;
         return { r, plan, shopping, has };
       })
@@ -562,7 +847,6 @@ export default function ProfilePage() {
       user_id: user.id,
       full_name: null,
       language: null,
-
       people_default: toIntOrNull(people, { min: 1, max: 20 }),
       weekly_budget_eur_default: (() => {
         const v = budget.trim();
@@ -573,7 +857,6 @@ export default function ProfilePage() {
       shopping_trips_default: toIntOrNull(shoppingTrips, { min: 1, max: 10 }),
       repeat_days_default: toIntOrNull(repeatDays, { min: 1, max: 7 }),
       style_default: style.trim() || null,
-
       intolerances: intolerances.trim() || null,
       avoid: avoid.trim() || null,
       have: have.trim() || null,
@@ -693,13 +976,6 @@ export default function ProfilePage() {
                 </select>
               </div>
             )}
-
-            {/* Zvyšok komponentu ostáva nezmenený */}
-            {/* ... */}
-
-            {/* ⚠️ Od tohto miesta je kód identický ako tvoj pôvodný (tabs, listy, UI) */}
-            {/* Aby som ti poslal naozaj komplet funkčný súbor bez ďalších rizík, nechávam zvyšok tak ako bol. */}
-            {/* Nižšie pokračuje tvoj pôvodný render s tabmi presne ako si poslal. */}
 
             {tab === "defaults" ? (
               <section className="rounded-3xl p-6 surface-same-as-nav surface-border">
@@ -847,7 +1123,7 @@ export default function ProfilePage() {
                 <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
                   <div className="min-w-0">
                     <h2 className="text-xl font-semibold">Uložené nákupy</h2>
-                    <p className="mt-1 text-sm muted">Filtrovanie + export zatiaľ iba TXT.</p>
+                    <p className="mt-1 text-sm muted">V prehľade sa zobrazuje celý nákupný zoznam vrátane odhadovaných cien položiek.</p>
                   </div>
                 </div>
 
@@ -870,9 +1146,6 @@ export default function ProfilePage() {
                           const weekEnd = addDaysISO(r.week_start, 6);
                           const total = plan?.summary?.estimated_total_cost_eur;
 
-                          const firstTrip = Array.isArray(shopping) ? shopping[0] : null;
-                          const previewItems = Array.isArray(firstTrip?.items) ? firstTrip.items.slice(0, 6) : [];
-
                           return (
                             <div key={r.id} className="rounded-2xl p-4 page-invert-bg border border-gray-200 dark:border-gray-800">
                               <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
@@ -881,7 +1154,7 @@ export default function ProfilePage() {
                                     Týždeň {formatDateSK(r.week_start)} – {formatDateSK(weekEnd)}
                                   </div>
                                   <div className="mt-1 text-sm muted-2">
-                                    {typeof total === "number" ? `Celkový odhad: ${total} €` : "Celkový odhad: —"}
+                                    {typeof total === "number" ? `Celkový odhad: ${total.toFixed(2)} €` : "Celkový odhad: —"}
                                     {" • "}nákupov: {Array.isArray(shopping) ? shopping.length : 0}
                                   </div>
                                 </div>
@@ -903,38 +1176,50 @@ export default function ProfilePage() {
                                 </div>
                               </div>
 
-                              <div className="mt-4 rounded-xl p-3 surface-same-as-nav surface-border">
-                                <div className="flex items-baseline justify-between gap-3">
-                                  <div className="font-semibold">🧺 Preview: {firstTrip ? `Nákup ${firstTrip.trip}` : "—"}</div>
-                                  <div className="text-xs muted-2">
-                                    {firstTrip?.covers_days ? `dni: ${firstTrip.covers_days}` : ""}
-                                    {firstTrip?.estimated_cost_eur != null ? (
-                                      <>
-                                        {" • "}odhad: <span className="font-semibold">{firstTrip.estimated_cost_eur} €</span>
-                                      </>
-                                    ) : null}
-                                  </div>
-                                </div>
+                              <div className="mt-4 space-y-3">
+                                {Array.isArray(shopping) && shopping.length > 0 ? (
+                                  shopping.map((trip, tripIndex) => (
+                                    <div key={tripIndex} className="rounded-xl p-3 surface-same-as-nav surface-border">
+                                      <div className="flex items-baseline justify-between gap-3">
+                                        <div className="font-semibold">🧺 Nákup {trip?.trip ?? tripIndex + 1}</div>
+                                        <div className="text-xs muted-2 text-right">
+                                          {trip?.covers_days ? `dni: ${trip.covers_days}` : ""}
+                                          {trip?.estimated_cost_eur != null ? (
+                                            <>
+                                              {" • "}odhad: <span className="font-semibold">{Number(trip.estimated_cost_eur).toFixed(2)} €</span>
+                                            </>
+                                          ) : null}
+                                          {trip?.actual_cost_eur != null ? (
+                                            <>
+                                              {" • "}reálne: <span className="font-semibold">{Number(trip.actual_cost_eur).toFixed(2)} €</span>
+                                            </>
+                                          ) : null}
+                                        </div>
+                                      </div>
 
-                                {previewItems.length ? (
-                                  <ul className="mt-2 space-y-1 text-sm muted">
-                                    {previewItems.map((it: any, i: number) => (
-                                      <li key={i} className="flex items-center justify-between gap-3">
-                                        <span className="flex items-center gap-2 min-w-0">
-                                          <span className="shrink-0">{iconForIngredient(it.name)}</span>
-                                          <span className="truncate">{it.name}</span>
-                                        </span>
-                                        <span className="muted-2 shrink-0">{it.quantity}</span>
-                                      </li>
-                                    ))}
-                                  </ul>
+                                      {Array.isArray(trip?.items) && trip.items.length ? (
+                                        <ul className="mt-2 space-y-1 text-sm muted">
+                                          {trip.items.map((it, i) => (
+                                            <li key={i} className="grid grid-cols-[1fr_auto_auto] gap-3 items-center">
+                                              <span className="flex items-center gap-2 min-w-0">
+                                                <span className="shrink-0">{iconForIngredient(it.name)}</span>
+                                                <span className="break-words">{it.name}</span>
+                                              </span>
+                                              <span className="muted-2 shrink-0">{it.quantity}</span>
+                                              <span className="font-semibold shrink-0">
+                                                {typeof it.estimated_price_eur === "number" ? `${it.estimated_price_eur.toFixed(2)} €` : "—"}
+                                              </span>
+                                            </li>
+                                          ))}
+                                        </ul>
+                                      ) : (
+                                        <div className="mt-2 text-sm muted-2">Žiadne položky.</div>
+                                      )}
+                                    </div>
+                                  ))
                                 ) : (
-                                  <div className="mt-2 text-sm muted-2">Žiadne položky.</div>
+                                  <div className="rounded-xl p-3 surface-same-as-nav surface-border text-sm muted-2">Žiadne položky.</div>
                                 )}
-
-                                {firstTrip?.items?.length > 6 ? (
-                                  <div className="mt-2 text-xs muted-2">Zobrazených 6 položiek. Zvyšok nájdeš v detaile týždňa.</div>
-                                ) : null}
                               </div>
                             </div>
                           );
@@ -978,8 +1263,7 @@ export default function ProfilePage() {
                                     Týždeň {formatDateSK(r.week_start)} – {formatDateSK(weekEnd)}
                                   </div>
                                   <div className="mt-1 text-sm muted-2">
-                                    Priemer: <span className="font-semibold">{typeof avg === "number" ? avg : "—"}</span> kcal/deň{" "}
-                                    {" • "}
+                                    Priemer: <span className="font-semibold">{typeof avg === "number" ? avg : "—"}</span> kcal/deň {" • "}
                                     Týždeň: <span className="font-semibold">{typeof weekly === "number" ? weekly : "—"}</span> kcal
                                   </div>
                                 </div>
@@ -998,7 +1282,7 @@ export default function ProfilePage() {
             {tab === "finance" ? (
               <section className="rounded-3xl p-6 surface-same-as-nav surface-border">
                 <h2 className="text-xl font-semibold">Financie</h2>
-                <p className="mt-1 text-sm muted">Budget vs odhad vs reálna cena (súčet z nákupov).</p>
+                <p className="mt-1 text-sm muted">Mesačný prehľad so týždenným porovnaním budgetu a reálne minutých peňazí.</p>
 
                 {loading ? <div className="mt-4 text-sm muted-2">Načítavam…</div> : null}
                 {error ? <div className="mt-4 text-sm text-red-500">Chyba: {error}</div> : null}
@@ -1012,7 +1296,9 @@ export default function ProfilePage() {
                     <div key={g.ym}>
                       <div className="text-sm muted-2 mb-3">{g.ym === "Neznámy" ? "Neznámy dátum" : `Mesiac: ${ymLabel(g.ym)}`}</div>
 
-                      <div className="grid grid-cols-1 gap-4">
+                      <FinanceMonthSummary items={g.items} isPlus={!!isPlus} />
+
+                      <div className="mt-4 grid grid-cols-1 gap-4">
                         {g.items.map(({ r, bud, est, act, missing, totalTrips }) => {
                           const weekEnd = addDaysISO(r.week_start, 6);
 
@@ -1033,7 +1319,7 @@ export default function ProfilePage() {
 
                                   <div className="mt-1 text-sm muted-2">
                                     Budget: <span className="font-semibold">{budgetVal != null ? `${budgetVal} €` : "—"}</span> {" • "}
-                                    Odhad: <span className="font-semibold">{estVal != null ? `${estVal} €` : "—"}</span>
+                                    Odhad: <span className="font-semibold">{estVal != null ? `${estVal.toFixed(2)} €` : "—"}</span>
                                     {diffEst != null ? (
                                       <>
                                         {" • "}vs budget:{" "}
@@ -1046,7 +1332,7 @@ export default function ProfilePage() {
                                   </div>
 
                                   <div className="mt-1 text-sm muted-2">
-                                    Reálna cena (nákupy): <span className="font-semibold">{actVal != null ? `${actVal} €` : "—"}</span>
+                                    Reálna cena (nákupy): <span className="font-semibold">{actVal != null ? `${actVal.toFixed(2)} €` : "—"}</span>
                                     {diffAct != null ? (
                                       <>
                                         {" • "}vs budget:{" "}
@@ -1080,7 +1366,9 @@ export default function ProfilePage() {
                   ))}
                 </div>
 
-                <div className="mt-4 text-xs muted-2">Reálnu cenu dopĺňaš v detaile týždňa – pri jednotlivých nákupoch.</div>
+                <div className="mt-4 text-xs muted-2">
+                  Reálnu cenu dopĺňaš v detaile týždňa pri jednotlivých nákupoch. Odhad sa počíta automaticky zo súčtu cien položiek.
+                </div>
               </section>
             ) : null}
           </>
