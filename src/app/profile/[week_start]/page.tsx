@@ -234,7 +234,7 @@ function KcalValue({
 }) {
   if (!isPlus) {
     return (
-      <span className="inline-flex items-center rounded-full border border-gray-300 dark:border-gray-700 px-2 py-0.5 text-xs font-bold text-gray-900 dark:text-white">
+      <span className="inline-flex items-center rounded-full border border-gray-300 dark:border-gray-700 px-2 py-0.5 text-xs font-bold text-gray-500 dark:text-white">
         PLUS
       </span>
     );
