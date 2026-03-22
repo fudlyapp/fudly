@@ -96,11 +96,25 @@ const CATEGORY_LABEL: Record<CategoryKey, string> = {
 
 const CATEGORY_ORDER: CategoryKey[] = ["veg", "fruit", "meat", "fish", "dairy", "bakery", "dry", "frozen", "spices", "other"];
 
+const CATEGORY_COLORS: Record<CategoryKey, string> = {
+  veg: "#16a34a",
+  fruit: "#f59e0b",
+  meat: "#dc2626",
+  fish: "#2563eb",
+  dairy: "#7c3aed",
+  bakery: "#d97706",
+  dry: "#475569",
+  frozen: "#06b6d4",
+  spices: "#f97316",
+  other: "#6b7280",
+};
+
 const STYLE_OPTIONS: StyleOption[] = [
   { value: "lacné", label: "Lacné", emoji: "💰", desc: "čo najnižšia cena" },
   { value: "rychle", label: "Rýchle", emoji: "⚡", desc: "max 20–30 min" },
   { value: "vyvazene", label: "Vyvážené", emoji: "🥗", desc: "bielkoviny + zelenina" },
   { value: "vegetarianske", label: "Vegetariánske", emoji: "🌱", desc: "bez mäsa" },
+  { value: "veganske", label: "Vegánske", emoji: "🌿", desc: "bez mäsa, rýb, vajec a mliečnych výrobkov" },
   { value: "tradicne", label: "Tradičné", emoji: "🍲", desc: "domáca poctivá strava" },
   { value: "exoticke", label: "Exotické", emoji: "🍜", desc: "ázia / mexiko / fusion" },
   { value: "fit", label: "Fit", emoji: "🏋️", desc: "viac bielkovín, menej cukru" },
@@ -327,7 +341,7 @@ function TabButton({
   );
 }
 
-function WeekCompareChart({
+function WeeklyBudgetActualBarChart({
   rows,
 }: {
   rows: Array<{ label: string; budget: number | null; actual: number | null }>;
@@ -342,97 +356,156 @@ function WeekCompareChart({
 
   return (
     <div className="rounded-2xl p-4 page-invert-bg border border-gray-200 dark:border-gray-800">
-      <div className="text-sm font-semibold">Týždenný graf: budget vs reálne minuté</div>
-      <div className="mt-1 text-xs muted-2">Každý týždeň porovnáva plánovaný budget s reálne zadanými nákupmi.</div>
+      <div className="text-sm font-semibold">Týždenný graf: budget vs reálna cena</div>
+      <div className="mt-1 text-xs muted-2">Porovnanie po týždňoch pre zvolený filter.</div>
 
-      <div className="mt-4 space-y-4">
-        {rows.map((r) => {
-          const budgetPct = typeof r.budget === "number" ? Math.max(4, (r.budget / maxValue) * 100) : 0;
-          const actualPct = typeof r.actual === "number" ? Math.max(4, (r.actual / maxValue) * 100) : 0;
-          const diff =
-            typeof r.budget === "number" && typeof r.actual === "number" ? Number((r.actual - r.budget).toFixed(2)) : null;
+      <div className="mt-4">
+        <div className="h-72 rounded-xl border border-gray-200 dark:border-gray-800 p-4">
+          <div className="flex h-full items-end gap-4 overflow-x-auto">
+            {rows.map((r, idx) => {
+              const budgetHeight = typeof r.budget === "number" ? Math.max(8, (r.budget / maxValue) * 100) : 0;
+              const actualHeight = typeof r.actual === "number" ? Math.max(8, (r.actual / maxValue) * 100) : 0;
 
-          return (
-            <div key={r.label} className="space-y-2">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
-                <div className="text-sm font-semibold">{r.label}</div>
-                <div className="text-xs muted-2">
-                  Budget: <span className="font-semibold">{moneyFmt(r.budget)}</span>
-                  {" • "}
-                  Reálne: <span className="font-semibold">{moneyFmt(r.actual)}</span>
-                  {diff != null ? (
-                    <>
-                      {" • "}Rozdiel:{" "}
-                      <span className={diff > 0 ? "text-red-500 font-semibold" : "text-green-600 font-semibold"}>
-                        {diff > 0 ? "+" : ""}
-                        {diff.toFixed(2)} €
-                      </span>
-                    </>
-                  ) : null}
-                </div>
-              </div>
+              return (
+                <div key={idx} className="min-w-[140px] h-full flex flex-col justify-end">
+                  <div className="flex-1 flex items-end justify-center gap-3">
+                    <div className="flex flex-col items-center justify-end h-full w-12">
+                      <div className="text-[11px] muted-2 mb-2">{moneyFmt(r.budget)}</div>
+                      <div
+                        className="w-10 rounded-t-md bg-slate-700 dark:bg-slate-300"
+                        style={{ height: `${budgetHeight}%` }}
+                        title={`Budget: ${moneyFmt(r.budget)}`}
+                      />
+                    </div>
 
-              <div className="space-y-2">
-                <div>
-                  <div className="mb-1 flex items-center justify-between text-[11px] uppercase tracking-wide muted-2">
-                    <span>Budget</span>
-                    <span>{moneyFmt(r.budget)}</span>
+                    <div className="flex flex-col items-center justify-end h-full w-12">
+                      <div className="text-[11px] muted-2 mb-2">{moneyFmt(r.actual)}</div>
+                      {typeof r.actual === "number" ? (
+                        <div
+                          className="w-10 rounded-t-md bg-emerald-500"
+                          style={{ height: `${actualHeight}%` }}
+                          title={`Reálna cena: ${moneyFmt(r.actual)}`}
+                        />
+                      ) : (
+                        <div
+                          className="w-10 rounded-t-md border border-dashed border-gray-300 dark:border-gray-700"
+                          style={{ height: `10%` }}
+                          title="Bez reálnej ceny"
+                        />
+                      )}
+                    </div>
                   </div>
-                  <div className="h-3 rounded-full bg-gray-200 dark:bg-zinc-800 overflow-hidden">
-                    <div className="h-full rounded-full bg-gray-900 dark:bg-white" style={{ width: `${budgetPct}%` }} />
-                  </div>
-                </div>
 
-                <div>
-                  <div className="mb-1 flex items-center justify-between text-[11px] uppercase tracking-wide muted-2">
-                    <span>Reálne minuté</span>
-                    <span>{moneyFmt(r.actual)}</span>
-                  </div>
-                  <div className="h-3 rounded-full bg-gray-200 dark:bg-zinc-800 overflow-hidden">
-                    {typeof r.actual === "number" ? (
-                      <div className="h-full rounded-full bg-green-600 dark:bg-green-500" style={{ width: `${actualPct}%` }} />
-                    ) : (
-                      <div className="h-full w-full flex items-center px-2 text-[10px] muted-2">Bez reálnej ceny</div>
-                    )}
+                  <div className="mt-3 text-center">
+                    <div className="text-xs font-semibold">Týždeň {idx + 1}</div>
+                    <div className="text-[11px] muted-2 leading-tight mt-1">{r.label}</div>
                   </div>
                 </div>
-              </div>
-            </div>
-          );
-        })}
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="mt-3 flex flex-wrap gap-4 text-xs">
+          <div className="flex items-center gap-2">
+            <span className="inline-block h-3 w-3 rounded-sm bg-slate-700 dark:bg-slate-300" />
+            <span>Budget</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="inline-block h-3 w-3 rounded-sm bg-emerald-500" />
+            <span>Reálna cena</span>
+          </div>
+        </div>
       </div>
     </div>
   );
 }
 
-function CategoryBreakdown({
+function CategoryDonutChart({
   rows,
 }: {
-  rows: Array<{ label: string; amount: number; pct: number }>;
+  rows: Array<{ key: CategoryKey; label: string; amount: number; pct: number }>;
+}) {
+  const gradient = useMemo(() => {
+    let start = 0;
+    const parts = rows.map((r) => {
+      const end = start + r.pct;
+      const color = CATEGORY_COLORS[r.key];
+      const part = `${color} ${start}% ${end}%`;
+      start = end;
+      return part;
+    });
+    return `conic-gradient(${parts.join(", ")})`;
+  }, [rows]);
+
+  return (
+    <div className="rounded-2xl p-4 page-invert-bg border border-gray-200 dark:border-gray-800">
+      <div className="text-sm font-semibold">PLUS: odhad výdavkov podľa kategórií</div>
+      <div className="mt-1 text-xs muted-2">Rozdelenie podľa cien jednotlivých položiek.</div>
+
+      <div className="mt-4 grid grid-cols-1 md:grid-cols-[220px_1fr] gap-6 items-center">
+        <div className="flex items-center justify-center">
+          <div
+            className="relative h-44 w-44 rounded-full"
+            style={{ background: gradient }}
+            aria-label="Donut chart"
+          >
+            <div className="absolute inset-[22%] rounded-full bg-white dark:bg-black border border-gray-200 dark:border-gray-800 flex items-center justify-center text-center p-2">
+              <div>
+                <div className="text-xs muted-2">Kategórie</div>
+                <div className="text-sm font-semibold">{rows.length}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          {rows.map((r) => (
+            <div key={r.key} className="flex items-center justify-between gap-3 text-sm">
+              <div className="flex items-center gap-2 min-w-0">
+                <span
+                  className="inline-block h-3 w-3 rounded-sm shrink-0"
+                  style={{ backgroundColor: CATEGORY_COLORS[r.key] }}
+                />
+                <span className="truncate">{r.label}</span>
+              </div>
+              <div className="shrink-0 muted-2">
+                {r.pct.toFixed(1)} % • <span className="font-semibold">{r.amount.toFixed(2)} €</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TopItemsBarChart({
+  rows,
+}: {
+  rows: Array<{ label: string; amount: number }>;
 }) {
   const maxValue = Math.max(1, ...rows.map((r) => r.amount));
 
   return (
     <div className="rounded-2xl p-4 page-invert-bg border border-gray-200 dark:border-gray-800">
-      <div className="text-sm font-semibold">PLUS detail: odhad výdavkov podľa kategórií</div>
-      <div className="mt-1 text-xs muted-2">
-        Výpočet vychádza priamo z cien jednotlivých položiek v nákupnom zozname.
-      </div>
+      <div className="text-sm font-semibold">PLUS: TOP 5 najdrahších položiek</div>
+      <div className="mt-1 text-xs muted-2">Podľa odhadovanej ceny položiek v nákupoch.</div>
 
-      <div className="mt-4 space-y-3">
-        {rows.map((r) => {
-          const width = Math.max(6, (r.amount / maxValue) * 100);
-
+      <div className="mt-4 space-y-4">
+        {rows.map((r, i) => {
+          const width = Math.max(8, (r.amount / maxValue) * 100);
           return (
-            <div key={r.label}>
+            <div key={i}>
               <div className="mb-1 flex items-center justify-between gap-3 text-sm">
-                <span className="font-semibold">{r.label}</span>
-                <span className="muted-2">
-                  {r.pct.toFixed(1)} % • <span className="font-semibold">{r.amount.toFixed(2)} €</span>
-                </span>
+                <span className="font-semibold truncate">{r.label}</span>
+                <span className="shrink-0">{r.amount.toFixed(2)} €</span>
               </div>
-              <div className="h-3 rounded-full bg-gray-200 dark:bg-zinc-800 overflow-hidden">
-                <div className="h-full rounded-full bg-black dark:bg-white" style={{ width: `${width}%` }} />
+              <div className="h-4 rounded-full bg-gray-200 dark:bg-zinc-800 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-sky-600"
+                  style={{ width: `${width}%` }}
+                />
               </div>
             </div>
           );
@@ -475,31 +548,11 @@ function FinanceMonthSummary({
 
       for (const trip of shopping as ShoppingTrip[]) {
         const tripItems = Array.isArray(trip?.items) ? trip.items : [];
-        if (!tripItems.length) continue;
-
-        let usedItemPrices = false;
         for (const item of tripItems) {
           const price = item?.estimated_price_eur;
-          if (typeof price === "number" && Number.isFinite(price) && price >= 0) {
-            const key = inferCategoryKey(item?.name || "");
-            totals.set(key, round2((totals.get(key) ?? 0) + price));
-            usedItemPrices = true;
-          }
-        }
-
-        if (usedItemPrices) continue;
-
-        const fallbackTripCost =
-          typeof trip?.estimated_cost_eur === "number" && Number.isFinite(trip.estimated_cost_eur)
-            ? trip.estimated_cost_eur
-            : null;
-
-        if (fallbackTripCost == null || fallbackTripCost < 0) continue;
-
-        const perItem = fallbackTripCost / tripItems.length;
-        for (const item of tripItems) {
+          if (typeof price !== "number" || !Number.isFinite(price) || price <= 0) continue;
           const key = inferCategoryKey(item?.name || "");
-          totals.set(key, round2((totals.get(key) ?? 0) + perItem));
+          totals.set(key, round2((totals.get(key) ?? 0) + price));
         }
       }
     }
@@ -515,36 +568,70 @@ function FinanceMonthSummary({
       .filter((x) => x.amount > 0)
       .sort((a, b) => b.amount - a.amount)
       .map((x) => ({
+        key: x.key,
         label: x.label,
         amount: x.amount,
         pct: Number(((x.amount / total) * 100).toFixed(1)),
       }));
   }, [items]);
 
+  const topItemsRows = useMemo(() => {
+    const totals = new Map<string, { label: string; amount: number }>();
+
+    for (const x of items) {
+      const shopping = x.plan?.shopping;
+      if (!Array.isArray(shopping)) continue;
+
+      for (const trip of shopping as ShoppingTrip[]) {
+        const tripItems = Array.isArray(trip?.items) ? trip.items : [];
+        for (const item of tripItems) {
+          const price = item?.estimated_price_eur;
+          if (typeof price !== "number" || !Number.isFinite(price) || price <= 0) continue;
+
+          const key = normalizeItemName(item.name || "");
+          const existing = totals.get(key);
+          if (existing) {
+            existing.amount = round2(existing.amount + price);
+          } else {
+            totals.set(key, {
+              label: item.name || key,
+              amount: round2(price),
+            });
+          }
+        }
+      }
+    }
+
+    return Array.from(totals.values())
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, 5);
+  }, [items]);
+
   return (
     <div className="space-y-4">
-      <WeekCompareChart rows={weeklyRows} />
+      <WeeklyBudgetActualBarChart rows={weeklyRows} />
 
       {isPlus ? (
-        categoryRows.length ? (
-          <CategoryBreakdown rows={categoryRows} />
-        ) : (
-          <div className="rounded-2xl p-4 page-invert-bg border border-gray-200 dark:border-gray-800">
-            <div className="text-sm font-semibold">PLUS detail: odhad výdavkov podľa kategórií</div>
-            <div className="mt-1 text-sm muted">Zatiaľ nie je dosť dát na kategórie výdavkov.</div>
-          </div>
-        )
-      ) : (
-        <div className="rounded-2xl p-4 page-invert-bg border border-gray-200 dark:border-gray-800">
-          <div className="text-sm font-semibold">PLUS detail: odhad výdavkov podľa kategórií</div>
-          <div className="mt-1 text-sm muted">
-            Percentuálne rozdelenie výdavkov podľa kategórií je dostupné iba v členstve <span className="font-semibold">PLUS</span>.
-            <Link href="/pricing" className="ml-2 underline font-semibold">
-              Prejsť na PLUS
-            </Link>
-          </div>
-        </div>
-      )}
+        <>
+          {categoryRows.length ? (
+            <CategoryDonutChart rows={categoryRows} />
+          ) : (
+            <div className="rounded-2xl p-4 page-invert-bg border border-gray-200 dark:border-gray-800">
+              <div className="text-sm font-semibold">PLUS: odhad výdavkov podľa kategórií</div>
+              <div className="mt-1 text-sm muted">Pre tento filter zatiaľ nie sú dostupné ceny položiek.</div>
+            </div>
+          )}
+
+          {topItemsRows.length ? (
+            <TopItemsBarChart rows={topItemsRows} />
+          ) : (
+            <div className="rounded-2xl p-4 page-invert-bg border border-gray-200 dark:border-gray-800">
+              <div className="text-sm font-semibold">PLUS: TOP 5 najdrahších položiek</div>
+              <div className="mt-1 text-sm muted">Pre tento filter zatiaľ nie sú dostupné ceny položiek.</div>
+            </div>
+          )}
+        </>
+      ) : null}
     </div>
   );
 }
@@ -1103,7 +1190,7 @@ export default function ProfilePage() {
                                   </div>
                                   <div className="mt-1 text-sm muted-2">
                                     {r.is_edited ? "Upravené" : "Generované"} {bud ? `• Budget: ${bud} €` : ""}{" "}
-                                    {est ? `• Odhad: ${est} €` : ""}
+                                    {est ? `• Odhad: ${Number(est).toFixed(2)} €` : ""}
                                   </div>
                                 </div>
                                 <div className="text-sm muted-2 shrink-0">Otvor</div>
@@ -1123,7 +1210,7 @@ export default function ProfilePage() {
                 <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
                   <div className="min-w-0">
                     <h2 className="text-xl font-semibold">Uložené nákupy</h2>
-                    <p className="mt-1 text-sm muted">V prehľade sa zobrazuje celý nákupný zoznam vrátane odhadovaných cien položiek.</p>
+                    <p className="mt-1 text-sm muted">V prehľade sa zobrazuje celý nákupný zoznam vrátane cien položiek, ak sú dostupné.</p>
                   </div>
                 </div>
 
@@ -1282,7 +1369,9 @@ export default function ProfilePage() {
             {tab === "finance" ? (
               <section className="rounded-3xl p-6 surface-same-as-nav surface-border">
                 <h2 className="text-xl font-semibold">Financie</h2>
-                <p className="mt-1 text-sm muted">Mesačný prehľad so týždenným porovnaním budgetu a reálne minutých peňazí.</p>
+                <p className="mt-1 text-sm muted">
+                  BASIC: stĺpcový graf budget vs reálna cena. PLUS: navyše kategórie a TOP 5 najdrahších položiek.
+                </p>
 
                 {loading ? <div className="mt-4 text-sm muted-2">Načítavam…</div> : null}
                 {error ? <div className="mt-4 text-sm text-red-500">Chyba: {error}</div> : null}
@@ -1367,7 +1456,7 @@ export default function ProfilePage() {
                 </div>
 
                 <div className="mt-4 text-xs muted-2">
-                  Reálnu cenu dopĺňaš v detaile týždňa pri jednotlivých nákupoch. Odhad sa počíta automaticky zo súčtu cien položiek.
+                  Reálnu cenu dopĺňaš v detaile týždňa pri jednotlivých nákupoch. Odhad podľa kategórií a TOP 5 fungujú len tam, kde sú dostupné ceny položiek.
                 </div>
               </section>
             ) : null}

@@ -225,33 +225,6 @@ function recalcShoppingEstimates(plan: PlanJSON): PlanJSON {
   return next;
 }
 
-function backfillItemEstimatedPrices(plan: PlanJSON): PlanJSON {
-  const next = deepClone(plan);
-  const trips = Array.isArray(next.shopping) ? next.shopping : [];
-
-  for (const trip of trips) {
-    const items = Array.isArray(trip.items) ? trip.items : [];
-    if (!items.length) continue;
-
-    const hasAnyItemPrice = items.some(
-      (it) => typeof it?.estimated_price_eur === "number" && Number.isFinite(it.estimated_price_eur)
-    );
-
-    if (hasAnyItemPrice) continue;
-
-    const tripEstimate = trip?.estimated_cost_eur;
-    if (typeof tripEstimate !== "number" || !Number.isFinite(tripEstimate) || tripEstimate < 0) continue;
-
-    const perItem = round2(tripEstimate / items.length);
-
-    for (const item of items) {
-      item.estimated_price_eur = perItem;
-    }
-  }
-
-  return recalcShoppingEstimates(next);
-}
-
 function KcalValue({
   isPlus,
   value,
@@ -398,8 +371,7 @@ export default function WeekDetailPage() {
       }
 
       const r = data as unknown as MealPlanRow;
-      let cloned = deepClone((r.plan ?? r.plan_generated) as PlanJSON);
-      cloned = backfillItemEstimatedPrices(cloned);
+      const cloned = deepClone((r.plan ?? r.plan_generated) as PlanJSON);
 
       cloned.meta = cloned.meta ?? {};
       cloned.meta.edited_meals = cloned.meta.edited_meals ?? {};
@@ -763,7 +735,7 @@ export default function WeekDetailPage() {
 
             {anyShoppingEdited ? (
               <div className="mt-3 text-xs muted-2">
-                Pozn.: Aspoň jeden nákup bol upravený — odhadovaná cena sa teraz počíta automaticky zo súčtu cien položiek.
+                Pozn.: Aspoň jeden nákup bol upravený — odhadovaná cena sa počíta automaticky zo súčtu cien položiek.
               </div>
             ) : null}
           </div>
@@ -883,8 +855,8 @@ export default function WeekDetailPage() {
                             ? d.lunch_kcal
                             : null
                           : typeof d.dinner_kcal === "number"
-                          ? d.dinner_kcal
-                          : null;
+                            ? d.dinner_kcal
+                            : null;
 
                       return (
                         <div key={meal} className="rounded-2xl p-3 border border-gray-200 dark:border-gray-800 min-w-0">

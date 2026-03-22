@@ -1,4 +1,3 @@
-//src/app/api/generate/route.ts
 import { NextResponse } from "next/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -27,7 +26,7 @@ function planLimits(plan: Plan) {
     return {
       weekly_limit: 5,
       calories_enabled: true,
-      allowed_styles: ["lacné", "rychle", "vyvazene", "vegetarianske", "fit", "tradicne", "exoticke"],
+      allowed_styles: ["lacné", "rychle", "vyvazene", "vegetarianske", "veganske", "fit", "tradicne", "exoticke"],
     };
   }
   return {
@@ -210,6 +209,8 @@ function styleHintFromValue(style: string, lang: "sk" | "en" | "uk") {
         return "Prefer balanced meals (protein + veggies + sides), still budget-friendly.";
       case "vegetarianske":
         return "Vegetarian: no meat or fish (eggs and dairy OK).";
+      case "veganske":
+        return "Vegan: no meat, fish, eggs, dairy or other animal products.";
       case "tradicne":
         return "Traditional home-style meals.";
       case "exoticke":
@@ -229,6 +230,8 @@ function styleHintFromValue(style: string, lang: "sk" | "en" | "uk") {
         return "Надавай перевагу збалансованим стравам (білок + овочі + гарнір), бюджетно.";
       case "vegetarianske":
         return "Вегетаріанське: без м’яса та риби (яйця й молочне можна).";
+      case "veganske":
+        return "Веганське: без м’яса, риби, яєць, молочних продуктів та інших продуктів тваринного походження.";
       case "tradicne":
         return "Традиційні домашні страви.";
       case "exoticke":
@@ -247,6 +250,8 @@ function styleHintFromValue(style: string, lang: "sk" | "en" | "uk") {
       return "Uprednostni vyvážené jedlá (bielkoviny, zelenina, prílohy), stále rozumná cena.";
     case "vegetarianske":
       return "Vegetariánske: bez mäsa a rýb (vajcia a mliečne OK).";
+    case "veganske":
+      return "Vegánske: bez mäsa, rýb, vajec, mliečnych výrobkov a všetkých živočíšnych produktov.";
     case "tradicne":
       return "Tradičné: domáca poctivá strava.";
     case "exoticke":
@@ -296,23 +301,66 @@ function ensurePerPersonCalories(summary: any) {
   return summary;
 }
 
+function round2(n: number) {
+  return Math.round(n * 100) / 100;
+}
+
+function normalizeShoppingPricing(plan: any) {
+  const next = JSON.parse(JSON.stringify(plan ?? {}));
+  const shopping = Array.isArray(next.shopping) ? next.shopping : [];
+  let weeklyTotal = 0;
+
+  for (const trip of shopping) {
+    const items = Array.isArray(trip?.items) ? trip.items : [];
+    let itemSum = 0;
+    let hasItemPrices = false;
+
+    for (const item of items) {
+      const price = Number(item?.estimated_price_eur);
+      if (Number.isFinite(price) && price >= 0) {
+        item.estimated_price_eur = round2(price);
+        itemSum += price;
+        hasItemPrices = true;
+      } else {
+        item.estimated_price_eur = null;
+      }
+    }
+
+    if (hasItemPrices) {
+      trip.estimated_cost_eur = round2(itemSum);
+    } else {
+      const tripEstimate = Number(trip?.estimated_cost_eur);
+      trip.estimated_cost_eur = Number.isFinite(tripEstimate) && tripEstimate >= 0 ? round2(tripEstimate) : 0;
+    }
+
+    const actual = Number(trip?.actual_cost_eur);
+    trip.actual_cost_eur = Number.isFinite(actual) && actual >= 0 ? round2(actual) : null;
+
+    weeklyTotal += Number(trip.estimated_cost_eur) || 0;
+  }
+
+  next.summary = next.summary ?? {};
+  next.summary.estimated_total_cost_eur = round2(weeklyTotal);
+
+  return next;
+}
+
 export async function POST(req: Request) {
   try {
     const apiKey = process.env.OPENAI_API_KEY;
 
-// 🧪 TEST: simulácia výpadku OpenAI
     const forceOpenAiError = process.env.FORCE_OPENAI_ERROR === "1";
 
     if (forceOpenAiError) {
       return NextResponse.json(
-  {
-    error: {
-      code: "OPENAI_UPSTREAM_ERROR",
-      message: "Service temporarily unavailable",
-    },
-  },
-  { status: 502 }
-);
+        {
+          error: {
+            code: "OPENAI_UPSTREAM_ERROR",
+            message: "Service temporarily unavailable",
+          },
+        },
+        { status: 502 }
+      );
     }
 
     if (!apiKey) {
@@ -420,6 +468,16 @@ CALORIES:
 - In summary include weekly_total_kcal and avg_daily_kcal (for the whole household).
 `;
 
+    const shoppingPricingBlock = `
+SHOPPING PRICING:
+- For each shopping item include estimated_price_eur.
+- estimated_price_eur must be a realistic estimate for that individual item only.
+- For each trip, estimated_cost_eur must equal the sum of estimated_price_eur of all items in that trip.
+- In summary, estimated_total_cost_eur must equal the sum of all trip estimated_cost_eur values.
+- Use realistic grocery prices in EUR for Slovakia.
+- Return numeric values, not strings.
+`;
+
     const schemaDaysCalories = `,
       "breakfast_kcal": number,
       "lunch_kcal": number,
@@ -462,9 +520,7 @@ Rules:
 - Split shopping into exactly ${shoppingTrips} trips.
 - Provide realistic quantities.
 ${caloriesBlock}
-
-SHOPPING:
-- For each trip include estimated_cost_eur.
+${shoppingPricingBlock}
 
 RECIPES:
 - Generate a recipe for EVERY meal: breakfast, lunch and dinner.
@@ -498,7 +554,7 @@ JSON schema (follow exactly):
       "covers_days": "1-3",
       "estimated_cost_eur": number,
       "items": [
-        { "name": string, "quantity": string }
+        { "name": string, "quantity": string, "estimated_price_eur": number }
       ]
     }
   ],
@@ -547,7 +603,8 @@ Counts:
       return NextResponse.json({ kind: "text", text }, { status: 200 });
     }
 
-    const parsed = normalizePlan(parsedRaw);
+    let parsed = normalizePlan(parsedRaw);
+    parsed = normalizeShoppingPricing(parsed);
 
     const recipes = parsed?.recipes && typeof parsed.recipes === "object" ? parsed.recipes : null;
     const missing = requiredRecipeKeys().filter((k) => !recipes?.[k]);
