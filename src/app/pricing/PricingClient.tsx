@@ -623,7 +623,7 @@ export default function PricingClient() {
             highlighted
             features={[
               "5 generovaní týždenne",
-              "Viac štýlov (Fit / Tradičné / Exotické)",
+              "Viac štýlov (Fit / Vegánske / Tradičné / Exotické)",
               "Kalórie na osobu",
               "Finančný prehľad",
             ]}

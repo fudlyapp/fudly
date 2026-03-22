@@ -316,7 +316,7 @@ export const DICT = {
         title: "Plus",
         subtitle: "Platené členstvo • 5 generovaní / týždeň",
         note: "",
-        features: ["Všetko z Basic", "Kalórie (prehľad + filtrovanie)", "Štýly: Fit, Tradičné, Exotické", "Vyšší limit generovania"],
+        features: ["Všetko z Basic", "Kalórie (prehľad + filtrovanie)", "Štýly: Fit, Vegánske, Tradičné, Exotické", "Vyšší limit generovania"],
       },
 
       ui: {

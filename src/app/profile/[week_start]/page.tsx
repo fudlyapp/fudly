@@ -833,7 +833,7 @@ export default function WeekDetailPage() {
                         {d.date ? <span className="text-xs muted-2">({formatDateSK(d.date)})</span> : null}
                       </div>
 
-                      <div className="mt-2 text-sm text-gray-800 dark:text-gray-100">
+                      <div className="mt-2 text-sm text-gray-600 dark:text-gray-400">
                         Spolu za deň: <KcalValue isPlus={!!isPlus} value={dayTotal} /> <span className="font-semibold">kcal</span>
                       </div>
                     </div>
@@ -877,7 +877,7 @@ export default function WeekDetailPage() {
                             onChange={(e) => updateMealText(dayIdx, meal, e.target.value)}
                           />
 
-                          <div className="mt-3 text-sm text-gray-800 dark:text-gray-100">
+                          <div className="mt-3 text-sm text-gray-600 dark:text-gray-400">
                             kcal / porcia: <KcalValue isPlus={!!isPlus} value={kcal} />
                           </div>
                         </div>

@@ -16,7 +16,7 @@ function planLimits(plan: Plan) {
     return {
       weekly_limit: 5,
       calories_enabled: true,
-      allowed_styles: ["lacné", "rychle", "vyvazene", "vegetarianske", "fit", "tradicne", "exoticke"],
+      allowed_styles: ["lacné", "rychle", "vyvazene", "vegetarianske", "veganske", "fit", "tradicne", "exoticke"],
     };
   }
 
