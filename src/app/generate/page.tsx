@@ -154,7 +154,7 @@ const STYLE_OPTIONS: StyleOption[] = [
   { value: "rychle", label: "Rýchle", emoji: "⚡", desc: "max 20–30 min" },
   { value: "vyvazene", label: "Vyvážené", emoji: "🥗", desc: "bielkoviny + zelenina" },
   { value: "vegetarianske", label: "Vegetariánske", emoji: "🌱", desc: "bez mäsa" },
-  { value: "veganske",label: "Vegánske",emoji: "🌿", desc: "bez mäsa, rýb, vajec, mliečnych výrobkov a všetkých živočíšnych produktov"},
+  { value: "veganske",label: "Vegánske",emoji: "🌿", desc: "bez mäsa, rýb, vajec, mliečnych výrobkov a všetkých živočíšnych produktov", plusOnly: true},
   { value: "tradicne", label: "Tradičné", emoji: "🍲", desc: "domáca poctivá strava", plusOnly: true },
   { value: "exoticke", label: "Exotické", emoji: "🍜", desc: "ázia / mexiko / fusion", plusOnly: true },
   { value: "fit", label: "Fit", emoji: "🏋️", desc: "viac bielkovín, menej cukru", plusOnly: true },
@@ -235,7 +235,7 @@ function deriveErrorMessage(status: number, api: any) {
   if (status === 402 && code === "SUBSCRIPTION_INACTIVE") {
     return {
       title: "Na generovanie potrebuješ členstvo",
-      message: "Najprv si vyber plán a spusti 14-dňový trial v Členstvách.",
+      message: "Najprv si vyber plán v sekcii Členstvá.",
       canRetry: false,
     };
   }
@@ -243,7 +243,7 @@ function deriveErrorMessage(status: number, api: any) {
   if (status === 403 && code === "STYLE_NOT_ALLOWED") {
     return {
       title: "Zvolený štýl nie je dostupný",
-      message: "Tento štýl je dostupný iba v inom pláne. Vyber iný štýl alebo upgrade na PLUS.",
+      message: "Tento štýl je dostupný iba vo vyššom pláne. Vyber iný štýl alebo upgrade na PLUS.",
       canRetry: false,
     };
   }
@@ -795,7 +795,7 @@ const remainingGenerations = useMemo(() => {
         setBanner({
           variant: "success",
           title: "✅ Jedálniček je vygenerovaný",
-          message: "Nájdeš ho v Profile. Môžeš ho tam upraviť, pozrieť recepty aj nákupy.",
+          message: "Nájdeš ho v Profile. Môžeš ho tam upraviť, pozrieť recepty aj nákupné zoznamy.",
           showProfileLink: true,
         });
 
@@ -884,7 +884,7 @@ const remainingGenerations = useMemo(() => {
         {paywalled ? (
           <div className="mb-6 rounded-3xl p-6 surface-same-as-nav surface-border">
             <div className="text-lg font-bold">Na generovanie potrebuješ členstvo</div>
-            <div className="mt-2 text-sm muted">Najprv si vyber plán a spusti 14-dňový trial.</div>
+            <div className="mt-2 text-sm muted">Najprv si vyber plán - BASIC alebo PLUS.</div>
             <div className="mt-4">
               <Link href="/pricing" className="btn-primary inline-block px-5 py-3">
                 Otvoriť členstvá
@@ -1025,7 +1025,7 @@ const remainingGenerations = useMemo(() => {
               </select>
 
               {tier !== "plus" ? (
-                <div className="mt-1 text-xs muted-2">Fit / Tradičné / Exotické / Vegánske budú v Plus členstve.</div>
+                <div className="mt-1 text-xs muted-2">Fit / Tradičné / Exotické / Vegánske sú dostupné v PLUS členstve.</div>
               ) : null}
             </Field>
 

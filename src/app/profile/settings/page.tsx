@@ -175,11 +175,11 @@ export default function ProfileSettingsPage() {
               <input value={avoid} onChange={(e) => setAvoid(e.target.value)} className="input-surface" />
             </Field>
 
-            <Field label="Mám doma">
+            <Field label="Mám doma a chcem použiť">
               <input value={have} onChange={(e) => setHave(e.target.value)} className="input-surface" />
             </Field>
 
-            <Field label="Obľúbené">
+            <Field label="Obľúbené + možnosť určiť konkrétne jedlo na konkrétny deň">
               <input value={favorites} onChange={(e) => setFavorites(e.target.value)} className="input-surface" />
             </Field>
           </div>

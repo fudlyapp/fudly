@@ -162,12 +162,12 @@ export default function PricingClient() {
     if (success === "1") {
       setMsg({
         type: "success",
-        text: "✅ Platba prebehla. Aktivujem členstvo…",
+        text: "✅ Platba prebehla úspešne!",
       });
     } else if (portal === "1") {
       setMsg({
         type: "info",
-        text: "Predplatné bolo aktualizované. Obnovujem stav členstva…",
+        text: "Predplatné bolo aktualizované.",
       });
     } else if (canceled === "1") {
       setMsg({
@@ -609,9 +609,10 @@ export default function PricingClient() {
               "Jedálniček + nákupný zoznam",
               "Recepty ku všetkým jedlám",
               "Uloženie do profilu",
+              "Základný finančný prehľad",
             ]}
             cta={basicCta}
-            ctaNote={isNone ? "14 dní zdarma • Zrušíš kedykoľvek" : "Správa prebieha cez Stripe"}
+            ctaNote={isNone ? "14 dní zdarma • Zrušíš kedykoľvek" : "Spravovanie členstva prebieha cez Stripe"}
           />
 
           <Card
@@ -622,10 +623,11 @@ export default function PricingClient() {
             period="mesačne"
             highlighted
             features={[
-              "5 generovaní týždenne",
+              "Celý obsah BASIC +",
+              "+2 generovania týždenne navyše (spolu 5)",
               "Viac štýlov (Fit / Vegánske / Tradičné / Exotické)",
-              "Kalórie na osobu",
-              "Finančný prehľad",
+              "Prehľad kalórií",
+              "Rozšírený finančný prehľad",
             ]}
             cta={plusCta}
             ctaNote={isNone ? "14 dní zdarma • Zrušíš kedykoľvek" : "Správa prebieha cez Stripe"}

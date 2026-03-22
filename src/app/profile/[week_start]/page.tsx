@@ -1,3 +1,4 @@
+//src/app/profile/%5Bweek_start%5D/page.tsx
 "use client";
 
 import Link from "next/link";
@@ -363,7 +364,7 @@ export default function WeekDetailPage() {
       }
 
       if (!data) {
-        setMsg("Pre tento týždeň nemáš uložený plán.");
+        setMsg("Pre tento týždeň zatiaľ nemáš uložený plán.");
         setRow(null);
         setPlan(null);
         setLoading(false);
@@ -731,11 +732,11 @@ export default function WeekDetailPage() {
             <div className="text-2xl font-bold">
               {formatDateSK(weekStart)} – {formatDateSK(weekEnd || "")}
             </div>
-            <div className="mt-2 text-sm muted">Úpravy jedál + upraviteľné nákupy (kategórie) + reálne ceny.</div>
+            <div className="mt-2 text-sm muted">Úpravy jedál + upraviteľné nákupné zoznamy (kategórie) + reálne ceny.</div>
 
             {anyShoppingEdited ? (
               <div className="mt-3 text-xs muted-2">
-                Pozn.: Aspoň jeden nákup bol upravený — odhadovaná cena sa počíta automaticky zo súčtu cien položiek.
+                Pozn.: Minimálne jeden nákup bol upravený — odhadovaná cena sa počíta automaticky zo súčtu cien položiek.
               </div>
             ) : null}
           </div>
@@ -971,21 +972,26 @@ export default function WeekDetailPage() {
                               value={item.quantity}
                               onChange={(e) => updateShoppingItem(tripIdx, originalIndex, { quantity: e.target.value })}
                             />
-                            <input
-                              className="input-surface !text-xs !leading-tight py-2 min-w-0"
-                              value={item.estimated_price_eur ?? ""}
-                              onChange={(e) =>
-                                updateShoppingItem(tripIdx, originalIndex, {
-                                  estimated_price_eur:
-                                    e.target.value.trim() === ""
-                                      ? null
-                                      : Number.isFinite(Number(e.target.value)) && Number(e.target.value) >= 0
-                                      ? Number(e.target.value)
-                                      : null,
-                                })
-                              }
-                              placeholder="Cena €"
-                            />
+                            <div className="relative min-w-0">
+  <input
+    className="input-surface !text-xs !leading-tight py-2 pr-8 min-w-0"
+    value={item.estimated_price_eur ?? ""}
+    onChange={(e) =>
+      updateShoppingItem(tripIdx, originalIndex, {
+        estimated_price_eur:
+          e.target.value.trim() === ""
+            ? null
+            : Number.isFinite(Number(e.target.value)) && Number(e.target.value) >= 0
+            ? Number(e.target.value)
+            : null,
+      })
+    }
+    placeholder="Cena"
+  />
+  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold muted pointer-events-none">
+    €
+  </span>
+</div>
                             <button
                               type="button"
                               onClick={() => removeShoppingItem(tripIdx, originalIndex)}

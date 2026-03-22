@@ -291,7 +291,7 @@ export const DICT = {
       passwordPlaceholder: "••••••••",
       loginCta: "Prihlásiť",
       signupCta: "Vytvoriť účet",
-      signupSuccess: "Účet vytvorený. Skús sa prihlásiť (alebo potvrď e-mail, ak to vyžaduje nastavenie).",
+      signupSuccess: "Účet vytvorený. Potvrď e-mail a môžeš sa prihlásiť.",
     },
 
     pricing: {
@@ -305,8 +305,8 @@ export const DICT = {
         subtitle: "Platené členstvo • 3 generovania / týždeň",
         note: "",
         features: [
-          "Generovanie jedálničkov + nákupov",
-          "Uložené plány a nákupy v profile",
+          "Generovanie jedálničkov + nákupných zoznamov",
+          "Uložené plány a nákupné zoznamy v profile",
           "Predvolené preferencie",
           "Štýly: Lacné, Rýchle, Vyvážené, Vegetariánske",
         ],
@@ -352,8 +352,8 @@ export const DICT = {
 
       intolerances: "❌ Intolerancie / NESMÚ byť použité",
       avoid: "Vyhnúť sa",
-      have: "Mám doma (použi)",
-      favorites: "Obľúbené",
+      have: "Mám doma (chcem použiť v tomto týždni)",
+      favorites: "Obľúbené + možnosť zvoliť konkrétne jedlá na konkrétne dni",
 
       loadSaved: "Načítať uložené",
       saveAsDefault: "Uložiť ako predvolené",
@@ -374,8 +374,8 @@ export const DICT = {
       nextWeek: "Budúci",
 
       hardBanHint: "tvrdý zákaz",
-      softPrefHint: "mäkká preferencia",
-      wasteLessHint: "minimalizuj odpad",
+      softPrefHint: "preferencia",
+      wasteLessHint:"minimalizuj vyhadzovanie jedla",
       tastyHint: "nech je to chutné",
 
       generations: "generovaní",
@@ -404,20 +404,20 @@ export const DICT = {
       generateCtaHintOk: "Vygenerovať a automaticky uložiť",
 
       planningTip:
-        "Plánovanie môže trvať 2–3 minúty (jedálniček + nákupy + recepty). Počas generovania stránku nerefrešuj.",
+        "Plánovanie môže trvať cca 5 minút (jedálniček + nákupné zoznamy + recepty). Počas generovania stránku nerefrešuj.",
 
       tipMovedDown:
-        "Plánovanie môže trvať 2–3 minúty (jedálniček + nákupy + recepty). Počas generovania stránku nerefrešuj.",
+        "Plánovanie môže trvať cca 5 minút  (jedálniček + nákupné zoznamy + recepty). Počas generovania stránku nerefrešuj.",
     },
 
     profile: {
       title: "Profil",
-      subtitle: "Prehľad: predvolené, jedálničky, nákupy, kalórie a financie.",
+      subtitle: "Prehľad: predvolené, jedálničky, nákupné zoznamy, kalórie a financie.",
       loggedAs: "Prihlásený ako",
 
       tabs: {
         plans: "Uložené jedálničky",
-        shopping: "Uložené nákupy",
+        shopping: "Uložené nákupné zoznamy",
         calories: "Kalórie",
         finance: "Financie",
         defaults: "Predvolené",
@@ -494,8 +494,8 @@ export const DICT = {
       },
 
       refund: {
-        intro: "Členstvo môžeš kedykoľvek zrušiť v Stripe portáli. Po zrušení zostane aktívne do konca fakturačného obdobia.",
-        cancel: ["Zrušenie sa vykonáva cez tlačidlo Spravovať (Stripe zákaznícky portál).", "Po zrušení už nebude prebiehať ďalšie fakturovanie."],
+        intro: "Členstvo môžeš kedykoľvek zrušiť. Po zrušení zostane aktívne do konca fakturačného obdobia.",
+        cancel: ["Zrušenie sa vykonáva cez tlačidlo Spravovať.", "Po zrušení už nebude prebiehať ďalšie fakturovanie."],
         refunds: ["Refundácie riešime individuálne podľa situácie a legislatívy.", "Ak sa domnievaš, že došlo k chybe v platbe, kontaktuj nás cez Kontakt."],
         trial: ["Počas trial obdobia môžeš zrušiť členstvo bez ďalšieho účtovania.", "Ak trial skončí a členstvo nie je zrušené, môže dôjsť k začatiu fakturácie."],
       },

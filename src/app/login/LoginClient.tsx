@@ -65,7 +65,7 @@ export default function LoginClient() {
         const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
         if (error) throw error;
 
-        setMessage("📩 Poslal som ti email na reset hesla. Skontroluj aj spam.");
+        setMessage("📩 Bol ti odoslaný e-mail na reset hesla. Skontroluj aj spam.");
         return;
       }
 
@@ -145,7 +145,7 @@ export default function LoginClient() {
           {mode === "forgot" ? (
             <>
               <div className="text-sm muted">
-                Zadaj email. Pošleme ti link na nastavenie nového hesla.
+                Zadaj svoj e-mail. Pošleme ti link na nastavenie nového hesla.
               </div>
 
               <div>

@@ -382,7 +382,7 @@ export default function HomePage() {
             </h1>
 
             <p className="mt-6 max-w-2xl text-base sm:text-lg text-black/70 dark:text-black/70">
-              Do 2–3 minút máš hotový plán na celý týždeň. Jedlá, nákupy, recepty, kalórie aj finančný prehľad.
+              Do 5 minút máš hotový plán na celý týždeň. Jedlá, nákupy, recepty, kalórie aj finančný prehľad.
             </p>
 
             <div className="mt-8 inline-flex items-center rounded-full border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-semibold surface-same-as-nav">

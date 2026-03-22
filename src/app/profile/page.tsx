@@ -1,3 +1,4 @@
+//src/app/profile/page.tsx
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -440,7 +441,7 @@ function CategoryDonutChart({
 
   return (
     <div className="rounded-2xl p-4 page-invert-bg border border-gray-200 dark:border-gray-800">
-      <div className="text-sm font-semibold">PLUS: odhad výdavkov podľa kategórií</div>
+      <div className="text-sm font-semibold">Odhad výdavkov podľa kategórií</div>
       <div className="mt-1 text-xs muted-2">Rozdelenie podľa cien jednotlivých položiek.</div>
 
       <div className="mt-4 grid grid-cols-1 md:grid-cols-[220px_1fr] gap-6 items-center">
@@ -489,7 +490,7 @@ function TopItemsBarChart({
 
   return (
     <div className="rounded-2xl p-4 page-invert-bg border border-gray-200 dark:border-gray-800">
-      <div className="text-sm font-semibold">PLUS: TOP 5 najdrahších položiek</div>
+      <div className="text-sm font-semibold">TOP 5 najdrahších položiek</div>
       <div className="mt-1 text-xs muted-2">Podľa odhadovanej ceny položiek v nákupoch.</div>
 
       <div className="mt-4 space-y-4">
@@ -617,7 +618,7 @@ function FinanceMonthSummary({
             <CategoryDonutChart rows={categoryRows} />
           ) : (
             <div className="rounded-2xl p-4 page-invert-bg border border-gray-200 dark:border-gray-800">
-              <div className="text-sm font-semibold">PLUS: odhad výdavkov podľa kategórií</div>
+              <div className="text-sm font-semibold">Odhad výdavkov podľa kategórií</div>
               <div className="mt-1 text-sm muted">Pre tento filter zatiaľ nie sú dostupné ceny položiek.</div>
             </div>
           )}
@@ -626,7 +627,7 @@ function FinanceMonthSummary({
             <TopItemsBarChart rows={topItemsRows} />
           ) : (
             <div className="rounded-2xl p-4 page-invert-bg border border-gray-200 dark:border-gray-800">
-              <div className="text-sm font-semibold">PLUS: TOP 5 najdrahších položiek</div>
+              <div className="text-sm font-semibold">TOP 5 najdrahších položiek</div>
               <div className="mt-1 text-sm muted">Pre tento filter zatiaľ nie sú dostupné ceny položiek.</div>
             </div>
           )}
@@ -970,7 +971,7 @@ export default function ProfilePage() {
       <div className="mx-auto w-full max-w-5xl min-w-0">
         <header className="mb-6">
           <h1 className="mt-2 text-3xl font-bold">{t.nav.profile}</h1>
-          <p className="mt-2 muted">Prehľad: predvolené, jedálničky, nákupy, kalórie a financie.</p>
+          <p className="mt-2 muted">Prehľad: predvolené, jedálničky, nákupné zoznamy, kalórie a financie.</p>
 
           {authLoading ? (
             <div className="mt-3 text-sm muted-2">Kontrolujem prihlásenie…</div>
@@ -1000,7 +1001,7 @@ export default function ProfilePage() {
                   Uložené jedálničky
                 </TabButton>
                 <TabButton active={tab === "shopping"} onClick={() => setTab("shopping")}>
-                  Uložené nákupy
+                  Uložené nákupné zoznamy
                 </TabButton>
 
                 <TabButton
@@ -1069,7 +1070,7 @@ export default function ProfilePage() {
                 <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
                   <div className="min-w-0">
                     <h2 className="text-xl font-semibold">Predvolené</h2>
-                    <p className="mt-1 text-sm muted">Toto sa načíta v Generátore cez „Načítať uložené“.</p>
+                    <p className="mt-1 text-sm muted">Predvolený plán sa načíta v Generátore cez tlačítko „Načítať uložené“.</p>
                   </div>
 
                   <button onClick={saveDefaults} disabled={prefLoading} className="btn-primary w-full sm:w-auto">
@@ -1209,7 +1210,7 @@ export default function ProfilePage() {
               <section className="rounded-3xl p-6 surface-same-as-nav surface-border">
                 <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
                   <div className="min-w-0">
-                    <h2 className="text-xl font-semibold">Uložené nákupy</h2>
+                    <h2 className="text-xl font-semibold">Uložené nákupné zoznamy</h2>
                     <p className="mt-1 text-sm muted">V prehľade sa zobrazuje celý nákupný zoznam vrátane cien položiek, ak sú dostupné.</p>
                   </div>
                 </div>
@@ -1370,7 +1371,7 @@ export default function ProfilePage() {
               <section className="rounded-3xl p-6 surface-same-as-nav surface-border">
                 <h2 className="text-xl font-semibold">Financie</h2>
                 <p className="mt-1 text-sm muted">
-                  BASIC: stĺpcový graf budget vs reálna cena. PLUS: navyše kategórie a TOP 5 najdrahších položiek.
+                  BASIC: stĺpcový graf budget vs reálna cena. PLUS: Rozdelenie nakúpených položiek podľa kategórie a TOP 5 najdrahších položiek.
                 </p>
 
                 {loading ? <div className="mt-4 text-sm muted-2">Načítavam…</div> : null}
@@ -1456,7 +1457,7 @@ export default function ProfilePage() {
                 </div>
 
                 <div className="mt-4 text-xs muted-2">
-                  Reálnu cenu dopĺňaš v detaile týždňa pri jednotlivých nákupoch. Odhad podľa kategórií a TOP 5 fungujú len tam, kde sú dostupné ceny položiek.
+                  Reálnu cenu dopĺňaš v detaile týždňa pri jednotlivých nákupných zoznamoch. Odhad podľa kategórií a TOP 5 fungujú len tam, kde sú dostupné ceny položiek.
                 </div>
               </section>
             ) : null}
