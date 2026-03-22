@@ -1,3 +1,4 @@
+// src/app/api/generate/route.ts
 import { NextResponse } from "next/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -206,11 +207,11 @@ function styleHintFromValue(style: string, lang: "sk" | "en" | "uk") {
       case "rychle":
         return "Prefer very quick meals (max 20–30 min).";
       case "vyvazene":
-        return "Prefer balanced meals (protein + veggies + sides), still budget-friendly.";
+        return "Prefer balanced meals (protein + veggies + sides). Use the available budget realistically for variety, quality ingredients, and nutritionally balanced meals.";
       case "vegetarianske":
         return "Vegetarian: no meat or fish (eggs and dairy OK).";
       case "veganske":
-        return "Vegan: no meat, fish, eggs, dairy or other animal products.";
+        return "Vegan: no meat, fish, eggs, dairy, honey, or any other animal products.";
       case "tradicne":
         return "Traditional home-style meals.";
       case "exoticke":
@@ -218,7 +219,7 @@ function styleHintFromValue(style: string, lang: "sk" | "en" | "uk") {
       case "fit":
         return "Fit: more protein and veggies, less sugar.";
       default:
-        return "Prefer the cheapest meals from common ingredients.";
+        return "Prefer the cheapest practical meals from common ingredients while still making good use of the available budget.";
     }
   }
 
@@ -227,11 +228,11 @@ function styleHintFromValue(style: string, lang: "sk" | "en" | "uk") {
       case "rychle":
         return "Надавай перевагу дуже швидким стравам (макс 20–30 хв).";
       case "vyvazene":
-        return "Надавай перевагу збалансованим стравам (білок + овочі + гарнір), бюджетно.";
+        return "Надавай перевагу збалансованим стравам (білок + овочі + гарнір). Реалістично використовуй доступний бюджет для більшої різноманітності, кращих інгредієнтів і харчового балансу.";
       case "vegetarianske":
         return "Вегетаріанське: без м’яса та риби (яйця й молочне можна).";
       case "veganske":
-        return "Веганське: без м’яса, риби, яєць, молочних продуктів та інших продуктів тваринного походження.";
+        return "Веганське: без м’яса, риби, яєць, молочних продуктів, меду та будь-яких інших продуктів тваринного походження.";
       case "tradicne":
         return "Традиційні домашні страви.";
       case "exoticke":
@@ -239,7 +240,7 @@ function styleHintFromValue(style: string, lang: "sk" | "en" | "uk") {
       case "fit":
         return "Fit: більше білка й овочів, менше цукру.";
       default:
-        return "Надавай перевагу найдешевшим стравам зі звичайних продуктів.";
+        return "Надавай перевагу практичним і доступним стравам зі звичайних продуктів, але бюджет використовуй розумно, а не надто ощадливо.";
     }
   }
 
@@ -247,11 +248,11 @@ function styleHintFromValue(style: string, lang: "sk" | "en" | "uk") {
     case "rychle":
       return "Uprednostni veľmi rýchle jedlá (max 20–30 min).";
     case "vyvazene":
-      return "Uprednostni vyvážené jedlá (bielkoviny, zelenina, prílohy), stále rozumná cena.";
+      return "Uprednostni vyvážené jedlá (bielkoviny, zelenina, prílohy). Dostupný budget využi realisticky na pestrosť, kvalitnejšie suroviny a nutrične vyvážené jedlá.";
     case "vegetarianske":
       return "Vegetariánske: bez mäsa a rýb (vajcia a mliečne OK).";
     case "veganske":
-      return "Vegánske: bez mäsa, rýb, vajec, mliečnych výrobkov a všetkých živočíšnych produktov.";
+      return "Vegánske: bez mäsa, rýb, vajec, mliečnych výrobkov, medu a všetkých živočíšnych produktov.";
     case "tradicne":
       return "Tradičné: domáca poctivá strava.";
     case "exoticke":
@@ -259,7 +260,7 @@ function styleHintFromValue(style: string, lang: "sk" | "en" | "uk") {
     case "fit":
       return "Fit: viac bielkovín, viac zeleniny, menej cukru.";
     default:
-      return "Uprednostni čo najlacnejšie jedlá z bežných surovín.";
+      return "Uprednostni praktické a lacnejšie jedlá z bežných surovín, ale budget využi rozumne a nie zbytočne príliš nízko.";
   }
 }
 
@@ -301,48 +302,26 @@ function ensurePerPersonCalories(summary: any) {
   return summary;
 }
 
-function round2(n: number) {
-  return Math.round(n * 100) / 100;
-}
-
-function normalizeShoppingPricing(plan: any) {
-  const next = JSON.parse(JSON.stringify(plan ?? {}));
-  const shopping = Array.isArray(next.shopping) ? next.shopping : [];
-  let weeklyTotal = 0;
+function sumShoppingEstimates(plan: any) {
+  const shopping = Array.isArray(plan?.shopping) ? plan.shopping : [];
+  let total = 0;
 
   for (const trip of shopping) {
     const items = Array.isArray(trip?.items) ? trip.items : [];
-    let itemSum = 0;
-    let hasItemPrices = false;
+    let tripTotal = 0;
 
     for (const item of items) {
-      const price = Number(item?.estimated_price_eur);
-      if (Number.isFinite(price) && price >= 0) {
-        item.estimated_price_eur = round2(price);
-        itemSum += price;
-        hasItemPrices = true;
-      } else {
-        item.estimated_price_eur = null;
-      }
+      const v = Number(item?.estimated_price_eur);
+      if (Number.isFinite(v) && v >= 0) tripTotal += v;
     }
 
-    if (hasItemPrices) {
-      trip.estimated_cost_eur = round2(itemSum);
-    } else {
-      const tripEstimate = Number(trip?.estimated_cost_eur);
-      trip.estimated_cost_eur = Number.isFinite(tripEstimate) && tripEstimate >= 0 ? round2(tripEstimate) : 0;
-    }
-
-    const actual = Number(trip?.actual_cost_eur);
-    trip.actual_cost_eur = Number.isFinite(actual) && actual >= 0 ? round2(actual) : null;
-
-    weeklyTotal += Number(trip.estimated_cost_eur) || 0;
+    trip.estimated_cost_eur = Number(tripTotal.toFixed(2));
+    total += tripTotal;
   }
 
-  next.summary = next.summary ?? {};
-  next.summary.estimated_total_cost_eur = round2(weeklyTotal);
-
-  return next;
+  plan.summary = plan.summary ?? {};
+  plan.summary.estimated_total_cost_eur = Number(total.toFixed(2));
+  return plan;
 }
 
 export async function POST(req: Request) {
@@ -458,24 +437,14 @@ export async function POST(req: Request) {
       lang === "en"
         ? "Write everything in English."
         : lang === "uk"
-          ? "Пиши все українською."
-          : "Všetko píš po slovensky.";
+        ? "Пиши все українською."
+        : "Všetko píš po slovensky.";
 
     const caloriesBlock = `
 CALORIES:
 - Calories must be per person/serving.
 - For each day include breakfast_kcal, lunch_kcal, dinner_kcal and total_kcal.
 - In summary include weekly_total_kcal and avg_daily_kcal (for the whole household).
-`;
-
-    const shoppingPricingBlock = `
-SHOPPING PRICING:
-- For each shopping item include estimated_price_eur.
-- estimated_price_eur must be a realistic estimate for that individual item only.
-- For each trip, estimated_cost_eur must equal the sum of estimated_price_eur of all items in that trip.
-- In summary, estimated_total_cost_eur must equal the sum of all trip estimated_cost_eur values.
-- Use realistic grocery prices in EUR for Slovakia.
-- Return numeric values, not strings.
 `;
 
     const schemaDaysCalories = `,
@@ -493,7 +462,7 @@ Return ONLY valid JSON (no other text).
 ${languageRule}
 
 Create a 7-day meal plan (breakfast/lunch/dinner).
-Goal: save time and money.
+Goal: create a practical, realistic weekly meal plan that respects the selected budget and style.
 
 Parameters:
 - people: ${people}
@@ -515,12 +484,25 @@ Style:
 Week:
 ${datesBlock}
 
+BUDGET TARGET:
+- Treat weekly_budget_eur as the target budget for the whole household, not only as a maximum cap.
+- Aim for estimated_total_cost_eur around 85% to 100% of weekly_budget_eur.
+- Do not make the plan unnecessarily cheap if the budget allows more variety, better ingredients, fuller shopping, or better meal quality.
+- The budget applies to the whole household for the full week, not per person.
+
 Rules:
-- Batch cooking, reuse ingredients across days.
+- Batch cooking is allowed, but do not over-optimize just for the lowest possible price.
+- Reuse ingredients across days when practical.
 - Split shopping into exactly ${shoppingTrips} trips.
 - Provide realistic quantities.
 ${caloriesBlock}
-${shoppingPricingBlock}
+
+SHOPPING:
+- For each trip include estimated_cost_eur.
+- For each shopping item include estimated_price_eur.
+- trip.estimated_cost_eur must equal the sum of estimated_price_eur for all items in that trip.
+- summary.estimated_total_cost_eur must equal the sum of all trip.estimated_cost_eur values.
+- Item prices should be realistic retail estimates in EUR for the quantity listed.
 
 RECIPES:
 - Generate a recipe for EVERY meal: breakfast, lunch and dinner.
@@ -603,8 +585,7 @@ Counts:
       return NextResponse.json({ kind: "text", text }, { status: 200 });
     }
 
-    let parsed = normalizePlan(parsedRaw);
-    parsed = normalizeShoppingPricing(parsed);
+    const parsed = normalizePlan(parsedRaw);
 
     const recipes = parsed?.recipes && typeof parsed.recipes === "object" ? parsed.recipes : null;
     const missing = requiredRecipeKeys().filter((k) => !recipes?.[k]);
@@ -615,7 +596,11 @@ Counts:
 
     if (!parsed.summary) parsed.summary = {};
     parsed.summary.people = coerceNumber(parsed.summary.people, peopleNum);
+    parsed.summary.weekly_budget_eur = coerceNumber(parsed.summary.weekly_budget_eur, budgetNum);
+    parsed.summary.shopping_trips_per_week = coerceNumber(parsed.summary.shopping_trips_per_week, shoppingTrips);
+    parsed.summary.repeat_days_max = coerceNumber(parsed.summary.repeat_days_max, repeatDays);
     parsed.summary = ensurePerPersonCalories(parsed.summary);
+    sumShoppingEstimates(parsed);
 
     const { error: upErr } = await supabase.from("generation_usage").upsert(
       { user_id: userId, week_start: weekStart, count: used + 1 },

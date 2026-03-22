@@ -154,6 +154,7 @@ const STYLE_OPTIONS: StyleOption[] = [
   { value: "rychle", label: "Rýchle", emoji: "⚡", desc: "max 20–30 min" },
   { value: "vyvazene", label: "Vyvážené", emoji: "🥗", desc: "bielkoviny + zelenina" },
   { value: "vegetarianske", label: "Vegetariánske", emoji: "🌱", desc: "bez mäsa" },
+  { value: "veganske",label: "Vegánske",emoji: "🌿", desc: "bez mäsa, rýb, vajec, mliečnych výrobkov a všetkých živočíšnych produktov"},
   { value: "tradicne", label: "Tradičné", emoji: "🍲", desc: "domáca poctivá strava", plusOnly: true },
   { value: "exoticke", label: "Exotické", emoji: "🍜", desc: "ázia / mexiko / fusion", plusOnly: true },
   { value: "fit", label: "Fit", emoji: "🏋️", desc: "viac bielkovín, menej cukru", plusOnly: true },
@@ -497,7 +498,7 @@ const remainingGenerations = useMemo(() => {
       return new Set(ent.allowed_styles);
     }
     return new Set(tier === "plus"
-      ? ["lacné", "rychle", "vyvazene", "vegetarianske", "fit", "tradicne", "exoticke"]
+      ? ["lacné", "rychle", "vyvazene", "vegetarianske", "veganske", "fit", "tradicne", "exoticke"]
       : ["lacné", "rychle", "vyvazene", "vegetarianske"]);
   }, [ent, tier]);
 
@@ -1024,7 +1025,7 @@ const remainingGenerations = useMemo(() => {
               </select>
 
               {tier !== "plus" ? (
-                <div className="mt-1 text-xs muted-2">Fit / Tradičné / Exotické budú v Plus členstve.</div>
+                <div className="mt-1 text-xs muted-2">Fit / Tradičné / Exotické / Vegánske budú v Plus členstve.</div>
               ) : null}
             </Field>
 

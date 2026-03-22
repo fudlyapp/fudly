@@ -44,11 +44,11 @@
 
   /* ✅ Muted texty – OPRAVA (na bielom musia byť tmavšie) */
   .muted {
-    @apply text-gray-700 dark:text-gray-300;
+    @apply text-gray-800 dark:text-gray-200;
   }
 
   .muted-2 {
-    @apply text-gray-600 dark:text-gray-400;
+    @apply text-gray-700 dark:text-gray-300;
   }
 
   .input-surface {
