@@ -1,4 +1,3 @@
-//src/app/profile/%5Bweek_start%5D/page.tsx
 "use client";
 
 import Link from "next/link";
@@ -13,6 +12,9 @@ type Recipe = {
   portions: number;
   ingredients: Array<{ name: string; quantity: string }>;
   steps: string[];
+  calories?: number | null;
+  isEdited?: boolean;
+  caloriesManual?: number | null;
 };
 
 type ShoppingItem = {
@@ -112,6 +114,10 @@ function deepClone<T>(x: T): T {
 
 function round2(n: number) {
   return Math.round(n * 100) / 100;
+}
+
+function roundInt(n: number) {
+  return Math.round(n);
 }
 
 function pad2(n: number) {
@@ -224,6 +230,80 @@ function recalcShoppingEstimates(plan: PlanJSON): PlanJSON {
   next.summary.estimated_total_cost_eur = round2(weeklyEstimatedTotal);
 
   return next;
+}
+
+function getSummaryPeopleCount(summary: any): number | null {
+  const candidates = [
+    summary?.people,
+    summary?.people_count,
+    summary?.persons,
+    summary?.household_people,
+    summary?.number_of_people,
+    summary?.count_people,
+  ];
+
+  for (const value of candidates) {
+    const n = Number(value);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+
+  return null;
+}
+
+function recalcCaloriesSummary(plan: PlanJSON): PlanJSON {
+  const next = deepClone(plan);
+  next.summary = next.summary ?? {};
+  next.days = Array.isArray(next.days) ? next.days : [];
+
+  let weeklyTotal = 0;
+  let anyCalories = false;
+
+  for (const day of next.days) {
+    const breakfast = typeof day.breakfast_kcal === "number" && Number.isFinite(day.breakfast_kcal) ? day.breakfast_kcal : 0;
+    const lunch = typeof day.lunch_kcal === "number" && Number.isFinite(day.lunch_kcal) ? day.lunch_kcal : 0;
+    const dinner = typeof day.dinner_kcal === "number" && Number.isFinite(day.dinner_kcal) ? day.dinner_kcal : 0;
+
+    const hasAnyMealKcal =
+      (typeof day.breakfast_kcal === "number" && Number.isFinite(day.breakfast_kcal)) ||
+      (typeof day.lunch_kcal === "number" && Number.isFinite(day.lunch_kcal)) ||
+      (typeof day.dinner_kcal === "number" && Number.isFinite(day.dinner_kcal));
+
+    if (hasAnyMealKcal) {
+      day.total_kcal = roundInt(breakfast + lunch + dinner);
+      weeklyTotal += day.total_kcal;
+      anyCalories = true;
+    } else {
+      day.total_kcal = undefined;
+    }
+  }
+
+  if (anyCalories) {
+    const daysCount = next.days.length || 7;
+    next.summary.weekly_total_kcal = roundInt(weeklyTotal);
+    next.summary.avg_daily_kcal = roundInt(weeklyTotal / daysCount);
+
+    const peopleCount = getSummaryPeopleCount(next.summary);
+    if (peopleCount && peopleCount > 0) {
+      next.summary.avg_daily_kcal_per_person = roundInt(weeklyTotal / daysCount / peopleCount);
+      next.summary.weekly_total_kcal_per_person = roundInt(weeklyTotal / peopleCount);
+    }
+  }
+
+  return next;
+}
+
+function normalizeLoadedPlan(input: PlanJSON): PlanJSON {
+  const next = deepClone(input);
+
+  next.summary = next.summary ?? {};
+  next.days = Array.isArray(next.days) ? next.days : [];
+  next.shopping = Array.isArray(next.shopping) ? next.shopping : [];
+  next.recipes = next.recipes ?? {};
+  next.meta = next.meta ?? {};
+  next.meta.edited_meals = next.meta.edited_meals ?? {};
+  next.meta.shopping_edited_trips = next.meta.shopping_edited_trips ?? {};
+
+  return recalcCaloriesSummary(recalcShoppingEstimates(next));
 }
 
 function KcalValue({
@@ -372,14 +452,10 @@ export default function WeekDetailPage() {
       }
 
       const r = data as unknown as MealPlanRow;
-      const cloned = deepClone((r.plan ?? r.plan_generated) as PlanJSON);
-
-      cloned.meta = cloned.meta ?? {};
-      cloned.meta.edited_meals = cloned.meta.edited_meals ?? {};
-      cloned.meta.shopping_edited_trips = cloned.meta.shopping_edited_trips ?? {};
+      const normalized = normalizeLoadedPlan((r.plan ?? r.plan_generated) as PlanJSON);
 
       setRow(r);
-      setPlan(cloned);
+      setPlan(normalized);
       setDirty(false);
       setLoading(false);
     })();
@@ -434,8 +510,38 @@ export default function WeekDetailPage() {
       next.meta.edited_meals = next.meta.edited_meals ?? {};
       next.meta.edited_meals[recipeKey(next.days[dayIdx].day, meal)] = true;
 
-      return next;
+      return recalcCaloriesSummary(next);
     });
+  }
+
+  function updateMealKcal(dayIdx: number, meal: "breakfast" | "lunch" | "dinner", value: string) {
+  setDirty(true);
+
+  const raw = value.trim();
+  const parsed = Number(raw);
+
+  setPlan((prev) => {
+    if (!prev) return prev;
+    const next = deepClone(prev);
+    if (!Array.isArray(next.days) || !next.days[dayIdx]) return prev;
+
+    const field =
+      meal === "breakfast"
+        ? "breakfast_kcal"
+        : meal === "lunch"
+        ? "lunch_kcal"
+        : "dinner_kcal";
+
+    (next.days[dayIdx] as any)[field] =
+      raw === ""
+        ? undefined
+        : Number.isFinite(parsed) && parsed >= 0
+        ? roundInt(parsed)
+        : undefined;
+
+    return recalcCaloriesSummary(next);
+  });
+
   }
 
   function showRecipeFor(dayNumber: number, meal: "breakfast" | "lunch" | "dinner") {
@@ -641,7 +747,7 @@ export default function WeekDetailPage() {
       return;
     }
 
-    const normalizedPlan = recalcShoppingEstimates(plan);
+    const normalizedPlan = recalcCaloriesSummary(recalcShoppingEstimates(plan));
 
     if (!Array.isArray(normalizedPlan.days) || normalizedPlan.days.length !== 7) {
       setMsg("Plán vyzerá poškodený (days nie je 7).");
@@ -856,8 +962,8 @@ export default function WeekDetailPage() {
                             ? d.lunch_kcal
                             : null
                           : typeof d.dinner_kcal === "number"
-                            ? d.dinner_kcal
-                            : null;
+                          ? d.dinner_kcal
+                          : null;
 
                       return (
                         <div key={meal} className="rounded-2xl p-3 border border-gray-200 dark:border-gray-800 min-w-0">
@@ -881,6 +987,31 @@ export default function WeekDetailPage() {
                           <div className="mt-3 text-sm text-gray-600 dark:text-gray-400">
                             kcal / porcia: <KcalValue isPlus={!!isPlus} value={kcal} />
                           </div>
+
+                          {isPlus && caloriesAllowed ? (
+                            <div className="mt-3 space-y-2">
+                              {edited ? (
+                                <div className="text-xs muted-2">
+                                  Jedlo bolo zmenené. Pôvodné kalórie už nemusia zodpovedať realite, môžeš ich ručne upraviť.
+                                </div>
+                              ) : (
+                                <div className="text-xs muted-2">
+                                  Ak jedlo upravíš, môžeš pri ňom ručne prepísať aj kalórie.
+                                </div>
+                              )}
+
+                              <div className="max-w-[180px]">
+                                <div className="text-xs muted mb-1">Kalórie / porcia</div>
+                                <input
+                                  className="input-surface !text-xs !leading-tight py-2"
+                                  value={kcal ?? ""}
+                                  onChange={(e) => updateMealKcal(dayIdx, meal, e.target.value)}
+                                  placeholder="napr. 520"
+                                  inputMode="numeric"
+                                />
+                              </div>
+                            </div>
+                          ) : null}
                         </div>
                       );
                     })}
@@ -973,25 +1104,25 @@ export default function WeekDetailPage() {
                               onChange={(e) => updateShoppingItem(tripIdx, originalIndex, { quantity: e.target.value })}
                             />
                             <div className="relative min-w-0">
-  <input
-    className="input-surface !text-xs !leading-tight py-2 pr-8 min-w-0"
-    value={item.estimated_price_eur ?? ""}
-    onChange={(e) =>
-      updateShoppingItem(tripIdx, originalIndex, {
-        estimated_price_eur:
-          e.target.value.trim() === ""
-            ? null
-            : Number.isFinite(Number(e.target.value)) && Number(e.target.value) >= 0
-            ? Number(e.target.value)
-            : null,
-      })
-    }
-    placeholder="Cena"
-  />
-  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold muted pointer-events-none">
-    €
-  </span>
-</div>
+                              <input
+                                className="input-surface !text-xs !leading-tight py-2 pr-8 min-w-0"
+                                value={item.estimated_price_eur ?? ""}
+                                onChange={(e) =>
+                                  updateShoppingItem(tripIdx, originalIndex, {
+                                    estimated_price_eur:
+                                      e.target.value.trim() === ""
+                                        ? null
+                                        : Number.isFinite(Number(e.target.value)) && Number(e.target.value) >= 0
+                                        ? Number(e.target.value)
+                                        : null,
+                                  })
+                                }
+                                placeholder="Cena"
+                              />
+                              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold muted pointer-events-none">
+                                €
+                              </span>
+                            </div>
                             <button
                               type="button"
                               onClick={() => removeShoppingItem(tripIdx, originalIndex)}

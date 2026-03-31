@@ -1,4 +1,3 @@
-//src/app/generate/page.tsx
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -13,6 +12,9 @@ type Recipe = {
   portions: number;
   ingredients: Array<{ name: string; quantity: string }>;
   steps: string[];
+  calories?: number | null;
+  isEdited?: boolean;
+  caloriesManual?: number | null;
 };
 
 type PlanDay = {
@@ -154,7 +156,13 @@ const STYLE_OPTIONS: StyleOption[] = [
   { value: "rychle", label: "Rýchle", emoji: "⚡", desc: "max 20–30 min" },
   { value: "vyvazene", label: "Vyvážené", emoji: "🥗", desc: "bielkoviny + zelenina" },
   { value: "vegetarianske", label: "Vegetariánske", emoji: "🌱", desc: "bez mäsa" },
-  { value: "veganske",label: "Vegánske",emoji: "🌿", desc: "bez mäsa, rýb, vajec, mliečnych výrobkov a všetkých živočíšnych produktov", plusOnly: true},
+  {
+    value: "veganske",
+    label: "Vegánske",
+    emoji: "🌿",
+    desc: "bez mäsa, rýb, vajec, mliečnych výrobkov a všetkých živočíšnych produktov",
+    plusOnly: true,
+  },
   { value: "tradicne", label: "Tradičné", emoji: "🍲", desc: "domáca poctivá strava", plusOnly: true },
   { value: "exoticke", label: "Exotické", emoji: "🍜", desc: "ázia / mexiko / fusion", plusOnly: true },
   { value: "fit", label: "Fit", emoji: "🏋️", desc: "viac bielkovín, menej cukru", plusOnly: true },
@@ -170,6 +178,231 @@ function normalizeRecipeKey(key: string) {
   return k;
 }
 
+function normalizeIngredientName(name: string) {
+  return (name || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/\s+,/g, ",")
+    .replace(/\s+\//g, "/")
+    .replace(/^\-\s*/, "")
+    .trim();
+}
+
+function normalizeQuantityString(quantity: string) {
+  return (quantity || "").trim().replace(/\s+/g, " ");
+}
+
+function normalizeRecipe(recipe: any): Recipe {
+  const ingredients = Array.isArray(recipe?.ingredients)
+    ? recipe.ingredients
+        .map((ing: any) => ({
+          name: normalizeIngredientName(String(ing?.name ?? "")),
+          quantity: normalizeQuantityString(String(ing?.quantity ?? "")),
+        }))
+        .filter((ing: { name: string; quantity: string }) => ing.name)
+    : [];
+
+  const steps = Array.isArray(recipe?.steps)
+    ? recipe.steps.map((s: any) => String(s ?? "").trim()).filter(Boolean)
+    : [];
+
+  const calories =
+    typeof recipe?.calories === "number" && Number.isFinite(recipe.calories) ? recipe.calories : null;
+
+  const caloriesManual =
+    typeof recipe?.caloriesManual === "number" && Number.isFinite(recipe.caloriesManual)
+      ? recipe.caloriesManual
+      : null;
+
+  return {
+    title: String(recipe?.title ?? "").trim(),
+    time_min:
+      typeof recipe?.time_min === "number" && Number.isFinite(recipe.time_min) ? recipe.time_min : 0,
+    portions:
+      typeof recipe?.portions === "number" && Number.isFinite(recipe.portions) ? recipe.portions : 0,
+    ingredients,
+    steps,
+    calories,
+    isEdited: recipe?.isEdited === true,
+    caloriesManual,
+  };
+}
+
+function parseQuantityLoose(raw: string): { value: number; unit: string } | null {
+  if (!raw) return null;
+
+  const s = raw
+    .trim()
+    .toLowerCase()
+    .replace(",", ".")
+    .replace(/\s+/g, " ");
+
+  const fractionMatch = s.match(/^(\d+)\s*\/\s*(\d+)\s*([^\d].*)?$/);
+  if (fractionMatch) {
+    const num = Number(fractionMatch[1]);
+    const den = Number(fractionMatch[2]);
+    if (Number.isFinite(num) && Number.isFinite(den) && den !== 0) {
+      return { value: num / den, unit: (fractionMatch[3] ?? "").trim() };
+    }
+  }
+
+  const mixedMatch = s.match(/^(\d+)\s+(\d+)\s*\/\s*(\d+)\s*([^\d].*)?$/);
+  if (mixedMatch) {
+    const whole = Number(mixedMatch[1]);
+    const num = Number(mixedMatch[2]);
+    const den = Number(mixedMatch[3]);
+    if (Number.isFinite(whole) && Number.isFinite(num) && Number.isFinite(den) && den !== 0) {
+      return { value: whole + num / den, unit: (mixedMatch[4] ?? "").trim() };
+    }
+  }
+
+  const m = s.match(/^(\d+(?:\.\d+)?)\s*([^\d].*)?$/);
+  if (!m) return null;
+
+  const value = Number(m[1]);
+  if (!Number.isFinite(value)) return null;
+
+  return { value, unit: (m[2] ?? "").trim() };
+}
+
+function formatMergedQuantity(value: number, unit: string) {
+  const rounded =
+    Math.abs(value - Math.round(value)) < 1e-9
+      ? String(Math.round(value))
+      : String(Number(value.toFixed(2))).replace(".", ",");
+
+  return unit ? `${rounded} ${unit}` : rounded;
+}
+
+function mergeQuantities(quantities: string[]) {
+  const clean = quantities.map(normalizeQuantityString).filter(Boolean);
+  if (clean.length === 0) return "";
+
+  const parsed = clean.map(parseQuantityLoose);
+  const allParsed = parsed.every(Boolean);
+
+  if (allParsed) {
+    const units = new Set(parsed.map((p) => (p?.unit ?? "").trim()));
+    if (units.size === 1) {
+      const total = parsed.reduce((sum, p) => sum + (p?.value ?? 0), 0);
+      return formatMergedQuantity(total, parsed[0]?.unit ?? "");
+    }
+  }
+
+  const unique = Array.from(new Set(clean));
+  if (unique.length === 1) return unique[0];
+  return unique.join(" + ");
+}
+
+function buildTripRanges(totalDays: number, tripCount: number) {
+  const safeDays = Math.max(1, totalDays);
+  const safeTrips = Math.max(1, Math.min(tripCount, safeDays));
+  const base = Math.floor(safeDays / safeTrips);
+  const remainder = safeDays % safeTrips;
+
+  const ranges: Array<{ trip: number; startDay: number; endDay: number }> = [];
+  let start = 1;
+
+  for (let i = 1; i <= safeTrips; i++) {
+    const size = base + (i <= remainder ? 1 : 0);
+    const end = start + size - 1;
+    ranges.push({ trip: i, startDay: start, endDay: end });
+    start = end + 1;
+  }
+
+  return ranges;
+}
+
+function getTripForDay(day: number, ranges: Array<{ trip: number; startDay: number; endDay: number }>) {
+  return ranges.find((r) => day >= r.startDay && day <= r.endDay)?.trip ?? ranges[ranges.length - 1]?.trip ?? 1;
+}
+
+function rebuildShoppingFromRecipes(plan: PlanJSON): PlanJSON {
+  const next: PlanJSON = JSON.parse(JSON.stringify(plan));
+
+  const days = Array.isArray(next.days) ? next.days.slice(0, 7) : [];
+  const recipes = next.recipes && typeof next.recipes === "object" ? next.recipes : undefined;
+
+  if (!recipes || days.length === 0) {
+    return next;
+  }
+
+  const requestedTripCount =
+    Array.isArray(next.shopping) && next.shopping.length > 0 ? next.shopping.length : 1;
+
+  const ranges = buildTripRanges(days.length, requestedTripCount);
+
+  const existingCostByTrip = new Map<number, number | undefined>();
+  for (const trip of Array.isArray(next.shopping) ? next.shopping : []) {
+    existingCostByTrip.set(trip.trip, trip.estimated_cost_eur);
+  }
+
+  const buckets = new Map<
+    number,
+    Map<string, { name: string; quantityParts: string[] }>
+  >();
+
+  function pushIngredientToTrip(trip: number, name: string, quantity: string) {
+    const normalizedName = normalizeIngredientName(name);
+    const normalizedQuantity = normalizeQuantityString(quantity);
+
+    if (!normalizedName) return;
+
+    if (!buckets.has(trip)) buckets.set(trip, new Map());
+    const tripMap = buckets.get(trip)!;
+
+    const key = normalizedName.toLocaleLowerCase("sk");
+    if (!tripMap.has(key)) {
+      tripMap.set(key, { name: normalizedName, quantityParts: [] });
+    }
+
+    if (normalizedQuantity) {
+      tripMap.get(key)!.quantityParts.push(normalizedQuantity);
+    }
+  }
+
+  for (const dayRow of days) {
+    const dayNumber = Number(dayRow?.day);
+    if (!Number.isFinite(dayNumber) || dayNumber < 1) continue;
+
+    const trip = getTripForDay(dayNumber, ranges);
+
+    const mealKeys = [`d${dayNumber}_breakfast`, `d${dayNumber}_lunch`, `d${dayNumber}_dinner`];
+
+    for (const mealKey of mealKeys) {
+      const recipe = recipes[mealKey];
+      if (!recipe || !Array.isArray(recipe.ingredients)) continue;
+
+      for (const ing of recipe.ingredients) {
+        pushIngredientToTrip(trip, String(ing?.name ?? ""), String(ing?.quantity ?? ""));
+      }
+    }
+  }
+
+  next.shopping = ranges.map((range) => {
+    const tripMap = buckets.get(range.trip) ?? new Map<string, { name: string; quantityParts: string[] }>();
+
+    const items = Array.from(tripMap.values())
+      .map((item) => ({
+        name: item.name,
+        quantity: mergeQuantities(item.quantityParts),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name, "sk"));
+
+    return {
+      trip: range.trip,
+      covers_days:
+        range.startDay === range.endDay
+          ? `${range.startDay}. deň`
+          : `${range.startDay}.–${range.endDay}. deň`,
+      estimated_cost_eur: existingCostByTrip.get(range.trip),
+      items,
+    };
+  });
+
+  return next;
+}
+
 function normalizePlan(plan: PlanJSON): PlanJSON {
   if (!plan) return plan;
   const next: PlanJSON = JSON.parse(JSON.stringify(plan));
@@ -177,13 +410,14 @@ function normalizePlan(plan: PlanJSON): PlanJSON {
   if (next.recipes && typeof next.recipes === "object") {
     const fixed: Record<string, Recipe> = {};
     for (const [k, v] of Object.entries(next.recipes)) {
-      fixed[normalizeRecipeKey(k)] = v as Recipe;
+      fixed[normalizeRecipeKey(k)] = normalizeRecipe(v);
     }
     next.recipes = fixed;
   }
 
   if (Array.isArray(next.days)) next.days = next.days.slice(0, 7);
-  return next;
+
+  return rebuildShoppingFromRecipes(next);
 }
 
 function expectedRecipeKeys() {
@@ -476,30 +710,32 @@ export default function GeneratorPage() {
   }, [supabase, session, weekStart]);
 
   const usedGenerations = useMemo(() => {
-  const entUsed = typeof ent?.used === "number" && Number.isFinite(ent.used) ? ent.used : 0;
-  const rowUsed =
-    typeof existingRow?.generation_count === "number" && Number.isFinite(existingRow.generation_count)
-      ? existingRow.generation_count
-      : 0;
+    const entUsed = typeof ent?.used === "number" && Number.isFinite(ent.used) ? ent.used : 0;
+    const rowUsed =
+      typeof existingRow?.generation_count === "number" && Number.isFinite(existingRow.generation_count)
+        ? existingRow.generation_count
+        : 0;
 
-  return Math.max(entUsed, rowUsed);
-}, [existingRow, ent]);
+    return Math.max(entUsed, rowUsed);
+  }, [existingRow, ent]);
 
-const remainingGenerations = useMemo(() => {
-  if (typeof ent?.remaining === "number" && Number.isFinite(ent.remaining)) {
-    return Math.min(ent.remaining, Math.max(0, generationLimitSafe - usedGenerations));
-  }
+  const remainingGenerations = useMemo(() => {
+    if (typeof ent?.remaining === "number" && Number.isFinite(ent.remaining)) {
+      return Math.min(ent.remaining, Math.max(0, generationLimitSafe - usedGenerations));
+    }
 
-  return Math.max(0, generationLimitSafe - usedGenerations);
-}, [generationLimitSafe, usedGenerations, ent]);
+    return Math.max(0, generationLimitSafe - usedGenerations);
+  }, [generationLimitSafe, usedGenerations, ent]);
 
   const allowedStyles = useMemo(() => {
     if (Array.isArray(ent?.allowed_styles) && ent.allowed_styles.length > 0) {
       return new Set(ent.allowed_styles);
     }
-    return new Set(tier === "plus"
-      ? ["lacné", "rychle", "vyvazene", "vegetarianske", "veganske", "fit", "tradicne", "exoticke"]
-      : ["lacné", "rychle", "vyvazene", "vegetarianske"]);
+    return new Set(
+      tier === "plus"
+        ? ["lacné", "rychle", "vyvazene", "vegetarianske", "veganske", "fit", "tradicne", "exoticke"]
+        : ["lacné", "rychle", "vyvazene", "vegetarianske"]
+    );
   }, [ent, tier]);
 
   const paywalled = !!accessToken && !!ent && ent.can_generate === false;
@@ -1025,7 +1261,9 @@ const remainingGenerations = useMemo(() => {
               </select>
 
               {tier !== "plus" ? (
-                <div className="mt-1 text-xs muted-2">Fit / Tradičné / Exotické / Vegánske sú dostupné v PLUS členstve.</div>
+                <div className="mt-1 text-xs muted-2">
+                  Fit / Tradičné / Exotické / Vegánske sú dostupné v PLUS členstve.
+                </div>
               ) : null}
             </Field>
 
