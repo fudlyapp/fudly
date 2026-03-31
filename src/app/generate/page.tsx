@@ -12,9 +12,6 @@ type Recipe = {
   portions: number;
   ingredients: Array<{ name: string; quantity: string }>;
   steps: string[];
-  calories?: number | null;
-  isEdited?: boolean;
-  caloriesManual?: number | null;
 };
 
 type PlanDay = {
@@ -38,7 +35,7 @@ type PlanJSON = {
     trip: number;
     covers_days: string;
     estimated_cost_eur?: number;
-    items: Array<{ name: string; quantity: string; estimated_price_eur?: number | null }>;
+    items: Array<{ name: string; quantity: string }>;
   }>;
   recipes?: Record<string, Recipe>;
   meta?: any;
@@ -160,13 +157,7 @@ const STYLE_OPTIONS: StyleOption[] = [
   { value: "rychle", label: "Rýchle", emoji: "⚡", desc: "max 20–30 min" },
   { value: "vyvazene", label: "Vyvážené", emoji: "🥗", desc: "bielkoviny + zelenina" },
   { value: "vegetarianske", label: "Vegetariánske", emoji: "🌱", desc: "bez mäsa" },
-  {
-    value: "veganske",
-    label: "Vegánske",
-    emoji: "🌿",
-    desc: "bez mäsa, rýb, vajec, mliečnych výrobkov a všetkých živočíšnych produktov",
-    plusOnly: true,
-  },
+  { value: "veganske",label: "Vegánske",emoji: "🌿", desc: "bez mäsa, rýb, vajec, mliečnych výrobkov a všetkých živočíšnych produktov", plusOnly: true},
   { value: "tradicne", label: "Tradičné", emoji: "🍲", desc: "domáca poctivá strava", plusOnly: true },
   { value: "exoticke", label: "Exotické", emoji: "🍜", desc: "ázia / mexiko / fusion", plusOnly: true },
   { value: "fit", label: "Fit", emoji: "🏋️", desc: "viac bielkovín, menej cukru", plusOnly: true },
@@ -194,42 +185,6 @@ function normalizeIngredientName(name: string) {
 
 function normalizeQuantityString(quantity: string) {
   return (quantity || "").trim().replace(/\s+/g, " ");
-}
-
-function normalizeRecipe(recipe: any): Recipe {
-  const ingredients = Array.isArray(recipe?.ingredients)
-    ? recipe.ingredients
-        .map((ing: any) => ({
-          name: normalizeIngredientName(String(ing?.name ?? "")),
-          quantity: normalizeQuantityString(String(ing?.quantity ?? "")),
-        }))
-        .filter((ing: { name: string; quantity: string }) => ing.name)
-    : [];
-
-  const steps = Array.isArray(recipe?.steps)
-    ? recipe.steps.map((s: any) => String(s ?? "").trim()).filter(Boolean)
-    : [];
-
-  const calories =
-    typeof recipe?.calories === "number" && Number.isFinite(recipe.calories) ? recipe.calories : null;
-
-  const caloriesManual =
-    typeof recipe?.caloriesManual === "number" && Number.isFinite(recipe.caloriesManual)
-      ? recipe.caloriesManual
-      : null;
-
-  return {
-    title: String(recipe?.title ?? "").trim(),
-    time_min:
-      typeof recipe?.time_min === "number" && Number.isFinite(recipe.time_min) ? recipe.time_min : 0,
-    portions:
-      typeof recipe?.portions === "number" && Number.isFinite(recipe.portions) ? recipe.portions : 0,
-    ingredients,
-    steps,
-    calories,
-    isEdited: recipe?.isEdited === true,
-    caloriesManual,
-  };
 }
 
 function parseQuantityLoose(raw: string): { value: number; unit: string } | null {
@@ -301,6 +256,14 @@ function mergeQuantities(quantities: string[]) {
 function buildTripRanges(totalDays: number, tripCount: number) {
   const safeDays = Math.max(1, totalDays);
   const safeTrips = Math.max(1, Math.min(tripCount, safeDays));
+
+  if (safeTrips === 2 && safeDays >= 7) {
+    return [
+      { trip: 1, startDay: 1, endDay: 3 },
+      { trip: 2, startDay: 4, endDay: safeDays },
+    ];
+  }
+
   const base = Math.floor(safeDays / safeTrips);
   const remainder = safeDays % safeTrips;
 
@@ -321,80 +284,105 @@ function getTripForDay(day: number, ranges: Array<{ trip: number; startDay: numb
   return ranges.find((r) => day >= r.startDay && day <= r.endDay)?.trip ?? ranges[ranges.length - 1]?.trip ?? 1;
 }
 
-function rebuildShoppingFromRecipes(plan: PlanJSON): PlanJSON {
-  const next: PlanJSON = JSON.parse(JSON.stringify(plan));
+function rebuildShoppingKeepingAllItemFields(plan: PlanJSON): PlanJSON {
+  const next: any = JSON.parse(JSON.stringify(plan ?? {}));
 
   const days = Array.isArray(next.days) ? next.days.slice(0, 7) : [];
-  const recipes = next.recipes && typeof next.recipes === "object" ? next.recipes : undefined;
+  const recipes = next.recipes && typeof next.recipes === "object" ? next.recipes : null;
+  const originalShopping = Array.isArray(next.shopping) ? next.shopping : [];
 
-  if (!recipes || days.length === 0) {
+  if (!recipes || days.length === 0 || originalShopping.length === 0) {
     return next;
   }
 
-  const requestedTripCount =
-    Array.isArray(next.shopping) && next.shopping.length > 0 ? next.shopping.length : 1;
+  const ranges = buildTripRanges(days.length, originalShopping.length);
 
-  const ranges = buildTripRanges(days.length, requestedTripCount);
+  type SourceItemEntry = {
+    item: any;
+    originalTrip: number;
+  };
+
+  const sourcePool = new Map<string, SourceItemEntry[]>();
+
+  for (const trip of originalShopping) {
+    const tripNo = Number(trip?.trip) || 1;
+    const items = Array.isArray(trip?.items) ? trip.items : [];
+
+    for (const item of items) {
+      const normalizedName = normalizeIngredientName(String(item?.name ?? ""));
+      const key = normalizedName.toLocaleLowerCase("sk");
+      if (!key) continue;
+
+      if (!sourcePool.has(key)) sourcePool.set(key, []);
+      sourcePool.get(key)!.push({
+        item: JSON.parse(JSON.stringify(item)),
+        originalTrip: tripNo,
+      });
+    }
+  }
 
   const existingCostByTrip = new Map<number, number | undefined>();
-  for (const trip of Array.isArray(next.shopping) ? next.shopping : []) {
-    existingCostByTrip.set(trip.trip, trip.estimated_cost_eur);
+  for (const trip of originalShopping) {
+    existingCostByTrip.set(Number(trip?.trip) || 1, trip?.estimated_cost_eur);
   }
 
   const buckets = new Map<
     number,
-    Map<string, { name: string; quantityParts: string[]; estimatedPriceTotal: number | null }>
+    Map<
+      string,
+      {
+        baseItem: any;
+        quantityParts: string[];
+        estimatedPriceTotal: number | null;
+        name: string;
+      }
+    >
   >();
 
-  const sourcePriceMap = new Map<string, number[]>();
-
-  for (const trip of Array.isArray(next.shopping) ? next.shopping : []) {
-    for (const item of Array.isArray(trip.items) ? trip.items : []) {
-      const key = normalizeIngredientName(String(item?.name ?? "")).toLocaleLowerCase("sk");
-      const price = item?.estimated_price_eur;
-
-      if (!key) continue;
-      if (typeof price !== "number" || !Number.isFinite(price) || price < 0) continue;
-
-      if (!sourcePriceMap.has(key)) sourcePriceMap.set(key, []);
-      sourcePriceMap.get(key)!.push(price);
-    }
-  }
-
-  function takeSourcePrice(name: string): number | null {
+  function takeSourceItem(name: string): SourceItemEntry | null {
     const key = normalizeIngredientName(name).toLocaleLowerCase("sk");
-    const arr = sourcePriceMap.get(key);
+    const arr = sourcePool.get(key);
     if (!arr || arr.length === 0) return null;
     return arr.shift() ?? null;
+  }
+
+  function ensureBucket(trip: number, name: string, sourceItem: any | null, quantity: string) {
+    if (!buckets.has(trip)) buckets.set(trip, new Map());
+    const tripMap = buckets.get(trip)!;
+
+    const key = normalizeIngredientName(name).toLocaleLowerCase("sk");
+    if (!tripMap.has(key)) {
+      tripMap.set(key, {
+        baseItem: sourceItem
+          ? JSON.parse(JSON.stringify(sourceItem))
+          : {
+              name: normalizeIngredientName(name),
+              quantity: normalizeQuantityString(quantity),
+            },
+        quantityParts: [],
+        estimatedPriceTotal: null,
+        name: normalizeIngredientName(name),
+      });
+    }
+
+    return tripMap.get(key)!;
   }
 
   function pushIngredientToTrip(trip: number, name: string, quantity: string) {
     const normalizedName = normalizeIngredientName(name);
     const normalizedQuantity = normalizeQuantityString(quantity);
-
     if (!normalizedName) return;
 
-    if (!buckets.has(trip)) buckets.set(trip, new Map());
-    const tripMap = buckets.get(trip)!;
-
-    const key = normalizedName.toLocaleLowerCase("sk");
-    if (!tripMap.has(key)) {
-      tripMap.set(key, {
-        name: normalizedName,
-        quantityParts: [],
-        estimatedPriceTotal: null,
-      });
-    }
-
-    const bucket = tripMap.get(key)!;
+    const source = takeSourceItem(normalizedName);
+    const bucket = ensureBucket(trip, normalizedName, source?.item ?? null, normalizedQuantity);
 
     if (normalizedQuantity) {
       bucket.quantityParts.push(normalizedQuantity);
     }
 
-    const sourcePrice = takeSourcePrice(normalizedName);
-    if (typeof sourcePrice === "number" && Number.isFinite(sourcePrice) && sourcePrice >= 0) {
-      bucket.estimatedPriceTotal = (bucket.estimatedPriceTotal ?? 0) + sourcePrice;
+    const price = source?.item?.estimated_price_eur;
+    if (typeof price === "number" && Number.isFinite(price) && price >= 0) {
+      bucket.estimatedPriceTotal = (bucket.estimatedPriceTotal ?? 0) + price;
     }
   }
 
@@ -403,7 +391,6 @@ function rebuildShoppingFromRecipes(plan: PlanJSON): PlanJSON {
     if (!Number.isFinite(dayNumber) || dayNumber < 1) continue;
 
     const trip = getTripForDay(dayNumber, ranges);
-
     const mealKeys = [`d${dayNumber}_breakfast`, `d${dayNumber}_lunch`, `d${dayNumber}_dinner`];
 
     for (const mealKey of mealKeys) {
@@ -416,40 +403,72 @@ function rebuildShoppingFromRecipes(plan: PlanJSON): PlanJSON {
     }
   }
 
+  for (const leftovers of Array.from(sourcePool.values())) {
+    for (const left of leftovers) {
+      const trip = left.originalTrip;
+      const item = left.item ?? {};
+      const normalizedName = normalizeIngredientName(String(item?.name ?? ""));
+      const normalizedQuantity = normalizeQuantityString(String(item?.quantity ?? ""));
+      if (!normalizedName) continue;
+
+      const bucket = ensureBucket(trip, normalizedName, item, normalizedQuantity);
+
+      if (normalizedQuantity) {
+        bucket.quantityParts.push(normalizedQuantity);
+      }
+
+      const price = item?.estimated_price_eur;
+      if (typeof price === "number" && Number.isFinite(price) && price >= 0) {
+        bucket.estimatedPriceTotal = (bucket.estimatedPriceTotal ?? 0) + price;
+      }
+    }
+  }
+
   next.shopping = ranges.map((range) => {
     const tripMap =
       buckets.get(range.trip) ??
-      new Map<string, { name: string; quantityParts: string[]; estimatedPriceTotal: number | null }>();
+      new Map<
+        string,
+        {
+          baseItem: any;
+          quantityParts: string[];
+          estimatedPriceTotal: number | null;
+          name: string;
+        }
+      >();
 
     const items = Array.from(tripMap.values())
-      .map((item) => ({
-        name: item.name,
-        quantity: mergeQuantities(item.quantityParts),
-        estimated_price_eur:
-          typeof item.estimatedPriceTotal === "number" && Number.isFinite(item.estimatedPriceTotal)
-            ? round2(item.estimatedPriceTotal)
-            : null,
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name, "sk"));
+      .map((bucket) => {
+        const item = JSON.parse(JSON.stringify(bucket.baseItem ?? {}));
+
+        item.name = bucket.name;
+        item.quantity = mergeQuantities(bucket.quantityParts);
+
+        if (typeof bucket.estimatedPriceTotal === "number" && Number.isFinite(bucket.estimatedPriceTotal)) {
+          item.estimated_price_eur = round2(bucket.estimatedPriceTotal);
+        }
+
+        return item;
+      })
+      .sort((a, b) => String(a?.name ?? "").localeCompare(String(b?.name ?? ""), "sk"));
 
     const estimatedCost = items.reduce((sum, item) => {
-      const v = item.estimated_price_eur;
-      return typeof v === "number" && Number.isFinite(v) ? sum + v : sum;
+      const v = item?.estimated_price_eur;
+      return typeof v === "number" && Number.isFinite(v) && v >= 0 ? sum + v : sum;
     }, 0);
 
     return {
       trip: range.trip,
-      covers_days:
-        range.startDay === range.endDay
-          ? `${range.startDay}. deň`
-          : `${range.startDay}.–${range.endDay}. deň`,
+      covers_days: `${range.startDay}-${range.endDay}`,
       estimated_cost_eur:
-        items.length > 0 ? round2(estimatedCost) : existingCostByTrip.get(range.trip),
+        items.some((item) => typeof item?.estimated_price_eur === "number")
+          ? round2(estimatedCost)
+          : existingCostByTrip.get(range.trip),
       items,
     };
   });
 
-  return next;
+  return next as PlanJSON;
 }
 
 function normalizePlan(plan: PlanJSON): PlanJSON {
@@ -459,14 +478,14 @@ function normalizePlan(plan: PlanJSON): PlanJSON {
   if (next.recipes && typeof next.recipes === "object") {
     const fixed: Record<string, Recipe> = {};
     for (const [k, v] of Object.entries(next.recipes)) {
-      fixed[normalizeRecipeKey(k)] = normalizeRecipe(v);
+      fixed[normalizeRecipeKey(k)] = v as Recipe;
     }
     next.recipes = fixed;
   }
 
   if (Array.isArray(next.days)) next.days = next.days.slice(0, 7);
 
-  return next;
+  return rebuildShoppingKeepingAllItemFields(next);
 }
 
 function expectedRecipeKeys() {
@@ -780,11 +799,9 @@ export default function GeneratorPage() {
     if (Array.isArray(ent?.allowed_styles) && ent.allowed_styles.length > 0) {
       return new Set(ent.allowed_styles);
     }
-    return new Set(
-      tier === "plus"
-        ? ["lacné", "rychle", "vyvazene", "vegetarianske", "veganske", "fit", "tradicne", "exoticke"]
-        : ["lacné", "rychle", "vyvazene", "vegetarianske"]
-    );
+    return new Set(tier === "plus"
+      ? ["lacné", "rychle", "vyvazene", "vegetarianske", "veganske", "fit", "tradicne", "exoticke"]
+      : ["lacné", "rychle", "vyvazene", "vegetarianske"]);
   }, [ent, tier]);
 
   const paywalled = !!accessToken && !!ent && ent.can_generate === false;
@@ -1310,9 +1327,7 @@ export default function GeneratorPage() {
               </select>
 
               {tier !== "plus" ? (
-                <div className="mt-1 text-xs muted-2">
-                  Fit / Tradičné / Exotické / Vegánske sú dostupné v PLUS členstve.
-                </div>
+                <div className="mt-1 text-xs muted-2">Fit / Tradičné / Exotické / Vegánske sú dostupné v PLUS členstve.</div>
               ) : null}
             </Field>
 
