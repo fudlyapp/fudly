@@ -1,4 +1,3 @@
-// src/app/api/generate/route.ts
 import { NextResponse } from "next/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -191,6 +190,10 @@ function pad2(n: number) {
   return String(n).padStart(2, "0");
 }
 
+function round2(n: number) {
+  return Math.round(n * 100) / 100;
+}
+
 function addDaysISO(iso: string, add: number) {
   const d = new Date(iso + "T00:00:00");
   d.setDate(d.getDate() + add);
@@ -322,6 +325,260 @@ function sumShoppingEstimates(plan: any) {
   plan.summary = plan.summary ?? {};
   plan.summary.estimated_total_cost_eur = Number(total.toFixed(2));
   return plan;
+}
+
+function normalizeIngredientName(name: string) {
+  return (name || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/\s+,/g, ",")
+    .replace(/\s+\//g, "/")
+    .replace(/^\-\s*/, "")
+    .trim();
+}
+
+function normalizeQuantityString(quantity: string) {
+  return (quantity || "").trim().replace(/\s+/g, " ");
+}
+
+function parseQuantityLoose(raw: string): { value: number; unit: string } | null {
+  if (!raw) return null;
+
+  const s = raw
+    .trim()
+    .toLowerCase()
+    .replace(",", ".")
+    .replace(/\s+/g, " ");
+
+  const fractionMatch = s.match(/^(\d+)\s*\/\s*(\d+)\s*([^\d].*)?$/);
+  if (fractionMatch) {
+    const num = Number(fractionMatch[1]);
+    const den = Number(fractionMatch[2]);
+    if (Number.isFinite(num) && Number.isFinite(den) && den !== 0) {
+      return { value: num / den, unit: (fractionMatch[3] ?? "").trim() };
+    }
+  }
+
+  const mixedMatch = s.match(/^(\d+)\s+(\d+)\s*\/\s*(\d+)\s*([^\d].*)?$/);
+  if (mixedMatch) {
+    const whole = Number(mixedMatch[1]);
+    const num = Number(mixedMatch[2]);
+    const den = Number(mixedMatch[3]);
+    if (Number.isFinite(whole) && Number.isFinite(num) && Number.isFinite(den) && den !== 0) {
+      return { value: whole + num / den, unit: (mixedMatch[4] ?? "").trim() };
+    }
+  }
+
+  const m = s.match(/^(\d+(?:\.\d+)?)\s*([^\d].*)?$/);
+  if (!m) return null;
+
+  const value = Number(m[1]);
+  if (!Number.isFinite(value)) return null;
+
+  return { value, unit: (m[2] ?? "").trim() };
+}
+
+function formatMergedQuantity(value: number, unit: string) {
+  const rounded =
+    Math.abs(value - Math.round(value)) < 1e-9
+      ? String(Math.round(value))
+      : String(Number(value.toFixed(2))).replace(".", ",");
+
+  return unit ? `${rounded} ${unit}` : rounded;
+}
+
+function mergeQuantities(quantities: string[]) {
+  const clean = quantities.map(normalizeQuantityString).filter(Boolean);
+  if (clean.length === 0) return "";
+
+  const parsed = clean.map(parseQuantityLoose);
+  const allParsed = parsed.every(Boolean);
+
+  if (allParsed) {
+    const units = new Set(parsed.map((p) => (p?.unit ?? "").trim()));
+    if (units.size === 1) {
+      const total = parsed.reduce((sum, p) => sum + (p?.value ?? 0), 0);
+      return formatMergedQuantity(total, parsed[0]?.unit ?? "");
+    }
+  }
+
+  const unique = Array.from(new Set(clean));
+  if (unique.length === 1) return unique[0];
+  return unique.join(" + ");
+}
+
+function buildTripRanges(totalDays: number, tripCount: number) {
+  const safeDays = Math.max(1, totalDays);
+  const safeTrips = Math.max(1, Math.min(tripCount, safeDays));
+  const base = Math.floor(safeDays / safeTrips);
+  const remainder = safeDays % safeTrips;
+
+  const ranges: Array<{ trip: number; startDay: number; endDay: number }> = [];
+  let start = 1;
+
+  for (let i = 1; i <= safeTrips; i++) {
+    const size = base + (i <= remainder ? 1 : 0);
+    const end = start + size - 1;
+    ranges.push({ trip: i, startDay: start, endDay: end });
+    start = end + 1;
+  }
+
+  return ranges;
+}
+
+function getTripForDay(day: number, ranges: Array<{ trip: number; startDay: number; endDay: number }>) {
+  return ranges.find((r) => day >= r.startDay && day <= r.endDay)?.trip ?? ranges[ranges.length - 1]?.trip ?? 1;
+}
+
+function rebuildShoppingFromRecipesWithPrices(plan: any, tripCount: number) {
+  const next = JSON.parse(JSON.stringify(plan ?? {}));
+  const days = Array.isArray(next.days) ? next.days.slice(0, 7) : [];
+  const recipes = next.recipes && typeof next.recipes === "object" ? next.recipes : null;
+  const originalShopping = Array.isArray(next.shopping) ? next.shopping : [];
+
+  if (!recipes || days.length === 0) return next;
+
+  const ranges = buildTripRanges(days.length, tripCount);
+
+  type PriceEntry = {
+    estimated_price_eur: number | null;
+    originalTrip: number;
+    name: string;
+    quantity: string;
+  };
+
+  const pricePool = new Map<string, PriceEntry[]>();
+
+  for (const trip of originalShopping) {
+    const tripNo = Number(trip?.trip) || 1;
+    const items = Array.isArray(trip?.items) ? trip.items : [];
+
+    for (const item of items) {
+      const normalizedName = normalizeIngredientName(String(item?.name ?? ""));
+      const key = normalizedName.toLocaleLowerCase("sk");
+      if (!key) continue;
+
+      if (!pricePool.has(key)) pricePool.set(key, []);
+      pricePool.get(key)!.push({
+        estimated_price_eur:
+          typeof item?.estimated_price_eur === "number" && Number.isFinite(item.estimated_price_eur) && item.estimated_price_eur >= 0
+            ? item.estimated_price_eur
+            : null,
+        originalTrip: tripNo,
+        name: normalizedName,
+        quantity: normalizeQuantityString(String(item?.quantity ?? "")),
+      });
+    }
+  }
+
+  const buckets = new Map<
+    number,
+    Map<string, { name: string; quantityParts: string[]; estimatedPriceTotal: number | null }>
+  >();
+
+  function takePriceEntry(name: string): PriceEntry | null {
+    const key = normalizeIngredientName(name).toLocaleLowerCase("sk");
+    const arr = pricePool.get(key);
+    if (!arr || arr.length === 0) return null;
+    return arr.shift() ?? null;
+  }
+
+  function pushIngredientToTrip(trip: number, name: string, quantity: string) {
+    const normalizedName = normalizeIngredientName(name);
+    const normalizedQuantity = normalizeQuantityString(quantity);
+    if (!normalizedName) return;
+
+    if (!buckets.has(trip)) buckets.set(trip, new Map());
+    const tripMap = buckets.get(trip)!;
+
+    const key = normalizedName.toLocaleLowerCase("sk");
+    if (!tripMap.has(key)) {
+      tripMap.set(key, {
+        name: normalizedName,
+        quantityParts: [],
+        estimatedPriceTotal: null,
+      });
+    }
+
+    const bucket = tripMap.get(key)!;
+
+    if (normalizedQuantity) {
+      bucket.quantityParts.push(normalizedQuantity);
+    }
+
+    const source = takePriceEntry(normalizedName);
+    if (source && typeof source.estimated_price_eur === "number" && Number.isFinite(source.estimated_price_eur)) {
+      bucket.estimatedPriceTotal = (bucket.estimatedPriceTotal ?? 0) + source.estimated_price_eur;
+    }
+  }
+
+  for (const dayRow of days) {
+    const dayNumber = Number(dayRow?.day);
+    if (!Number.isFinite(dayNumber) || dayNumber < 1) continue;
+
+    const trip = getTripForDay(dayNumber, ranges);
+    const mealKeys = [`d${dayNumber}_breakfast`, `d${dayNumber}_lunch`, `d${dayNumber}_dinner`];
+
+    for (const mealKey of mealKeys) {
+      const recipe = recipes[mealKey];
+      if (!recipe || !Array.isArray(recipe.ingredients)) continue;
+
+      for (const ing of recipe.ingredients) {
+        pushIngredientToTrip(trip, String(ing?.name ?? ""), String(ing?.quantity ?? ""));
+      }
+    }
+  }
+
+  for (const leftovers of Array.from(pricePool.values())) {
+  for (const left of leftovers) {
+    const trip = left.originalTrip;
+    if (!buckets.has(trip)) buckets.set(trip, new Map());
+    const tripMap = buckets.get(trip)!;
+
+    const key = normalizeIngredientName(left.name).toLocaleLowerCase("sk");
+    if (!tripMap.has(key)) {
+      tripMap.set(key, {
+        name: normalizeIngredientName(left.name),
+        quantityParts: [],
+        estimatedPriceTotal: null,
+      });
+    }
+
+    const bucket = tripMap.get(key)!;
+    const q = normalizeQuantityString(left.quantity);
+    if (q) bucket.quantityParts.push(q);
+
+    if (typeof left.estimated_price_eur === "number" && Number.isFinite(left.estimated_price_eur)) {
+      bucket.estimatedPriceTotal = (bucket.estimatedPriceTotal ?? 0) + left.estimated_price_eur;
+    }
+  }
+}
+
+  next.shopping = ranges.map((range) => {
+    const tripMap =
+      buckets.get(range.trip) ??
+      new Map<string, { name: string; quantityParts: string[]; estimatedPriceTotal: number | null }>();
+
+    const items = Array.from(tripMap.values())
+      .map((item) => ({
+        name: item.name,
+        quantity: mergeQuantities(item.quantityParts),
+        estimated_price_eur:
+          typeof item.estimatedPriceTotal === "number" && Number.isFinite(item.estimatedPriceTotal)
+            ? round2(item.estimatedPriceTotal)
+            : null,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name, "sk"));
+
+    return {
+      trip: range.trip,
+      covers_days: range.startDay === range.endDay ? `${range.startDay}` : `${range.startDay}-${range.endDay}`,
+      estimated_cost_eur: 0,
+      items,
+    };
+  });
+
+  return sumShoppingEstimates(next);
 }
 
 export async function POST(req: Request) {
@@ -509,6 +766,13 @@ RECIPES:
 - Keys must be exactly: d{day}_{meal} where meal is breakfast|lunch|dinner.
 - That means 21 recipes total.
 
+VARIETY RULES:
+- Do not repeat the same main dish during the week.
+- Use at least 5 different main protein sources across the week when the chosen style allows it.
+- Use at least 4 different main side/starch bases across the week.
+- Vary cuisines and flavor profiles.
+- Avoid making the plan feel repetitive even if ingredients are reused.
+
 JSON schema (follow exactly):
 {
   "summary": {
@@ -600,7 +864,15 @@ Counts:
     parsed.summary.shopping_trips_per_week = coerceNumber(parsed.summary.shopping_trips_per_week, shoppingTrips);
     parsed.summary.repeat_days_max = coerceNumber(parsed.summary.repeat_days_max, repeatDays);
     parsed.summary = ensurePerPersonCalories(parsed.summary);
-    sumShoppingEstimates(parsed);
+
+    const rebuilt = rebuildShoppingFromRecipesWithPrices(parsed, shoppingTrips);
+    rebuilt.summary = rebuilt.summary ?? {};
+    rebuilt.summary.people = coerceNumber(rebuilt.summary.people, peopleNum);
+    rebuilt.summary.weekly_budget_eur = coerceNumber(rebuilt.summary.weekly_budget_eur, budgetNum);
+    rebuilt.summary.shopping_trips_per_week = coerceNumber(rebuilt.summary.shopping_trips_per_week, shoppingTrips);
+    rebuilt.summary.repeat_days_max = coerceNumber(rebuilt.summary.repeat_days_max, repeatDays);
+    rebuilt.summary = ensurePerPersonCalories(rebuilt.summary);
+    sumShoppingEstimates(rebuilt);
 
     const { error: upErr } = await supabase.from("generation_usage").upsert(
       { user_id: userId, week_start: weekStart, count: used + 1 },
@@ -611,14 +883,14 @@ Counts:
       return NextResponse.json(
         {
           kind: "json",
-          plan: parsed,
+          plan: rebuilt,
           warning: { code: "USAGE_WRITE_FAILED", message: upErr.message },
         },
         { status: 200 }
       );
     }
 
-    return NextResponse.json({ kind: "json", plan: parsed }, { status: 200 });
+    return NextResponse.json({ kind: "json", plan: rebuilt }, { status: 200 });
   } catch (e: any) {
     return NextResponse.json(
       { error: { code: "SERVER_ERROR", message: e?.message ?? "Unknown error" } },

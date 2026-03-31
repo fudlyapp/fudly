@@ -466,7 +466,7 @@ function normalizePlan(plan: PlanJSON): PlanJSON {
 
   if (Array.isArray(next.days)) next.days = next.days.slice(0, 7);
 
-  return rebuildShoppingFromRecipes(next);
+  return next;
 }
 
 function expectedRecipeKeys() {
