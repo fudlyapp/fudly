@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 
 type Body = {
   weekStart?: string;
-  language?: string; // sk|en|uk
+  language?: string;
   people: string;
   budget: string;
   intolerances?: string;
@@ -198,52 +198,8 @@ function addDaysISO(iso: string, add: number) {
 }
 
 const DAY_NAMES_SK = ["Pondelok", "Utorok", "Streda", "Štvrtok", "Piatok", "Sobota", "Nedeľa"];
-const DAY_NAMES_EN = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-const DAY_NAMES_UK = ["Понеділок", "Вівторок", "Середа", "Четвер", "П’ятниця", "Субота", "Неділя"];
 
-function styleHintFromValue(style: string, lang: "sk" | "en" | "uk") {
-  if (lang === "en") {
-    switch (style) {
-      case "rychle":
-        return "Prefer very quick meals (max 20–30 min).";
-      case "vyvazene":
-        return "Prefer balanced meals (protein + veggies + sides). Use the available budget realistically for variety, quality ingredients, and nutritionally balanced meals.";
-      case "vegetarianske":
-        return "Vegetarian: no meat or fish (eggs and dairy OK).";
-      case "veganske":
-        return "Vegan: no meat, fish, eggs, dairy, honey, or any other animal products.";
-      case "tradicne":
-        return "Traditional home-style meals.";
-      case "exoticke":
-        return "Exotic inspirations (Asia/Mexico/fusion) using common store ingredients.";
-      case "fit":
-        return "Fit: more protein and veggies, less sugar.";
-      default:
-        return "Prefer the cheapest practical meals from common ingredients while still making good use of the available budget.";
-    }
-  }
-
-  if (lang === "uk") {
-    switch (style) {
-      case "rychle":
-        return "Надавай перевагу дуже швидким стравам (макс 20–30 хв).";
-      case "vyvazene":
-        return "Надавай перевагу збалансованим стравам (білок + овочі + гарнір). Реалістично використовуй доступний бюджет для більшої різноманітності, кращих інгредієнтів і харчового балансу.";
-      case "vegetarianske":
-        return "Вегетаріанське: без м’яса та риби (яйця й молочне можна).";
-      case "veganske":
-        return "Веганське: без м’яса, риби, яєць, молочних продуктів, меду та будь-яких інших продуктів тваринного походження.";
-      case "tradicne":
-        return "Традиційні домашні страви.";
-      case "exoticke":
-        return "Екзотика (Азія/Мексика/fusion) зі звичайних продуктів.";
-      case "fit":
-        return "Fit: більше білка й овочів, менше цукру.";
-      default:
-        return "Надавай перевагу практичним і доступним стравам зі звичайних продуктів, але бюджет використовуй розумно, а не надто ощадливо.";
-    }
-  }
-
+function styleHintFromValue(style: string) {
   switch (style) {
     case "rychle":
       return "Uprednostni veľmi rýchle jedlá (max 20–30 min).";
@@ -262,6 +218,77 @@ function styleHintFromValue(style: string, lang: "sk" | "en" | "uk") {
     default:
       return "Uprednostni praktické a lacnejšie jedlá z bežných surovín, ale budget využi rozumne a nie zbytočne príliš nízko.";
   }
+}
+
+function getPromptVariantsForStyle(style: string): string[] {
+  switch (style) {
+    case "lacné":
+      return [
+        "V rámci lacného štýlu sa snaž o miernu pestrosť medzi dňami a neopakuj stále ten istý typ jedál alebo príloh.",
+        "Aj pri lacných surovinách obmieňaj hlavné prílohy, spôsob použitia zeleniny a typ jedál počas týždňa.",
+        "Zachovaj nízku cenu, ale nech dni nepôsobia ako len malé obmeny toho istého jedla.",
+      ];
+
+    case "rychle":
+      return [
+        "Zachovaj rýchlosť, ale striedaj typy jedál a techniky prípravy, aby susedné dni nepôsobili príliš podobne.",
+        "Aj pri rýchlych jedlách obmieňaj prílohy, chute a hlavné kombinácie surovín.",
+        "Uprednostni rýchle jedlá, ale dbaj na miernu pestrosť medzi dňami a vyhni sa príliš podobným rýchlym kombináciám.",
+      ];
+
+    case "vyvazene":
+      return [
+        "V rámci vyváženého štýlu striedaj zdroje bielkovín, zeleninu a hlavné prílohy počas týždňa.",
+        "Dbaj na to, aby dni pôsobili pestrejšie a neopakovali sa stále tie isté kombinácie bielkovina + príloha.",
+        "Zachovaj vyváženosť, ale obmieňaj chuťové profily, zeleninu aj hlavné bázy jedál.",
+      ];
+
+    case "vegetarianske":
+      return [
+        "Pri vegetariánskom štýle striedaj typy jedál, aby sa neopakovali stále rovnaké kombinácie syra, vajec a zeleniny.",
+        "Použi rôzne vegetariánske základy a obmieňaj prílohy, strukoviny, syry a zeleninu.",
+        "Zachovaj vegetariánsky štýl, ale dbaj na pestrosť chutí, textúr a hlavných surovín počas týždňa.",
+      ];
+
+    case "veganske":
+      return [
+        "Pri vegánskom štýle striedaj rastlinné bielkoviny, prílohy a zeleninu, aby týždeň nepôsobil monotónne.",
+        "Zachovaj vegánsky štýl, ale obmieňaj hlavné bázy jedál a chuťové profily počas týždňa.",
+        "Použi pestrejšie kombinácie strukovín, obilnín, zeleniny a príloh pri zachovaní praktickosti.",
+      ];
+
+    case "tradicne":
+      return [
+        "Zachovaj tradičný charakter, ale nevyberaj príliš podobné tradičné jedlá po sebe.",
+        "Pri tradičnom štýle obmieňaj typy príloh, druhy mäsa a spôsob prípravy jedál počas týždňa.",
+        "Aj pri tradičných jedlách dbaj na miernu pestrosť, aby dni nepôsobili príliš jednotvárne.",
+      ];
+
+    case "exoticke":
+      return [
+        "Zachovaj exotický štýl, ale striedaj chuťové profily a nenechaj týždeň stáť len na jednom type cuisine.",
+        "Pri exotickom štýle obmieňaj techniky prípravy, hlavné prílohy aj koreniny počas týždňa.",
+        "Dbaj na pestrosť exotických inšpirácií, ale stále používaj praktické a bežne dostupné suroviny.",
+      ];
+
+    case "fit":
+      return [
+        "Zachovaj fit štýl, ale striedaj zdroje bielkovín, prílohy a typy zeleniny počas týždňa.",
+        "Pri fit štýle dbaj na pestrosť jedál, aby sa neopakovali stále rovnaké kombinácie kura + ryža + zelenina.",
+        "Zachovaj vyšší obsah bielkovín a ľahší charakter, ale obmieňaj chute, formu jedál a prílohy.",
+      ];
+
+    default:
+      return [
+        "Dbaj na miernu pestrosť medzi dňami a neopakuj stále ten istý typ jedál alebo príloh.",
+        "Aj pri podobných surovinách sa snaž o odlišné kombinácie a rôzne spracovanie počas týždňa.",
+        "Nech susedné dni nepôsobia ako len malé obmeny toho istého jedla.",
+      ];
+  }
+}
+
+function pickRandom<T>(arr: T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)];
 }
 
 function requiredRecipeKeys() {
@@ -366,9 +393,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: { code: "INVALID_WEEK_START" } }, { status: 400 });
     }
 
-    const langRaw = (body.language || "sk").trim().toLowerCase();
-    const lang: "sk" | "en" | "uk" = langRaw === "en" ? "en" : langRaw === "uk" ? "uk" : "sk";
-
     const peopleNum = parsePeople(body.people?.trim() || "");
     if (peopleNum == null) {
       return NextResponse.json({ error: { code: "INVALID_PEOPLE" } }, { status: 400 });
@@ -427,18 +451,13 @@ export async function POST(req: Request) {
     const shoppingTrips = clampInt(body.shoppingTrips ?? 2, 1, 4, 2);
     const repeatDays = clampInt(body.repeatDays ?? 2, 1, 3, 2);
 
-    const styleHint = styleHintFromValue(style, lang);
-    const dayNames = lang === "en" ? DAY_NAMES_EN : lang === "uk" ? DAY_NAMES_UK : DAY_NAMES_SK;
+    const styleHint = styleHintFromValue(style);
+    const dayNames = DAY_NAMES_SK;
     const datesBlock = dayNames
       .map((name, i) => `- day ${i + 1}: ${name}, date: ${addDaysISO(weekStart, i)}`)
       .join("\n");
 
-    const languageRule =
-      lang === "en"
-        ? "Write everything in English."
-        : lang === "uk"
-        ? "Пиши все українською."
-        : "Všetko píš po slovensky.";
+    const variationHint = pickRandom(getPromptVariantsForStyle(style));
 
     const caloriesBlock = `
 CALORIES:
@@ -459,7 +478,7 @@ CALORIES:
 
     const prompt = `
 Return ONLY valid JSON (no other text).
-${languageRule}
+Všetko píš po slovensky.
 
 Create a 7-day meal plan (breakfast/lunch/dinner).
 Goal: create a practical, realistic weekly meal plan that respects the selected budget and style.
@@ -480,6 +499,9 @@ Preferences:
 
 Style:
 - ${styleHint}
+
+Jemná variácia pre túto generáciu:
+- ${variationHint}
 
 Week:
 ${datesBlock}
