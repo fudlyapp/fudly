@@ -38,7 +38,7 @@ type PlanJSON = {
     trip: number;
     covers_days: string;
     estimated_cost_eur?: number;
-    items: Array<{ name: string; quantity: string }>;
+    items: Array<{ name: string; quantity: string; estimated_price_eur?: number | null }>;
   }>;
   recipes?: Record<string, Recipe>;
   meta?: any;
@@ -88,6 +88,10 @@ type Entitlements = {
 
 function pad2(n: number) {
   return String(n).padStart(2, "0");
+}
+
+function round2(n: number) {
+  return Math.round(n * 100) / 100;
 }
 
 function toISODate(d: Date) {
@@ -339,8 +343,30 @@ function rebuildShoppingFromRecipes(plan: PlanJSON): PlanJSON {
 
   const buckets = new Map<
     number,
-    Map<string, { name: string; quantityParts: string[] }>
+    Map<string, { name: string; quantityParts: string[]; estimatedPriceTotal: number | null }>
   >();
+
+  const sourcePriceMap = new Map<string, number[]>();
+
+  for (const trip of Array.isArray(next.shopping) ? next.shopping : []) {
+    for (const item of Array.isArray(trip.items) ? trip.items : []) {
+      const key = normalizeIngredientName(String(item?.name ?? "")).toLocaleLowerCase("sk");
+      const price = item?.estimated_price_eur;
+
+      if (!key) continue;
+      if (typeof price !== "number" || !Number.isFinite(price) || price < 0) continue;
+
+      if (!sourcePriceMap.has(key)) sourcePriceMap.set(key, []);
+      sourcePriceMap.get(key)!.push(price);
+    }
+  }
+
+  function takeSourcePrice(name: string): number | null {
+    const key = normalizeIngredientName(name).toLocaleLowerCase("sk");
+    const arr = sourcePriceMap.get(key);
+    if (!arr || arr.length === 0) return null;
+    return arr.shift() ?? null;
+  }
 
   function pushIngredientToTrip(trip: number, name: string, quantity: string) {
     const normalizedName = normalizeIngredientName(name);
@@ -353,11 +379,22 @@ function rebuildShoppingFromRecipes(plan: PlanJSON): PlanJSON {
 
     const key = normalizedName.toLocaleLowerCase("sk");
     if (!tripMap.has(key)) {
-      tripMap.set(key, { name: normalizedName, quantityParts: [] });
+      tripMap.set(key, {
+        name: normalizedName,
+        quantityParts: [],
+        estimatedPriceTotal: null,
+      });
     }
 
+    const bucket = tripMap.get(key)!;
+
     if (normalizedQuantity) {
-      tripMap.get(key)!.quantityParts.push(normalizedQuantity);
+      bucket.quantityParts.push(normalizedQuantity);
+    }
+
+    const sourcePrice = takeSourcePrice(normalizedName);
+    if (typeof sourcePrice === "number" && Number.isFinite(sourcePrice) && sourcePrice >= 0) {
+      bucket.estimatedPriceTotal = (bucket.estimatedPriceTotal ?? 0) + sourcePrice;
     }
   }
 
@@ -380,14 +417,25 @@ function rebuildShoppingFromRecipes(plan: PlanJSON): PlanJSON {
   }
 
   next.shopping = ranges.map((range) => {
-    const tripMap = buckets.get(range.trip) ?? new Map<string, { name: string; quantityParts: string[] }>();
+    const tripMap =
+      buckets.get(range.trip) ??
+      new Map<string, { name: string; quantityParts: string[]; estimatedPriceTotal: number | null }>();
 
     const items = Array.from(tripMap.values())
       .map((item) => ({
         name: item.name,
         quantity: mergeQuantities(item.quantityParts),
+        estimated_price_eur:
+          typeof item.estimatedPriceTotal === "number" && Number.isFinite(item.estimatedPriceTotal)
+            ? round2(item.estimatedPriceTotal)
+            : null,
       }))
       .sort((a, b) => a.name.localeCompare(b.name, "sk"));
+
+    const estimatedCost = items.reduce((sum, item) => {
+      const v = item.estimated_price_eur;
+      return typeof v === "number" && Number.isFinite(v) ? sum + v : sum;
+    }, 0);
 
     return {
       trip: range.trip,
@@ -395,7 +443,8 @@ function rebuildShoppingFromRecipes(plan: PlanJSON): PlanJSON {
         range.startDay === range.endDay
           ? `${range.startDay}. deň`
           : `${range.startDay}.–${range.endDay}. deň`,
-      estimated_cost_eur: existingCostByTrip.get(range.trip),
+      estimated_cost_eur:
+        items.length > 0 ? round2(estimatedCost) : existingCostByTrip.get(range.trip),
       items,
     };
   });
