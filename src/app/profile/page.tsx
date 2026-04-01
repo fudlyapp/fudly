@@ -121,6 +121,27 @@ const STYLE_OPTIONS: StyleOption[] = [
   { value: "fit", label: "Fit", emoji: "🏋️", desc: "viac bielkovín, menej cukru" },
 ];
 
+const MONTH_LABELS = [
+  "Január",
+  "Február",
+  "Marec",
+  "Apríl",
+  "Máj",
+  "Jún",
+  "Júl",
+  "August",
+  "September",
+  "Október",
+  "November",
+  "December",
+] as const;
+
+function monthNameSK(mm: string) {
+  const idx = Number(mm) - 1;
+  if (!Number.isFinite(idx) || idx < 0 || idx > 11) return mm;
+  return MONTH_LABELS[idx];
+}
+
 function formatDateSK(iso?: string) {
   if (!iso) return "";
   const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -148,7 +169,7 @@ function ymLabel(ym: string) {
   if (!m) return ym;
   const y = m[1];
   const mm = m[2];
-  return `${mm}.${y}`;
+  return `${monthNameSK(mm)} ${y}`;
 }
 
 function round2(n: number) {
@@ -342,10 +363,14 @@ function TabButton({
   );
 }
 
-function WeeklyBudgetActualBarChart({
+function BudgetActualBarChart({
   rows,
+  title,
+  subtitle,
 }: {
   rows: Array<{ label: string; budget: number | null; actual: number | null }>;
+  title: string;
+  subtitle: string;
 }) {
   const maxValue = Math.max(
     1,
@@ -357,8 +382,8 @@ function WeeklyBudgetActualBarChart({
 
   return (
     <div className="rounded-2xl p-4 page-invert-bg border border-gray-200 dark:border-gray-800">
-      <div className="text-sm font-semibold">Týždenný graf: budget vs reálna cena</div>
-      <div className="mt-1 text-xs muted-2">Porovnanie po týždňoch pre zvolený filter.</div>
+      <div className="text-sm font-semibold">{title}</div>
+      <div className="mt-1 text-xs muted-2">{subtitle}</div>
 
       <div className="mt-4">
         <div className="h-72 rounded-xl border border-gray-200 dark:border-gray-800 p-4">
@@ -398,8 +423,7 @@ function WeeklyBudgetActualBarChart({
                   </div>
 
                   <div className="mt-3 text-center">
-                    <div className="text-xs font-semibold">Týždeň {idx + 1}</div>
-                    <div className="text-[11px] muted-2 leading-tight mt-1">{r.label}</div>
+                    <div className="text-[11px] muted-2 leading-tight">{r.label}</div>
                   </div>
                 </div>
               );
@@ -420,6 +444,74 @@ function WeeklyBudgetActualBarChart({
       </div>
     </div>
   );
+}
+
+function buildCategoryRowsFromFinanceItems(items: Array<{ plan: any }>) {
+  const totals = new Map<CategoryKey, number>();
+
+  for (const x of items) {
+    const shopping = x.plan?.shopping;
+    if (!Array.isArray(shopping)) continue;
+
+    for (const trip of shopping as ShoppingTrip[]) {
+      const tripItems = Array.isArray(trip?.items) ? trip.items : [];
+      for (const item of tripItems) {
+        const price = item?.estimated_price_eur;
+        if (typeof price !== "number" || !Number.isFinite(price) || price <= 0) continue;
+        const key = inferCategoryKey(item?.name || "");
+        totals.set(key, round2((totals.get(key) ?? 0) + price));
+      }
+    }
+  }
+
+  const total = Array.from(totals.values()).reduce((a, b) => a + b, 0);
+  if (!total) return [];
+
+  return CATEGORY_ORDER.map((key) => ({
+    key,
+    label: CATEGORY_LABEL[key],
+    amount: Number((totals.get(key) ?? 0).toFixed(2)),
+  }))
+    .filter((x) => x.amount > 0)
+    .sort((a, b) => b.amount - a.amount)
+    .map((x) => ({
+      key: x.key,
+      label: x.label,
+      amount: x.amount,
+      pct: Number(((x.amount / total) * 100).toFixed(1)),
+    }));
+}
+
+function buildTopItemsRowsFromFinanceItems(items: Array<{ plan: any }>) {
+  const totals = new Map<string, { label: string; amount: number }>();
+
+  for (const x of items) {
+    const shopping = x.plan?.shopping;
+    if (!Array.isArray(shopping)) continue;
+
+    for (const trip of shopping as ShoppingTrip[]) {
+      const tripItems = Array.isArray(trip?.items) ? trip.items : [];
+      for (const item of tripItems) {
+        const price = item?.estimated_price_eur;
+        if (typeof price !== "number" || !Number.isFinite(price) || price <= 0) continue;
+
+        const key = normalizeItemName(item.name || "");
+        const existing = totals.get(key);
+        if (existing) {
+          existing.amount = round2(existing.amount + price);
+        } else {
+          totals.set(key, {
+            label: item.name || key,
+            amount: round2(price),
+          });
+        }
+      }
+    }
+  }
+
+  return Array.from(totals.values())
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, 5);
 }
 
 function CategoryDonutChart({
@@ -540,77 +632,102 @@ function FinanceMonthSummary({
     }));
   }, [items]);
 
-  const categoryRows = useMemo(() => {
-    const totals = new Map<CategoryKey, number>();
-
-    for (const x of items) {
-      const shopping = x.plan?.shopping;
-      if (!Array.isArray(shopping)) continue;
-
-      for (const trip of shopping as ShoppingTrip[]) {
-        const tripItems = Array.isArray(trip?.items) ? trip.items : [];
-        for (const item of tripItems) {
-          const price = item?.estimated_price_eur;
-          if (typeof price !== "number" || !Number.isFinite(price) || price <= 0) continue;
-          const key = inferCategoryKey(item?.name || "");
-          totals.set(key, round2((totals.get(key) ?? 0) + price));
-        }
-      }
-    }
-
-    const total = Array.from(totals.values()).reduce((a, b) => a + b, 0);
-    if (!total) return [];
-
-    return CATEGORY_ORDER.map((key) => ({
-      key,
-      label: CATEGORY_LABEL[key],
-      amount: Number((totals.get(key) ?? 0).toFixed(2)),
-    }))
-      .filter((x) => x.amount > 0)
-      .sort((a, b) => b.amount - a.amount)
-      .map((x) => ({
-        key: x.key,
-        label: x.label,
-        amount: x.amount,
-        pct: Number(((x.amount / total) * 100).toFixed(1)),
-      }));
-  }, [items]);
-
-  const topItemsRows = useMemo(() => {
-    const totals = new Map<string, { label: string; amount: number }>();
-
-    for (const x of items) {
-      const shopping = x.plan?.shopping;
-      if (!Array.isArray(shopping)) continue;
-
-      for (const trip of shopping as ShoppingTrip[]) {
-        const tripItems = Array.isArray(trip?.items) ? trip.items : [];
-        for (const item of tripItems) {
-          const price = item?.estimated_price_eur;
-          if (typeof price !== "number" || !Number.isFinite(price) || price <= 0) continue;
-
-          const key = normalizeItemName(item.name || "");
-          const existing = totals.get(key);
-          if (existing) {
-            existing.amount = round2(existing.amount + price);
-          } else {
-            totals.set(key, {
-              label: item.name || key,
-              amount: round2(price),
-            });
-          }
-        }
-      }
-    }
-
-    return Array.from(totals.values())
-      .sort((a, b) => b.amount - a.amount)
-      .slice(0, 5);
-  }, [items]);
+  const categoryRows = useMemo(() => buildCategoryRowsFromFinanceItems(items), [items]);
+  const topItemsRows = useMemo(() => buildTopItemsRowsFromFinanceItems(items), [items]);
 
   return (
     <div className="space-y-4">
-      <WeeklyBudgetActualBarChart rows={weeklyRows} />
+      <BudgetActualBarChart
+        rows={weeklyRows}
+        title="Mesačný graf: budget vs reálna cena"
+        subtitle="Porovnanie po týždňoch v zvolenom mesiaci."
+      />
+
+      {isPlus ? (
+        <>
+          {categoryRows.length ? (
+            <CategoryDonutChart rows={categoryRows} />
+          ) : (
+            <div className="rounded-2xl p-4 page-invert-bg border border-gray-200 dark:border-gray-800">
+              <div className="text-sm font-semibold">Odhad výdavkov podľa kategórií</div>
+              <div className="mt-1 text-sm muted">Pre tento filter zatiaľ nie sú dostupné ceny položiek.</div>
+            </div>
+          )}
+
+          {topItemsRows.length ? (
+            <TopItemsBarChart rows={topItemsRows} />
+          ) : (
+            <div className="rounded-2xl p-4 page-invert-bg border border-gray-200 dark:border-gray-800">
+              <div className="text-sm font-semibold">TOP 5 najdrahších položiek</div>
+              <div className="mt-1 text-sm muted">Pre tento filter zatiaľ nie sú dostupné ceny položiek.</div>
+            </div>
+          )}
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function FinanceYearSummary({
+  items,
+  isPlus,
+  yearLabel,
+}: {
+  items: Array<{
+    r: MealPlanRow;
+    plan: any;
+    bud: number | null | undefined;
+    est: number | null | undefined;
+    act: number | null;
+    missing: number;
+    totalTrips: number;
+    has: boolean;
+  }>;
+  isPlus: boolean;
+  yearLabel: string;
+}) {
+  const monthRows = useMemo(() => {
+    const byMonth = new Map<
+      string,
+      { budget: number; actual: number; hasBudget: boolean; hasActual: boolean }
+    >();
+
+    for (const item of items) {
+      const mm = item.r.week_start.slice(5, 7);
+      if (!byMonth.has(mm)) {
+        byMonth.set(mm, { budget: 0, actual: 0, hasBudget: false, hasActual: false });
+      }
+      const bucket = byMonth.get(mm)!;
+
+      if (typeof item.bud === "number" && Number.isFinite(item.bud)) {
+        bucket.budget += item.bud;
+        bucket.hasBudget = true;
+      }
+      if (typeof item.act === "number" && Number.isFinite(item.act)) {
+        bucket.actual += item.act;
+        bucket.hasActual = true;
+      }
+    }
+
+    return Array.from(byMonth.entries())
+      .sort((a, b) => Number(a[0]) - Number(b[0]))
+      .map(([mm, v]) => ({
+        label: monthNameSK(mm),
+        budget: v.hasBudget ? round2(v.budget) : null,
+        actual: v.hasActual ? round2(v.actual) : null,
+      }));
+  }, [items]);
+
+  const categoryRows = useMemo(() => buildCategoryRowsFromFinanceItems(items), [items]);
+  const topItemsRows = useMemo(() => buildTopItemsRowsFromFinanceItems(items), [items]);
+
+  return (
+    <div className="space-y-4">
+      <BudgetActualBarChart
+        rows={monthRows}
+        title={`Ročný graf: budget vs reálna cena (${yearLabel})`}
+        subtitle="Porovnanie po mesiacoch v zvolenom roku."
+      />
 
       {isPlus ? (
         <>
@@ -641,6 +758,8 @@ export default function ProfilePage() {
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
   const { t } = useT();
 
+  const currentYear = String(new Date().getFullYear());
+
   const [authLoading, setAuthLoading] = useState(true);
   const [email, setEmail] = useState<string | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
@@ -665,7 +784,7 @@ export default function ProfilePage() {
   const [have, setHave] = useState("");
   const [favorites, setFavorites] = useState("");
 
-  const [yearFilter, setYearFilter] = useState<string>("all");
+  const [yearFilter, setYearFilter] = useState<string>(currentYear);
   const [monthFilter, setMonthFilter] = useState<string>("all");
 
   const [entLoading, setEntLoading] = useState(false);
@@ -807,12 +926,13 @@ export default function ProfilePage() {
 
   const years = useMemo(() => {
     const set = new Set<string>();
+    set.add(currentYear);
     for (const r of rows) {
       const m = r.week_start.match(/^(\d{4})-/);
       if (m) set.add(m[1]);
     }
     return Array.from(set).sort((a, b) => Number(b) - Number(a));
-  }, [rows]);
+  }, [rows, currentYear]);
 
   const filteredRows = useMemo(() => {
     return rows.filter((r) => {
@@ -918,6 +1038,11 @@ export default function ProfilePage() {
     const keys = Array.from(map.keys()).sort((a, b) => (a < b ? 1 : -1));
     return keys.map((k) => ({ ym: k, items: map.get(k)! }));
   }, [rows, yearFilter, monthFilter]);
+
+  const financeFlatItems = useMemo(
+    () => financeWeeksFiltered.flatMap((g) => g.items),
+    [financeWeeksFiltered]
+  );
 
   async function saveDefaults() {
     setPrefMsg("");
@@ -1057,7 +1182,7 @@ export default function ProfilePage() {
                     const mm = String(i + 1).padStart(2, "0");
                     return (
                       <option key={mm} value={mm}>
-                        {mm}
+                        {monthNameSK(mm)}
                       </option>
                     );
                   })}
@@ -1382,11 +1507,17 @@ export default function ProfilePage() {
                 ) : null}
 
                 <div className="mt-4 space-y-6">
+                  {yearFilter !== "all" && monthFilter === "all" && financeFlatItems.length > 0 ? (
+                    <FinanceYearSummary items={financeFlatItems} isPlus={!!isPlus} yearLabel={yearFilter} />
+                  ) : null}
+
                   {financeWeeksFiltered.map((g) => (
                     <div key={g.ym}>
                       <div className="text-sm muted-2 mb-3">{g.ym === "Neznámy" ? "Neznámy dátum" : `Mesiac: ${ymLabel(g.ym)}`}</div>
 
-                      <FinanceMonthSummary items={g.items} isPlus={!!isPlus} />
+                      {monthFilter !== "all" ? (
+                        <FinanceMonthSummary items={g.items} isPlus={!!isPlus} />
+                      ) : null}
 
                       <div className="mt-4 grid grid-cols-1 gap-4">
                         {g.items.map(({ r, bud, est, act, missing, totalTrips }) => {
