@@ -228,56 +228,48 @@ function getPromptVariantsForStyle(style: string): string[] {
         "Aj pri lacných surovinách obmieňaj hlavné prílohy, spôsob použitia zeleniny a typ jedál počas týždňa.",
         "Zachovaj nízku cenu, ale nech dni nepôsobia ako len malé obmeny toho istého jedla.",
       ];
-
     case "rychle":
       return [
         "Zachovaj rýchlosť, ale striedaj typy jedál a techniky prípravy, aby susedné dni nepôsobili príliš podobne.",
         "Aj pri rýchlych jedlách obmieňaj prílohy, chute a hlavné kombinácie surovín.",
         "Uprednostni rýchle jedlá, ale dbaj na miernu pestrosť medzi dňami a vyhni sa príliš podobným rýchlym kombináciám.",
       ];
-
     case "vyvazene":
       return [
         "V rámci vyváženého štýlu striedaj zdroje bielkovín, zeleninu a hlavné prílohy počas týždňa.",
         "Dbaj na to, aby dni pôsobili pestrejšie a neopakovali sa stále tie isté kombinácie bielkovina + príloha.",
         "Zachovaj vyváženosť, ale obmieňaj chuťové profily, zeleninu aj hlavné bázy jedál.",
       ];
-
     case "vegetarianske":
       return [
         "Pri vegetariánskom štýle striedaj typy jedál, aby sa neopakovali stále rovnaké kombinácie syra, vajec a zeleniny.",
         "Použi rôzne vegetariánske základy a obmieňaj prílohy, strukoviny, syry a zeleninu.",
         "Zachovaj vegetariánsky štýl, ale dbaj na pestrosť chutí, textúr a hlavných surovín počas týždňa.",
       ];
-
     case "veganske":
       return [
         "Pri vegánskom štýle striedaj rastlinné bielkoviny, prílohy a zeleninu, aby týždeň nepôsobil monotónne.",
         "Zachovaj vegánsky štýl, ale obmieňaj hlavné bázy jedál a chuťové profily počas týždňa.",
         "Použi pestrejšie kombinácie strukovín, obilnín, zeleniny a príloh pri zachovaní praktickosti.",
       ];
-
     case "tradicne":
       return [
         "Zachovaj tradičný charakter, ale nevyberaj príliš podobné tradičné jedlá po sebe.",
         "Pri tradičnom štýle obmieňaj typy príloh, druhy mäsa a spôsob prípravy jedál počas týždňa.",
         "Aj pri tradičných jedlách dbaj na miernu pestrosť, aby dni nepôsobili príliš jednotvárne.",
       ];
-
     case "exoticke":
       return [
         "Zachovaj exotický štýl, ale striedaj chuťové profily a nenechaj týždeň stáť len na jednom type cuisine.",
         "Pri exotickom štýle obmieňaj techniky prípravy, hlavné prílohy aj koreniny počas týždňa.",
         "Dbaj na pestrosť exotických inšpirácií, ale stále používaj praktické a bežne dostupné suroviny.",
       ];
-
     case "fit":
       return [
         "Zachovaj fit štýl, ale striedaj zdroje bielkovín, prílohy a typy zeleniny počas týždňa.",
         "Pri fit štýle dbaj na pestrosť jedál, aby sa neopakovali stále rovnaké kombinácie kura + ryža + zelenina.",
         "Zachovaj vyšší obsah bielkovín a ľahší charakter, ale obmieňaj chute, formu jedál a prílohy.",
       ];
-
     default:
       return [
         "Dbaj na miernu pestrosť medzi dňami a neopakuj stále ten istý typ jedál alebo príloh.",
@@ -348,6 +340,40 @@ function sumShoppingEstimates(plan: any) {
 
   plan.summary = plan.summary ?? {};
   plan.summary.estimated_total_cost_eur = Number(total.toFixed(2));
+  return plan;
+}
+
+function normalizeShoppingCoversDays(plan: any, shoppingTrips: number) {
+  if (!Array.isArray(plan?.shopping)) return plan;
+
+  const trips = plan.shopping;
+
+  if (shoppingTrips === 1 && trips[0]) {
+    trips[0].covers_days = "1-7";
+    return plan;
+  }
+
+  if (shoppingTrips === 2) {
+    if (trips[0]) trips[0].covers_days = "1-3";
+    if (trips[1]) trips[1].covers_days = "4-7";
+    return plan;
+  }
+
+  if (shoppingTrips === 3) {
+    if (trips[0]) trips[0].covers_days = "1-2";
+    if (trips[1]) trips[1].covers_days = "3-4";
+    if (trips[2]) trips[2].covers_days = "5-7";
+    return plan;
+  }
+
+  if (shoppingTrips === 4) {
+    if (trips[0]) trips[0].covers_days = "1-2";
+    if (trips[1]) trips[1].covers_days = "3-4";
+    if (trips[2]) trips[2].covers_days = "5-6";
+    if (trips[3]) trips[3].covers_days = "7-7";
+    return plan;
+  }
+
   return plan;
 }
 
@@ -517,6 +543,12 @@ Rules:
 - Reuse ingredients across days when practical.
 - Split shopping into exactly ${shoppingTrips} trips.
 - Provide realistic quantities.
+- Every shopping trip must contain ONLY ingredients needed for the days covered by that trip.
+- If an ingredient is needed both in early days and in later days, split it between both trips instead of putting everything into the first trip.
+- For 2 trips per week, trip 1 must cover days 1-3 and trip 2 must cover days 4-7.
+- For 3 trips per week, use practical split 1-2, 3-4, 5-7.
+- For 4 trips per week, use practical split 1-2, 3-4, 5-6, 7.
+- Do not place ingredients for day 4-7 into trip 1 when there are 2 trips.
 ${caloriesBlock}
 
 SHOPPING:
@@ -525,6 +557,9 @@ SHOPPING:
 - trip.estimated_cost_eur must equal the sum of estimated_price_eur for all items in that trip.
 - summary.estimated_total_cost_eur must equal the sum of all trip.estimated_cost_eur values.
 - Item prices should be realistic retail estimates in EUR for the quantity listed.
+- Keep item naming consistent inside the same shopping list. Do not create duplicate item names that differ only by singular/plural, capitalization, or minor wording changes.
+- Prefer one consistent naming form, for example use either "jablká" or "jablko", not both.
+- Prefer one consistent naming form, for example use either "banány" or "banán", not both.
 
 RECIPES:
 - Generate a recipe for EVERY meal: breakfast, lunch and dinner.
@@ -622,6 +657,8 @@ Counts:
     parsed.summary.shopping_trips_per_week = coerceNumber(parsed.summary.shopping_trips_per_week, shoppingTrips);
     parsed.summary.repeat_days_max = coerceNumber(parsed.summary.repeat_days_max, repeatDays);
     parsed.summary = ensurePerPersonCalories(parsed.summary);
+
+    normalizeShoppingCoversDays(parsed, shoppingTrips);
     sumShoppingEstimates(parsed);
 
     const { error: upErr } = await supabase.from("generation_usage").upsert(

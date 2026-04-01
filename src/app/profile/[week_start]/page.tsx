@@ -1,3 +1,4 @@
+//src/app/profile/[week_start]/page.tsx
 "use client";
 
 import Link from "next/link";

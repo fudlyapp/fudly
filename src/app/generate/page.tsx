@@ -1,3 +1,4 @@
+//src/app/generate/page.tsx
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -87,10 +88,6 @@ function pad2(n: number) {
   return String(n).padStart(2, "0");
 }
 
-function round2(n: number) {
-  return Math.round(n * 100) / 100;
-}
-
 function toISODate(d: Date) {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
@@ -173,304 +170,6 @@ function normalizeRecipeKey(key: string) {
   return k;
 }
 
-function normalizeIngredientName(name: string) {
-  return (name || "")
-    .trim()
-    .replace(/\s+/g, " ")
-    .replace(/\s+,/g, ",")
-    .replace(/\s+\//g, "/")
-    .replace(/^\-\s*/, "")
-    .trim();
-}
-
-function normalizeQuantityString(quantity: string) {
-  return (quantity || "").trim().replace(/\s+/g, " ");
-}
-
-function parseQuantityLoose(raw: string): { value: number; unit: string } | null {
-  if (!raw) return null;
-
-  const s = raw
-    .trim()
-    .toLowerCase()
-    .replace(",", ".")
-    .replace(/\s+/g, " ");
-
-  const fractionMatch = s.match(/^(\d+)\s*\/\s*(\d+)\s*([^\d].*)?$/);
-  if (fractionMatch) {
-    const num = Number(fractionMatch[1]);
-    const den = Number(fractionMatch[2]);
-    if (Number.isFinite(num) && Number.isFinite(den) && den !== 0) {
-      return { value: num / den, unit: (fractionMatch[3] ?? "").trim() };
-    }
-  }
-
-  const mixedMatch = s.match(/^(\d+)\s+(\d+)\s*\/\s*(\d+)\s*([^\d].*)?$/);
-  if (mixedMatch) {
-    const whole = Number(mixedMatch[1]);
-    const num = Number(mixedMatch[2]);
-    const den = Number(mixedMatch[3]);
-    if (Number.isFinite(whole) && Number.isFinite(num) && Number.isFinite(den) && den !== 0) {
-      return { value: whole + num / den, unit: (mixedMatch[4] ?? "").trim() };
-    }
-  }
-
-  const m = s.match(/^(\d+(?:\.\d+)?)\s*([^\d].*)?$/);
-  if (!m) return null;
-
-  const value = Number(m[1]);
-  if (!Number.isFinite(value)) return null;
-
-  return { value, unit: (m[2] ?? "").trim() };
-}
-
-function formatMergedQuantity(value: number, unit: string) {
-  const rounded =
-    Math.abs(value - Math.round(value)) < 1e-9
-      ? String(Math.round(value))
-      : String(Number(value.toFixed(2))).replace(".", ",");
-
-  return unit ? `${rounded} ${unit}` : rounded;
-}
-
-function mergeQuantities(quantities: string[]) {
-  const clean = quantities.map(normalizeQuantityString).filter(Boolean);
-  if (clean.length === 0) return "";
-
-  const parsed = clean.map(parseQuantityLoose);
-  const allParsed = parsed.every(Boolean);
-
-  if (allParsed) {
-    const units = new Set(parsed.map((p) => (p?.unit ?? "").trim()));
-    if (units.size === 1) {
-      const total = parsed.reduce((sum, p) => sum + (p?.value ?? 0), 0);
-      return formatMergedQuantity(total, parsed[0]?.unit ?? "");
-    }
-  }
-
-  const unique = Array.from(new Set(clean));
-  if (unique.length === 1) return unique[0];
-  return unique.join(" + ");
-}
-
-function buildTripRanges(totalDays: number, tripCount: number) {
-  const safeDays = Math.max(1, totalDays);
-  const safeTrips = Math.max(1, Math.min(tripCount, safeDays));
-
-  if (safeTrips === 2 && safeDays >= 7) {
-    return [
-      { trip: 1, startDay: 1, endDay: 3 },
-      { trip: 2, startDay: 4, endDay: safeDays },
-    ];
-  }
-
-  const base = Math.floor(safeDays / safeTrips);
-  const remainder = safeDays % safeTrips;
-
-  const ranges: Array<{ trip: number; startDay: number; endDay: number }> = [];
-  let start = 1;
-
-  for (let i = 1; i <= safeTrips; i++) {
-    const size = base + (i <= remainder ? 1 : 0);
-    const end = start + size - 1;
-    ranges.push({ trip: i, startDay: start, endDay: end });
-    start = end + 1;
-  }
-
-  return ranges;
-}
-
-function getTripForDay(day: number, ranges: Array<{ trip: number; startDay: number; endDay: number }>) {
-  return ranges.find((r) => day >= r.startDay && day <= r.endDay)?.trip ?? ranges[ranges.length - 1]?.trip ?? 1;
-}
-
-function rebuildShoppingKeepingAllItemFields(plan: PlanJSON): PlanJSON {
-  const next: any = JSON.parse(JSON.stringify(plan ?? {}));
-
-  const days = Array.isArray(next.days) ? next.days.slice(0, 7) : [];
-  const recipes = next.recipes && typeof next.recipes === "object" ? next.recipes : null;
-  const originalShopping = Array.isArray(next.shopping) ? next.shopping : [];
-
-  if (!recipes || days.length === 0 || originalShopping.length === 0) {
-    return next;
-  }
-
-  const ranges = buildTripRanges(days.length, originalShopping.length);
-
-  type SourceItemEntry = {
-    item: any;
-    originalTrip: number;
-  };
-
-  const sourcePool = new Map<string, SourceItemEntry[]>();
-
-  for (const trip of originalShopping) {
-    const tripNo = Number(trip?.trip) || 1;
-    const items = Array.isArray(trip?.items) ? trip.items : [];
-
-    for (const item of items) {
-      const normalizedName = normalizeIngredientName(String(item?.name ?? ""));
-      const key = normalizedName.toLocaleLowerCase("sk");
-      if (!key) continue;
-
-      if (!sourcePool.has(key)) sourcePool.set(key, []);
-      sourcePool.get(key)!.push({
-        item: JSON.parse(JSON.stringify(item)),
-        originalTrip: tripNo,
-      });
-    }
-  }
-
-  const existingCostByTrip = new Map<number, number | undefined>();
-  for (const trip of originalShopping) {
-    existingCostByTrip.set(Number(trip?.trip) || 1, trip?.estimated_cost_eur);
-  }
-
-  const buckets = new Map<
-    number,
-    Map<
-      string,
-      {
-        baseItem: any;
-        quantityParts: string[];
-        estimatedPriceTotal: number | null;
-        name: string;
-      }
-    >
-  >();
-
-  function takeSourceItem(name: string): SourceItemEntry | null {
-    const key = normalizeIngredientName(name).toLocaleLowerCase("sk");
-    const arr = sourcePool.get(key);
-    if (!arr || arr.length === 0) return null;
-    return arr.shift() ?? null;
-  }
-
-  function ensureBucket(trip: number, name: string, sourceItem: any | null, quantity: string) {
-    if (!buckets.has(trip)) buckets.set(trip, new Map());
-    const tripMap = buckets.get(trip)!;
-
-    const key = normalizeIngredientName(name).toLocaleLowerCase("sk");
-    if (!tripMap.has(key)) {
-      tripMap.set(key, {
-        baseItem: sourceItem
-          ? JSON.parse(JSON.stringify(sourceItem))
-          : {
-              name: normalizeIngredientName(name),
-              quantity: normalizeQuantityString(quantity),
-            },
-        quantityParts: [],
-        estimatedPriceTotal: null,
-        name: normalizeIngredientName(name),
-      });
-    }
-
-    return tripMap.get(key)!;
-  }
-
-  function pushIngredientToTrip(trip: number, name: string, quantity: string) {
-    const normalizedName = normalizeIngredientName(name);
-    const normalizedQuantity = normalizeQuantityString(quantity);
-    if (!normalizedName) return;
-
-    const source = takeSourceItem(normalizedName);
-    const bucket = ensureBucket(trip, normalizedName, source?.item ?? null, normalizedQuantity);
-
-    if (normalizedQuantity) {
-      bucket.quantityParts.push(normalizedQuantity);
-    }
-
-    const price = source?.item?.estimated_price_eur;
-    if (typeof price === "number" && Number.isFinite(price) && price >= 0) {
-      bucket.estimatedPriceTotal = (bucket.estimatedPriceTotal ?? 0) + price;
-    }
-  }
-
-  for (const dayRow of days) {
-    const dayNumber = Number(dayRow?.day);
-    if (!Number.isFinite(dayNumber) || dayNumber < 1) continue;
-
-    const trip = getTripForDay(dayNumber, ranges);
-    const mealKeys = [`d${dayNumber}_breakfast`, `d${dayNumber}_lunch`, `d${dayNumber}_dinner`];
-
-    for (const mealKey of mealKeys) {
-      const recipe = recipes[mealKey];
-      if (!recipe || !Array.isArray(recipe.ingredients)) continue;
-
-      for (const ing of recipe.ingredients) {
-        pushIngredientToTrip(trip, String(ing?.name ?? ""), String(ing?.quantity ?? ""));
-      }
-    }
-  }
-
-  for (const leftovers of Array.from(sourcePool.values())) {
-    for (const left of leftovers) {
-      const trip = left.originalTrip;
-      const item = left.item ?? {};
-      const normalizedName = normalizeIngredientName(String(item?.name ?? ""));
-      const normalizedQuantity = normalizeQuantityString(String(item?.quantity ?? ""));
-      if (!normalizedName) continue;
-
-      const bucket = ensureBucket(trip, normalizedName, item, normalizedQuantity);
-
-      if (normalizedQuantity) {
-        bucket.quantityParts.push(normalizedQuantity);
-      }
-
-      const price = item?.estimated_price_eur;
-      if (typeof price === "number" && Number.isFinite(price) && price >= 0) {
-        bucket.estimatedPriceTotal = (bucket.estimatedPriceTotal ?? 0) + price;
-      }
-    }
-  }
-
-  next.shopping = ranges.map((range) => {
-    const tripMap =
-      buckets.get(range.trip) ??
-      new Map<
-        string,
-        {
-          baseItem: any;
-          quantityParts: string[];
-          estimatedPriceTotal: number | null;
-          name: string;
-        }
-      >();
-
-    const items = Array.from(tripMap.values())
-      .map((bucket) => {
-        const item = JSON.parse(JSON.stringify(bucket.baseItem ?? {}));
-
-        item.name = bucket.name;
-        item.quantity = mergeQuantities(bucket.quantityParts);
-
-        if (typeof bucket.estimatedPriceTotal === "number" && Number.isFinite(bucket.estimatedPriceTotal)) {
-          item.estimated_price_eur = round2(bucket.estimatedPriceTotal);
-        }
-
-        return item;
-      })
-      .sort((a, b) => String(a?.name ?? "").localeCompare(String(b?.name ?? ""), "sk"));
-
-    const estimatedCost = items.reduce((sum, item) => {
-      const v = item?.estimated_price_eur;
-      return typeof v === "number" && Number.isFinite(v) && v >= 0 ? sum + v : sum;
-    }, 0);
-
-    return {
-      trip: range.trip,
-      covers_days: `${range.startDay}-${range.endDay}`,
-      estimated_cost_eur:
-        items.some((item) => typeof item?.estimated_price_eur === "number")
-          ? round2(estimatedCost)
-          : existingCostByTrip.get(range.trip),
-      items,
-    };
-  });
-
-  return next as PlanJSON;
-}
-
 function normalizePlan(plan: PlanJSON): PlanJSON {
   if (!plan) return plan;
   const next: PlanJSON = JSON.parse(JSON.stringify(plan));
@@ -484,8 +183,7 @@ function normalizePlan(plan: PlanJSON): PlanJSON {
   }
 
   if (Array.isArray(next.days)) next.days = next.days.slice(0, 7);
-
-  return rebuildShoppingKeepingAllItemFields(next);
+  return next;
 }
 
 function expectedRecipeKeys() {
@@ -778,22 +476,22 @@ export default function GeneratorPage() {
   }, [supabase, session, weekStart]);
 
   const usedGenerations = useMemo(() => {
-    const entUsed = typeof ent?.used === "number" && Number.isFinite(ent.used) ? ent.used : 0;
-    const rowUsed =
-      typeof existingRow?.generation_count === "number" && Number.isFinite(existingRow.generation_count)
-        ? existingRow.generation_count
-        : 0;
+  const entUsed = typeof ent?.used === "number" && Number.isFinite(ent.used) ? ent.used : 0;
+  const rowUsed =
+    typeof existingRow?.generation_count === "number" && Number.isFinite(existingRow.generation_count)
+      ? existingRow.generation_count
+      : 0;
 
-    return Math.max(entUsed, rowUsed);
-  }, [existingRow, ent]);
+  return Math.max(entUsed, rowUsed);
+}, [existingRow, ent]);
 
-  const remainingGenerations = useMemo(() => {
-    if (typeof ent?.remaining === "number" && Number.isFinite(ent.remaining)) {
-      return Math.min(ent.remaining, Math.max(0, generationLimitSafe - usedGenerations));
-    }
+const remainingGenerations = useMemo(() => {
+  if (typeof ent?.remaining === "number" && Number.isFinite(ent.remaining)) {
+    return Math.min(ent.remaining, Math.max(0, generationLimitSafe - usedGenerations));
+  }
 
-    return Math.max(0, generationLimitSafe - usedGenerations);
-  }, [generationLimitSafe, usedGenerations, ent]);
+  return Math.max(0, generationLimitSafe - usedGenerations);
+}, [generationLimitSafe, usedGenerations, ent]);
 
   const allowedStyles = useMemo(() => {
     if (Array.isArray(ent?.allowed_styles) && ent.allowed_styles.length > 0) {
