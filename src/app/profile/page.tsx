@@ -380,10 +380,80 @@ function BudgetActualBarChart({
     ])
   );
 
+  const totals = useMemo(() => {
+    let budget = 0;
+    let actual = 0;
+    let hasBudget = false;
+    let hasActual = false;
+
+    for (const r of rows) {
+      if (typeof r.budget === "number" && Number.isFinite(r.budget)) {
+        budget += r.budget;
+        hasBudget = true;
+      }
+      if (typeof r.actual === "number" && Number.isFinite(r.actual)) {
+        actual += r.actual;
+        hasActual = true;
+      }
+    }
+
+    const budgetVal = hasBudget ? round2(budget) : null;
+    const actualVal = hasActual ? round2(actual) : null;
+    const diffVal =
+      budgetVal != null && actualVal != null ? round2(actualVal - budgetVal) : null;
+
+    return { budgetVal, actualVal, diffVal };
+  }, [rows]);
+
   return (
     <div className="rounded-2xl p-4 page-invert-bg border border-gray-200 dark:border-gray-800">
       <div className="text-sm font-semibold">{title}</div>
       <div className="mt-1 text-xs muted-2">{subtitle}</div>
+
+      <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="rounded-2xl border border-gray-200 dark:border-gray-800 p-4">
+          <div className="text-xs muted-2">Budget spolu</div>
+          <div className="mt-1 text-2xl font-bold">
+            {totals.budgetVal != null ? `${totals.budgetVal.toFixed(2)} €` : "—"}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-gray-200 dark:border-gray-800 p-4">
+          <div className="text-xs muted-2">Reálna cena spolu</div>
+          <div
+            className={[
+              "mt-1 text-2xl font-bold",
+              totals.actualVal != null && totals.budgetVal != null
+                ? totals.actualVal > totals.budgetVal
+                  ? "text-red-500"
+                  : "text-green-600 dark:text-green-400"
+                : "",
+            ].join(" ")}
+          >
+            {totals.actualVal != null ? `${totals.actualVal.toFixed(2)} €` : "—"}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-gray-200 dark:border-gray-800 p-4">
+          <div className="text-xs muted-2">Rozdiel</div>
+          <div
+            className={[
+              "mt-1 text-2xl font-bold",
+              totals.diffVal != null
+                ? totals.diffVal > 0
+                  ? "text-red-500"
+                  : totals.diffVal < 0
+                  ? "text-green-600 dark:text-green-400"
+                  : ""
+                : "",
+            ].join(" ")}
+          >
+            {totals.diffVal != null
+              ? `${totals.diffVal > 0 ? "+" : ""}${totals.diffVal.toFixed(2)} €`
+              : "—"}
+          </div>
+        </div>
+      </div>
 
       <div className="mt-4">
         <div className="h-72 rounded-xl border border-gray-200 dark:border-gray-800 p-4">
@@ -391,6 +461,13 @@ function BudgetActualBarChart({
             {rows.map((r, idx) => {
               const budgetHeight = typeof r.budget === "number" ? Math.max(8, (r.budget / maxValue) * 100) : 0;
               const actualHeight = typeof r.actual === "number" ? Math.max(8, (r.actual / maxValue) * 100) : 0;
+
+              const actualIsOver =
+                typeof r.actual === "number" &&
+                typeof r.budget === "number" &&
+                Number.isFinite(r.actual) &&
+                Number.isFinite(r.budget) &&
+                r.actual > r.budget;
 
               return (
                 <div key={idx} className="min-w-[140px] h-full flex flex-col justify-end">
@@ -408,7 +485,7 @@ function BudgetActualBarChart({
                       <div className="text-[11px] muted-2 mb-2">{moneyFmt(r.actual)}</div>
                       {typeof r.actual === "number" ? (
                         <div
-                          className="w-10 rounded-t-md bg-emerald-500"
+                          className={`w-10 rounded-t-md ${actualIsOver ? "bg-red-500" : "bg-emerald-500"}`}
                           style={{ height: `${actualHeight}%` }}
                           title={`Reálna cena: ${moneyFmt(r.actual)}`}
                         />
@@ -438,7 +515,11 @@ function BudgetActualBarChart({
           </div>
           <div className="flex items-center gap-2">
             <span className="inline-block h-3 w-3 rounded-sm bg-emerald-500" />
-            <span>Reálna cena</span>
+            <span>Reálna cena v limite</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="inline-block h-3 w-3 rounded-sm bg-red-500" />
+            <span>Reálna cena nad budget</span>
           </div>
         </div>
       </div>
@@ -516,8 +597,10 @@ function buildTopItemsRowsFromFinanceItems(items: Array<{ plan: any }>) {
 
 function CategoryDonutChart({
   rows,
+  isPlus,
 }: {
   rows: Array<{ key: CategoryKey; label: string; amount: number; pct: number }>;
+  isPlus: boolean;
 }) {
   const gradient = useMemo(() => {
     let start = 0;
@@ -533,8 +616,19 @@ function CategoryDonutChart({
 
   return (
     <div className="rounded-2xl p-4 page-invert-bg border border-gray-200 dark:border-gray-800">
-      <div className="text-sm font-semibold">Odhad výdavkov podľa kategórií</div>
-      <div className="mt-1 text-xs muted-2">Rozdelenie podľa cien jednotlivých položiek.</div>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold">Odhad výdavkov podľa kategórií</div>
+          <div className="mt-1 text-xs muted-2">
+            Rozdelenie podľa cien jednotlivých položiek.
+          </div>
+        </div>
+        {!isPlus ? (
+          <div className="text-xs font-semibold rounded-full border border-gray-300 dark:border-gray-700 px-3 py-1">
+            PLUS
+          </div>
+        ) : null}
+      </div>
 
       <div className="mt-4 grid grid-cols-1 md:grid-cols-[220px_1fr] gap-6 items-center">
         <div className="flex items-center justify-center">
@@ -546,44 +640,67 @@ function CategoryDonutChart({
             <div className="absolute inset-[22%] rounded-full bg-white dark:bg-black border border-gray-200 dark:border-gray-800 flex items-center justify-center text-center p-2">
               <div>
                 <div className="text-xs muted-2">Kategórie</div>
-                <div className="text-sm font-semibold">{rows.length}</div>
+                <div className="text-sm font-semibold">{isPlus ? rows.length : "PLUS"}</div>
               </div>
             </div>
           </div>
         </div>
 
         <div className="space-y-2">
-          {rows.map((r) => (
+          {rows.map((r, idx) => (
             <div key={r.key} className="flex items-center justify-between gap-3 text-sm">
               <div className="flex items-center gap-2 min-w-0">
                 <span
                   className="inline-block h-3 w-3 rounded-sm shrink-0"
                   style={{ backgroundColor: CATEGORY_COLORS[r.key] }}
                 />
-                <span className="truncate">{r.label}</span>
+                <span className="truncate">{isPlus ? r.label : `Kategória ${idx + 1}`}</span>
               </div>
               <div className="shrink-0 muted-2">
-                {r.pct.toFixed(1)} % • <span className="font-semibold">{r.amount.toFixed(2)} €</span>
+                {isPlus ? (
+                  <>
+                    {r.pct.toFixed(1)} % • <span className="font-semibold">{r.amount.toFixed(2)} €</span>
+                  </>
+                ) : (
+                  <span className="font-semibold">•••</span>
+                )}
               </div>
             </div>
           ))}
         </div>
       </div>
+
+      {!isPlus ? (
+        <div className="mt-4 text-xs muted-2">
+          V BASIC vidíš iba preview. Konkrétne názvy kategórií, percentá a hodnoty sú dostupné v PLUS.
+        </div>
+      ) : null}
     </div>
   );
 }
 
 function TopItemsBarChart({
   rows,
+  isPlus,
 }: {
   rows: Array<{ label: string; amount: number }>;
+  isPlus: boolean;
 }) {
   const maxValue = Math.max(1, ...rows.map((r) => r.amount));
 
   return (
     <div className="rounded-2xl p-4 page-invert-bg border border-gray-200 dark:border-gray-800">
-      <div className="text-sm font-semibold">TOP 5 najdrahších položiek</div>
-      <div className="mt-1 text-xs muted-2">Podľa odhadovanej ceny položiek v nákupoch.</div>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold">TOP 5 najdrahších položiek</div>
+          <div className="mt-1 text-xs muted-2">Podľa odhadovanej ceny položiek v nákupoch.</div>
+        </div>
+        {!isPlus ? (
+          <div className="text-xs font-semibold rounded-full border border-gray-300 dark:border-gray-700 px-3 py-1">
+            PLUS
+          </div>
+        ) : null}
+      </div>
 
       <div className="mt-4 space-y-4">
         {rows.map((r, i) => {
@@ -591,8 +708,8 @@ function TopItemsBarChart({
           return (
             <div key={i}>
               <div className="mb-1 flex items-center justify-between gap-3 text-sm">
-                <span className="font-semibold truncate">{r.label}</span>
-                <span className="shrink-0">{r.amount.toFixed(2)} €</span>
+                <span className="font-semibold truncate">{isPlus ? r.label : `Položka ${i + 1}`}</span>
+                <span className="shrink-0">{isPlus ? `${r.amount.toFixed(2)} €` : "•••"}</span>
               </div>
               <div className="h-4 rounded-full bg-gray-200 dark:bg-zinc-800 overflow-hidden">
                 <div
@@ -604,6 +721,12 @@ function TopItemsBarChart({
           );
         })}
       </div>
+
+      {!isPlus ? (
+        <div className="mt-4 text-xs muted-2">
+          V BASIC vidíš iba preview. Konkrétne názvy položiek a hodnoty sú dostupné v PLUS.
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -643,27 +766,41 @@ function FinanceMonthSummary({
         subtitle="Porovnanie po týždňoch v zvolenom mesiaci."
       />
 
-      {isPlus ? (
-        <>
-          {categoryRows.length ? (
-            <CategoryDonutChart rows={categoryRows} />
-          ) : (
-            <div className="rounded-2xl p-4 page-invert-bg border border-gray-200 dark:border-gray-800">
+      {categoryRows.length ? (
+        <CategoryDonutChart rows={categoryRows} isPlus={isPlus} />
+      ) : (
+        <div className="rounded-2xl p-4 page-invert-bg border border-gray-200 dark:border-gray-800">
+          <div className="flex items-start justify-between gap-3">
+            <div>
               <div className="text-sm font-semibold">Odhad výdavkov podľa kategórií</div>
               <div className="mt-1 text-sm muted">Pre tento filter zatiaľ nie sú dostupné ceny položiek.</div>
             </div>
-          )}
+            {!isPlus ? (
+              <div className="text-xs font-semibold rounded-full border border-gray-300 dark:border-gray-700 px-3 py-1">
+                PLUS
+              </div>
+            ) : null}
+          </div>
+        </div>
+      )}
 
-          {topItemsRows.length ? (
-            <TopItemsBarChart rows={topItemsRows} />
-          ) : (
-            <div className="rounded-2xl p-4 page-invert-bg border border-gray-200 dark:border-gray-800">
+      {topItemsRows.length ? (
+        <TopItemsBarChart rows={topItemsRows} isPlus={isPlus} />
+      ) : (
+        <div className="rounded-2xl p-4 page-invert-bg border border-gray-200 dark:border-gray-800">
+          <div className="flex items-start justify-between gap-3">
+            <div>
               <div className="text-sm font-semibold">TOP 5 najdrahších položiek</div>
               <div className="mt-1 text-sm muted">Pre tento filter zatiaľ nie sú dostupné ceny položiek.</div>
             </div>
-          )}
-        </>
-      ) : null}
+            {!isPlus ? (
+              <div className="text-xs font-semibold rounded-full border border-gray-300 dark:border-gray-700 px-3 py-1">
+                PLUS
+              </div>
+            ) : null}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -729,27 +866,41 @@ function FinanceYearSummary({
         subtitle="Porovnanie po mesiacoch v zvolenom roku."
       />
 
-      {isPlus ? (
-        <>
-          {categoryRows.length ? (
-            <CategoryDonutChart rows={categoryRows} />
-          ) : (
-            <div className="rounded-2xl p-4 page-invert-bg border border-gray-200 dark:border-gray-800">
+      {categoryRows.length ? (
+        <CategoryDonutChart rows={categoryRows} isPlus={isPlus} />
+      ) : (
+        <div className="rounded-2xl p-4 page-invert-bg border border-gray-200 dark:border-gray-800">
+          <div className="flex items-start justify-between gap-3">
+            <div>
               <div className="text-sm font-semibold">Odhad výdavkov podľa kategórií</div>
               <div className="mt-1 text-sm muted">Pre tento filter zatiaľ nie sú dostupné ceny položiek.</div>
             </div>
-          )}
+            {!isPlus ? (
+              <div className="text-xs font-semibold rounded-full border border-gray-300 dark:border-gray-700 px-3 py-1">
+                PLUS
+              </div>
+            ) : null}
+          </div>
+        </div>
+      )}
 
-          {topItemsRows.length ? (
-            <TopItemsBarChart rows={topItemsRows} />
-          ) : (
-            <div className="rounded-2xl p-4 page-invert-bg border border-gray-200 dark:border-gray-800">
+      {topItemsRows.length ? (
+        <TopItemsBarChart rows={topItemsRows} isPlus={isPlus} />
+      ) : (
+        <div className="rounded-2xl p-4 page-invert-bg border border-gray-200 dark:border-gray-800">
+          <div className="flex items-start justify-between gap-3">
+            <div>
               <div className="text-sm font-semibold">TOP 5 najdrahších položiek</div>
               <div className="mt-1 text-sm muted">Pre tento filter zatiaľ nie sú dostupné ceny položiek.</div>
             </div>
-          )}
-        </>
-      ) : null}
+            {!isPlus ? (
+              <div className="text-xs font-semibold rounded-full border border-gray-300 dark:border-gray-700 px-3 py-1">
+                PLUS
+              </div>
+            ) : null}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1496,7 +1647,7 @@ export default function ProfilePage() {
               <section className="rounded-3xl p-6 surface-same-as-nav surface-border">
                 <h2 className="text-xl font-semibold">Financie</h2>
                 <p className="mt-1 text-sm muted">
-                  BASIC: stĺpcový graf budget vs reálna cena. PLUS: Rozdelenie nakúpených položiek podľa kategórie a TOP 5 najdrahších položiek.
+                  BASIC: stĺpcový graf budget vs reálna cena + preview kategórií a TOP 5. PLUS: plné rozdelenie nakúpených položiek podľa kategórie a TOP 5 najdrahších položiek s konkrétnymi hodnotami.
                 </p>
 
                 {loading ? <div className="mt-4 text-sm muted-2">Načítavam…</div> : null}
