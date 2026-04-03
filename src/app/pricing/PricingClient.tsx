@@ -623,12 +623,12 @@ export default function PricingClient() {
             period="mesačne"
             highlighted
             features={[
-              "Celý obsah BASIC +",
-              "+2 generovania týždenne navyše (spolu 5)",
-              "Viac štýlov (Fit / Vegánske / Tradičné / Exotické)",
-              "Prehľad kalórií",
-              "Rozšírený finančný prehľad",
-            ]}
+                "Celý obsah BASIC + navyše:",
+                "2 generovania týždenne navyše (spolu 5)",
+                "Viac štýlov (Fit / Vegánske / Tradičné / Exotické)",
+                "Prehľad kalórií",
+                "Rozšírený finančný prehľad",
+              ]}
             cta={plusCta}
             ctaNote={isNone ? "14 dní zdarma • Zrušíš kedykoľvek" : "Správa prebieha cez Stripe"}
           />

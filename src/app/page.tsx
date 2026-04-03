@@ -1,4 +1,4 @@
-// src/app/page.tsx
+//src/app/page.tsx
 "use client";
 
 import Image from "next/image";
@@ -21,11 +21,24 @@ type Entitlements = {
   has_stripe_link: boolean;
 };
 
-function FeatureCard({ title, desc }: { title: string; desc: string }) {
+function FeatureCard({
+  title,
+  desc,
+  icon,
+}: {
+  title: string;
+  desc: string;
+  icon?: string;
+}) {
   return (
     <div className="rounded-2xl p-5 surface-same-as-nav surface-border transition hover:opacity-[0.98]">
-      <div className="text-base font-semibold">{title}</div>
-      <div className="mt-1 text-sm muted">{desc}</div>
+      <div className="flex items-start gap-3">
+        {icon ? <div className="text-2xl leading-none shrink-0 mt-0.5">{icon}</div> : null}
+        <div>
+          <div className="text-base font-semibold">{title}</div>
+          <div className="mt-1 text-sm muted">{desc}</div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -97,12 +110,7 @@ function PricingCard({
       <div className="mt-6">
         <Link
           href={ctaHref}
-          className={[
-            "block w-full rounded-2xl px-5 py-3 text-center text-sm font-semibold transition",
-            highlighted
-              ? "btn-primary"
-              : "border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-zinc-900",
-          ].join(" ")}
+          className="block w-full rounded-2xl px-5 py-3 text-center text-sm font-semibold transition btn-primary"
         >
           {ctaLabel}
         </Link>
@@ -147,6 +155,14 @@ function AppActionCard({
         </span>
       </div>
     </Link>
+  );
+}
+
+function BenefitPill({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="inline-flex items-center rounded-full border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-semibold surface-same-as-nav">
+      {children}
+    </div>
   );
 }
 
@@ -248,8 +264,6 @@ export default function HomePage() {
   }, [supabase, loggedIn]);
 
   const planLabel = ent?.plan ? ent.plan.toUpperCase() : "ŽIADNY";
-  const remaining = ent?.remaining ?? null;
-  const weeklyLimit = ent?.weekly_limit ?? null;
   const firstName =
     userEmail?.split("@")[0]?.split(".")[0]?.replace(/^./, (s) => s.toUpperCase()) || "vitaj späť";
 
@@ -275,7 +289,7 @@ export default function HomePage() {
             </div>
 
             <div className="flex flex-col items-center text-center">
-              <div className="relative w-44 h-44 md:w-56 md:h-56">
+              <div className="relative w-48 h-48 md:w-64 md:h-64">
                 <Image src="/logo_black.png" alt="Fudly logo" fill className="object-contain dark:hidden" priority />
                 <Image src="/logo_white.png" alt="Fudly logo" fill className="object-contain hidden dark:block" priority />
               </div>
@@ -285,21 +299,13 @@ export default function HomePage() {
                 <span className="block text-[clamp(20px,4.5vw,40px)] muted">pokračuj tam, kde si skončil/a</span>
               </h1>
 
-              <p className="mt-5 max-w-2xl text-base sm:text-lg text-black/70 dark:text-black/70">
+              <p className="mt-5 max-w-2xl text-base sm:text-lg text-black/70 dark:text-gray-300">
                 Generátor, profil aj členstvo máš pripravené. Stačí si vybrať, čo chceš práve otvoriť.
               </p>
 
               <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-                <div className="inline-flex items-center rounded-full border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-semibold surface-same-as-nav">
-                  Aktuálny plán: {planLabel}
-                </div>
-
-                {ent?.status ? (
-                  <div className="inline-flex items-center rounded-full border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-semibold surface-same-as-nav">
-                    Stav: {statusLabel(ent.status)}
-                  </div>
-                ) : null}
-
+                <BenefitPill>Aktuálny plán: {planLabel}</BenefitPill>
+                {ent?.status ? <BenefitPill>Stav: {statusLabel(ent.status)}</BenefitPill> : null}
               </div>
             </div>
           </section>
@@ -328,6 +334,7 @@ export default function HomePage() {
           <section className="pb-14">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <FeatureCard
+                icon="⚡"
                 title="Aktívny generátor"
                 desc={
                   ent?.can_generate
@@ -336,6 +343,7 @@ export default function HomePage() {
                 }
               />
               <FeatureCard
+                icon="🍽️"
                 title="Štýly jedál"
                 desc={
                   ent?.allowed_styles?.length
@@ -344,6 +352,7 @@ export default function HomePage() {
                 }
               />
               <FeatureCard
+                icon="📊"
                 title="Kalórie a financie"
                 desc={
                   ent?.calories_enabled
@@ -353,7 +362,6 @@ export default function HomePage() {
               />
             </div>
           </section>
-
         </div>
       </main>
     );
@@ -363,30 +371,49 @@ export default function HomePage() {
     <main className="min-h-screen overflow-hidden page-invert-bg">
       <div className="mx-auto w-full max-w-6xl px-6">
         {/* HERO */}
-        <section className="pt-20 pb-16 relative">
-          <div className="absolute inset-0 flex justify-center -z-10">
-            <div className="w-[620px] h-[620px] bg-black/10 dark:bg-black/5 blur-[160px] rounded-full" />
+        <section className="pt-20 pb-14 relative isolate">
+          <div className="absolute inset-0 flex justify-center -z-20">
+            <div className="w-[760px] h-[760px] bg-black/10 dark:bg-black/5 blur-[180px] rounded-full" />
           </div>
 
-          <div className="flex flex-col items-center text-center">
-            <div className="relative w-60 h-60 md:w-80 md:h-80">
-              <Image src="/logo_black.png" alt="Fudly logo" fill className="object-contain dark:hidden" priority />
-              <Image src="/logo_white.png" alt="Fudly logo" fill className="object-contain hidden dark:block" priority />
+          <div className="absolute inset-x-0 top-8 md:top-0 flex justify-center pointer-events-none -z-10">
+            <div className="relative w-[360px] h-[360px] md:w-[640px] md:h-[640px] opacity-[0.07] dark:opacity-[0.08]">
+              <Image
+                src="/logo_black.png"
+                alt=""
+                fill
+                className="object-contain dark:hidden"
+                priority
+              />
+              <Image
+                src="/logo_white.png"
+                alt=""
+                fill
+                className="object-contain hidden dark:block"
+                priority
+              />
             </div>
+          </div>
 
-            <h1 className="mt-6 font-bold tracking-tight leading-[1.02] px-3">
-              <span className="block whitespace-nowrap text-[clamp(22px,6vw,56px)]">
-                Inteligentný týždenný jedálniček
+          <div className="flex flex-col items-center text-center relative z-10">
+
+            <h1 className="mt-8 font-bold tracking-tight leading-[0.95] px-3 max-w-5xl">
+              <span className="block text-[clamp(34px,7vw,78px)]">
+                Inteligentný týždenný plán
               </span>
-              <span className="block text-[clamp(20px,5.2vw,48px)] muted">na jedno kliknutie</span>
+              <span className="block mt-2 text-[clamp(28px,5.8vw,60px)] muted">
+                rýchlo a jednoducho
+              </span>
             </h1>
 
-            <p className="mt-6 max-w-2xl text-base sm:text-lg text-black/70 dark:text-black/70">
-              Do 5 minút máš hotový plán na celý týždeň. Jedlá, nákupy, recepty, kalórie aj finančný prehľad.
+            <p className="mt-6 max-w-3xl text-base sm:text-lg md:text-xl text-black/300 dark:text-gray-700">
+              Týždenný jedálniček, nákupný zoznam, recepty, kalórie aj rozpočet na jednom mieste
             </p>
 
-            <div className="mt-8 inline-flex items-center rounded-full border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-semibold surface-same-as-nav">
-              14 dní zdarma • bez záväzkov
+            <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+              <BenefitPill>Hotový do 5 minút</BenefitPill>
+              <BenefitPill>14 dní ZDARMA</BenefitPill>
+              <BenefitPill>Zrušenie kedykoľvek</BenefitPill>
             </div>
 
             <div className="mt-10 flex flex-col sm:flex-row gap-4 w-full sm:w-auto">
@@ -415,22 +442,179 @@ export default function HomePage() {
                 Pozrieť členstvá
               </Link>
             </div>
+          </div>
+        </section>
 
-            <div className="mt-3 text-sm text-black/60 dark:text-black/60">
-              Registrácia trvá pár sekúnd • Zrušíš kedykoľvek
+        {/* VALUE STRIP */}
+        <section className="pb-14">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <FeatureCard
+              icon="🧠"
+              title="Už viac nemusíš rozmýšlať, čo variť"
+              desc="Fudly spraví všetko za teba a ty máš celý týždeň vyriešený dopredu."
+            />
+            <FeatureCard
+              icon="🛒"
+              title="Nakupuješ jednoduchšie a prehľadnejšie"
+              desc="Všetky potrebné suroviny máš prehľadne spísané v nákupnom zozname."
+            />
+            <FeatureCard
+              icon="💸"
+              title="Máš lepší prehľad nad jedlom aj rozpočtom"
+              desc="Vieš, čo budeš jesť, koľko to približne stojí a ako dodržiavaš svoj budget."
+            />
+          </div>
+        </section>
+
+        {/* PREČO FUDLY */}
+        <section className="pb-14">
+          <div className="rounded-3xl p-6 md:p-8 surface-same-as-nav surface-border">
+            <div className="text-center">
+              <div className="text-2xl md:text-3xl font-semibold">Prečo práve Fudly</div>
+            </div>
+
+            <div className="mt-8 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+              <FeatureCard
+                icon="⏱️"
+                title="Šetrí čas"
+                desc="Ušetrených niekoľko hodín týždenne vymýšľaním, plánovaním a nakupovaním jedla"
+              />
+              <FeatureCard
+                icon="🥦"
+                title="Znižuje odpad"
+                desc="Zabudni na zbytočné plytvanie jedlom. Nakupuješ len to, čo naozaj potrebuješ"
+              />
+              <FeatureCard
+                icon="📋"
+                title="Zabezpečuje prehľad"
+                desc="Jedálničky recepty, prehľad kalórií aj nákupné zoznamy spolu s financiami máš na jednom mieste"
+              />
+              <FeatureCard
+                icon="✨"
+                title="Prináša pokoj"
+                desc="Menej stresu okolo jedla každý deň"
+              />
             </div>
           </div>
         </section>
 
-        {/* FEATURES */}
+        {/* HLAVNÉ FUNKCIE */}
         <section className="pb-14">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <FeatureCard title="Jedálničky" desc="Raňajky, obed, večera na celý týždeň optimalizované na čas aj rozpočet." />
-            <FeatureCard title="Nákupné zoznamy" desc="Pripravené nákupy rozdelené počas týždňa." />
-            <FeatureCard title="Recepty" desc="Stručné postupy ku každému jedlu." />
-            <FeatureCard title="Kalórie" desc="Denné aj týždenné kalórie (PLUS)." />
-            <FeatureCard title="Financie" desc="Budget vs odhad vs reálna cena." />
-            <FeatureCard title="Profil" desc="Všetko uložené a vždy dostupné." />
+          <div className="text-2xl font-semibold text-center">Čo všetko za teba Fudly vyrieši</div>
+
+          <div className="mt-8 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            <FeatureCard
+              icon="📅"
+              title="Týždenný jedálniček"
+              desc="Raňajky, obed aj večera na celý týždeň v jednom prehľadnom pláne"
+            />
+            <FeatureCard
+              icon="🛍️"
+              title="Automatický nákupný zoznam"
+              desc="Ingrediencie sa pripravia automaticky, takže nemusíš nič vypisovať ručne"
+            />
+            <FeatureCard
+              icon="👨‍🍳"
+              title="Recepty ku každému jedlu"
+              desc="Stručné a praktické postupy, aby si mohol hneď variť"
+            />
+            <FeatureCard
+              icon="🔥"
+              title="Kalórie"
+              desc="Denné aj týždenné kalórie pre lepší prehľad o stravovaní. (PLUS)"
+            />
+            <FeatureCard
+              icon="📈"
+              title="Finančný prehľad"
+              desc="Sleduj budget, odhad a reálnu cenu na jednom mieste"
+            />
+            <FeatureCard
+              icon="☁️"
+              title="Všetko uložené v profile"
+              desc="Jedálničky, recepty aj nákupné zoznamy sa ti nestratia a máš ich vždy poruke"
+            />
+          </div>
+        </section>
+
+        {/* PRE KOHO */}
+        <section className="pb-16">
+          <div className="rounded-3xl p-6 md:p-8 surface-same-as-nav surface-border">
+            <div className="text-2xl font-semibold text-center">Pre koho je Fudly</div>
+
+            <div className="mt-8 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+              <FeatureCard
+                icon="💼"
+                title="Pre zaneprázdnených"
+                desc="Keď nechceš po práci ešte riešiť, čo budeš každý deň variť"
+              />
+              <FeatureCard
+                icon="💶"
+                title="Pre zodpovedných"
+                desc="Keď potrebuješ mať v jedle poriadok a nakupovať efektívnejšie"
+              />
+              <FeatureCard
+                icon="🎯"
+                title="Pre náročných"
+                desc="Kalórie, štýl stravy aj budget pod väčšou kontrolou"
+              />
+              <FeatureCard
+                icon="🧘"
+                title="Pre pohodových"
+                desc="Maximum pohody. Bez stresu a námahy"
+              />
+            </div>
+          </div>
+        </section>
+
+        {/* ŠTÝLY */}
+        <section className="pb-16">
+          <div className="text-2xl font-semibold text-center">Vyber si štýl, ktorý ti sedí</div>
+
+          <div className="mt-8 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+            <FeatureCard
+              icon="💶"
+              title="Lacné"
+              desc="Keď chceš variť rozumne a úsporne"
+            />
+            <FeatureCard
+              icon="⚡"
+              title="Rýchle"
+              desc="Keď máš minimum času v kuchyni"
+            />
+            <FeatureCard
+              icon="🥗"
+              title="Vyvážené"
+              desc="Univerzálna voľba na bežné fungovanie"
+            />
+            <FeatureCard
+              icon="🥕"
+              title="Vegetariánske"
+              desc="Bez mäsových výrobkov"
+            />
+            <FeatureCard
+              icon="🌿"
+              title="Vegánske (PLUS)"
+              desc="Bez živočíšnych produktov"
+            />
+            <FeatureCard
+              icon="🏋️"
+              title="Fit (PLUS)"
+              desc="Viac bielkovín a menej cukru"
+            />
+            <FeatureCard
+              icon="🍲"
+              title="Tradičné (PLUS)"
+              desc="Klasické chute blízke domácej kuchyni"
+            />
+            <FeatureCard
+              icon="🌍"
+              title="Exotické (PLUS)"
+              desc="Ázia, Mexiko a iné kuchyne sveta"
+            />
+          </div>
+
+          <div className="mt-6 text-center text-sm muted">
+            Každý týždeň môže vyzerať inak — podľa toho, na čo máš chuť!
           </div>
         </section>
 
@@ -438,21 +622,51 @@ export default function HomePage() {
         <section className="pb-16">
           <div className="rounded-3xl p-6 md:p-8 surface-same-as-nav surface-border">
             <div className="text-2xl font-semibold">Ako to funguje</div>
-            <div className="mt-1 text-sm muted">Jednoduché. Rýchle. Bez chaosu.</div>
-
+            
             <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Step n="1" title="Nastav preferencie" desc="Počet ľudí, budget, intolerancie a štýl jedál." />
-              <Step n="2" title="Vygeneruj plán" desc="Jedálniček + nákupy + recepty." />
-              <Step n="3" title="Ulož do profilu" desc="Všetko máš prehľadne uložené." />
+              <Step n="1" title="Nastav základné parametre" desc="Počet osôb, budget, štýl jedál a iné preferencie" />
+              <Step n="2" title="Vygeneruj plán" desc="Jedálniček + recepty + nákupné zoznamy " />
+              <Step n="3" title="Ulož do profilu" desc="Všetko máš prehľadne dostupné v profile" />
             </div>
           </div>
         </section>
 
-        {/* ČLENSTVÁ NA KONCI */}
+        {/* CTA */}
+        <section className="pb-16">
+          <div className="rounded-3xl p-6 md:p-10 surface-same-as-nav surface-border text-center">
+            <div className="text-2xl md:text-3xl font-semibold">Začni s Fudly ešte dnes</div>
+            <div className="mt-3 text-sm md:text-base muted max-w-2xl mx-auto">
+              Otestuj si, aké je to mať jedlo, nákupy aj plánovanie konečne pod kontrolou
+            </div>
+
+            <div className="mt-8 flex flex-col sm:flex-row gap-4 justify-center">
+              <Link
+                href="/login"
+                className="
+                  rounded-2xl px-8 py-4 text-center font-semibold transition
+                  bg-gradient-to-r from-amber-600 to-amber-500
+                  hover:from-amber-500 hover:to-amber-400
+                  text-white
+                  shadow-lg shadow-amber-600/40
+                "
+              >
+                Vyskúšaj na 14 dní zadarmo
+              </Link>
+
+              <Link
+                href="/pricing"
+                className="rounded-2xl px-8 py-4 text-center font-semibold transition border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-zinc-900"
+              >
+                Pozrieť členstvá
+              </Link>
+            </div>
+          </div>
+        </section>
+
+        {/* ČLENSTVÁ */}
         <section className="pb-20">
           <div className="text-2xl font-semibold text-center">Vyber si členstvo</div>
-          <div className="mt-2 text-sm muted text-center">Začni zdarma na 14 dní. Potom si vyber, čo ti sedí.</div>
-
+          
           <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
             <PricingCard
               title="Basic"
@@ -466,6 +680,7 @@ export default function HomePage() {
                 "Jedálniček + nákupný zoznam",
                 "Recepty ku všetkým jedlám",
                 "Uloženie do profilu",
+                "Základný finančný prehľad",
               ]}
             />
 
@@ -479,10 +694,11 @@ export default function HomePage() {
               ctaHref="/login"
               highlighted
               features={[
-                "5 generovaní týždenne",
-                "Viac štýlov",
-                "Kalórie na osobu",
-                "Finančný prehľad",
+                "Celý obsah BASIC + navyše:",
+                "2 generovania týždenne navyše (spolu 5)",
+                "Viac štýlov (Fit / Vegánske / Tradičné / Exotické)",
+                "Prehľad kalórií",
+                "Rozšírený finančný prehľad",
               ]}
             />
           </div>

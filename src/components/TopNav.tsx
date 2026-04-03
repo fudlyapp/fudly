@@ -1,4 +1,3 @@
-// src/components/TopNav.tsx
 "use client";
 
 import Link from "next/link";
@@ -55,7 +54,6 @@ export default function TopNav() {
   useEffect(() => {
     let alive = true;
 
-    // ✅ supabase klient vytvoríme až po mount-e (100% browser-only)
     const sb = createSupabaseBrowserClient();
     supabaseRef.current = sb;
 
@@ -101,24 +99,25 @@ export default function TopNav() {
   return (
     <div className="sticky top-0 z-50 border-b border-gray-200 bg-white/80 backdrop-blur dark:border-gray-800 dark:bg-black/70">
       <div className="mx-auto w-full max-w-6xl px-4 sm:px-6 py-3 flex items-center justify-between gap-3">
-        <Link href="/" className="flex items-center gap-3" onClick={closeMobile}>
-          <Image
-            src="/logo_black.png"
-            alt="Fudly"
-            width={44}
-            height={44}
-            className="w-9 h-9 sm:w-11 sm:h-11 block dark:hidden"
-            priority
-          />
-          <Image
-            src="/logo_white.png"
-            alt="Fudly"
-            width={44}
-            height={44}
-            className="w-9 h-9 sm:w-11 sm:h-11 hidden dark:block"
-            priority
-          />
-          <div className="font-semibold text-lg">Fudly</div>
+        <Link href="/" className="flex items-center gap-3 min-w-0" onClick={closeMobile}>
+          <div className="relative w-12 h-12 sm:w-14 sm:h-14 shrink-0 overflow-hidden rounded-full">
+            <Image
+              src="/logo_black.png"
+              alt="Fudly"
+              fill
+              className="object-cover block dark:hidden"
+              priority
+            />
+            <Image
+              src="/logo_white.png"
+              alt="Fudly"
+              fill
+              className="object-cover hidden dark:block"
+              priority
+            />
+          </div>
+
+          <div className="font-semibold text-lg sm:text-xl leading-none">Fudly</div>
         </Link>
 
         <div className="hidden md:flex items-center gap-2">
