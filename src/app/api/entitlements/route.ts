@@ -1,4 +1,4 @@
-// src/app/api/entitlements/route.ts
+//src/app/api/entitlements/route.ts
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -73,6 +73,7 @@ function isActiveLike(
 
 function normalizeStripeStatus(status: string): Status {
   if (status === "unpaid") return "past_due";
+
   switch (status) {
     case "trialing":
       return "trialing";
@@ -89,8 +90,11 @@ function normalizeStripeStatus(status: string): Status {
   }
 }
 
-function planFromPriceId(priceId: string | null): Plan {
-  return priceId === process.env.STRIPE_PRICE_PLUS ? "plus" : "basic";
+function planFromPriceId(priceId: string | null): Plan | null {
+  if (!priceId) return null;
+  if (priceId === process.env.STRIPE_PRICE_PLUS) return "plus";
+  if (priceId === process.env.STRIPE_PRICE_BASIC) return "basic";
+  return null;
 }
 
 function toIsoFromUnix(unix?: number | null) {
@@ -140,7 +144,6 @@ async function getCanonicalStripeSubscription(customerId: string) {
 
   return (
     subs.data.find((s) => ["active", "trialing", "past_due", "unpaid"].includes(s.status)) ??
-    subs.data[0] ??
     null
   );
 }
@@ -200,14 +203,13 @@ export async function GET(req: Request) {
     const sub = await getCanonicalStripeSubscription(customerId);
 
     if (!sub) {
-      // customer existuje, ale bez subscription
       await supabase.from("subscriptions").upsert(
         {
           user_id: userId,
           stripe_customer_id: customerId,
           stripe_subscription_id: null,
-          plan: "basic",
-          status: "inactive",
+          plan: null,
+          status: "none",
           trial_until: null,
           current_period_end: null,
         },
@@ -254,6 +256,29 @@ export async function GET(req: Request) {
       },
       { onConflict: "user_id" }
     );
+
+    if (!plan) {
+      return NextResponse.json(
+        {
+          debug_user_id: userId,
+          debug_email: userEmail,
+          debug_price_id: priceId,
+          plan: null,
+          status,
+          active_like: false,
+          can_generate: false,
+          weekly_limit: 0,
+          used: 0,
+          remaining: 0,
+          calories_enabled: false,
+          allowed_styles: [],
+          trial_until,
+          current_period_end,
+          has_stripe_link: true,
+        },
+        { headers: noStoreHeaders() }
+      );
+    }
 
     const limits = planLimits(plan);
     const active_like = isActiveLike(status, now, current_period_end, trial_until);
