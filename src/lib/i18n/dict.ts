@@ -451,36 +451,36 @@ export const DICT = {
       },
 
       terms: {
-        intro: "Tieto podmienky upravujú používanie služby Fudly (generovanie jedálničkov, nákupov a receptov).",
+        intro: "Tieto podmienky upravujú používanie služby Fudly (generovanie jedálničkov, nákupných zoznamov a receptov).",
         service: [
           "Služba poskytuje odporúčania a výstupy generované algoritmicky.",
           "Výstupy majú informatívny charakter a nenahrádzajú odborné poradenstvo.",
         ],
         account: [
           "Používateľ zodpovedá za správnosť údajov, ktoré do služby zadá.",
-          "Prístup k účtu si chráň; za použitie účtu zodpovedá používateľ.",
+          "Prístupové údaje neposkytuj inej osobe. Za použitie účtu zodpovedá používateľ.",
         ],
         pricing: [
           "Platené členstvá poskytujú vyššie limity a rozšírené funkcie.",
           "Ceny a rozsah funkcií sa môžu meniť; zmeny oznámime primerane vopred.",
         ],
         liability: [
-          "Nezodpovedáme za škody spôsobené nesprávnym použitím výstupov.",
-          "Pri zdravotných obmedzeniach odporúčame konzultovať lekára alebo odborníka na výživu.",
+          "Fudly nezodpovedá za škody spôsobené nesprávnym použitím výstupov.",
+          "Pri zdravotných obmedzeniach odporúčame konzultovať s lekárom alebo odborníkom na výživu.",
         ],
       },
 
       privacy: {
-        intro: "Spracúvame len údaje potrebné na poskytovanie služby (účty, uložené plány, preferencie, kontaktné správy).",
+        intro: "Spracúvame len údaje potrebné na poskytovanie služby (e-mail, uložené plány, preferencie, kontaktné správy).",
         data: [
-          "Identifikačné údaje: email (a prípadne meno, ak ho uvedieš).",
-          "Údaje v profile: preferencie, intolerancie, nastavenia.",
-          "Uložené plány: jedálničky, nákupy, recepty.",
+          "Identifikačné údaje: e-mail.",
+          "Údaje v profile: preferencie, intolerancie, ceny nákupov, nastavenia.",
+          "Uložené plány: jedálničky, nákupné zoznamy, recepty.",
         ],
         purpose: [
           "Poskytovanie a zlepšovanie služby.",
           "Zákaznícka podpora a riešenie požiadaviek.",
-          "Fakturácia/platby cez Stripe (ak je aktívne členstvo).",
+          "Fakturácia/platby cez platobný portál (ak je aktívne členstvo).",
         ],
         retention: [
           "Údaje uchovávame počas trvania účtu a primerane po jeho zrušení.",
@@ -497,7 +497,7 @@ export const DICT = {
         intro: "Členstvo môžeš kedykoľvek zrušiť. Po zrušení zostane aktívne do konca fakturačného obdobia.",
         cancel: ["Zrušenie sa vykonáva cez tlačidlo Spravovať.", "Po zrušení už nebude prebiehať ďalšie fakturovanie."],
         refunds: ["Refundácie riešime individuálne podľa situácie a legislatívy.", "Ak sa domnievaš, že došlo k chybe v platbe, kontaktuj nás cez Kontakt."],
-        trial: ["Počas trial obdobia môžeš zrušiť členstvo bez ďalšieho účtovania.", "Ak trial skončí a členstvo nie je zrušené, môže dôjsť k začatiu fakturácie."],
+        trial: ["Počas skúšobného obdobia môžeš zrušiť členstvo bez ďalšieho účtovania.", "Ak skúšobná doba skončí a členstvo nie je zrušené, môže dôjsť k začatiu fakturácie."],
       },
     },
   },
