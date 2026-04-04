@@ -614,16 +614,10 @@ export default function PricingClient() {
           <h1 className="mt-2 text-3xl font-bold">Vyber si plán</h1>
 
           {loggedIn ? (
-            <div className="mt-3 text-xs muted-2">
-              Aktuálny plán: <span className="font-semibold">{planLabel}</span>
-              {ent?.status ? (
-                <>
-                  {" "}
-                  • stav: <span className="font-semibold">{displayStatus(ent.status)}</span>
-                </>
-              ) : null}
-            </div>
-          ) : null}
+  <div className="mt-3 text-xs muted-2">
+    Aktuálny plán: <span className="font-semibold">{planLabel}</span>
+  </div>
+) : null}
         </header>
 
         {!supabase || checkingAuth ? (

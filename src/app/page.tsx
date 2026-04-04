@@ -348,7 +348,6 @@ export default function HomePage() {
 
               <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
                 <BenefitPill>Aktuálny plán: {planLabel}</BenefitPill>
-                {ent?.status ? <BenefitPill>Stav: {statusLabel(ent.status)}</BenefitPill> : null}
               </div>
             </div>
           </section>
