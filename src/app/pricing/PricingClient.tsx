@@ -597,11 +597,11 @@ export default function PricingClient() {
     <button type="button" className={btnPrimary} disabled={busy !== null} onClick={openPortal}>
       {busy === "portal" ? "Otváram…" : "Spravovať predplatné"}
     </button>
- ) : isBasic ? (
-  <button type="button" className={btnPrimary} disabled={busy !== null} onClick={() => startCheckout("plus")}>
-    {busy === "plus" ? "Presmerúvam…" : "Prejsť na PLUS"}
-  </button>
-) : (
+  ) : isBasic ? (
+    <button type="button" className={btnPrimary} disabled={busy !== null} onClick={openPortal}>
+      {busy === "portal" ? "Otváram…" : "Prejsť na PLUS"}
+    </button>
+  ) : (
     <button type="button" className={btnPrimary} disabled={busy !== null} onClick={() => startCheckout("plus")}>
       {busy === "plus" ? "Presmerúvam…" : loggedIn ? "Zakúpiť PLUS" : "Prihlásiť sa a kúpiť PLUS"}
     </button>
