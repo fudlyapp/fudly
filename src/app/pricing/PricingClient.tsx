@@ -1,4 +1,3 @@
-//src/app/pricing/PricingClient.tsx
 "use client";
 
 import React, { useEffect, useState } from "react";
@@ -164,6 +163,14 @@ function displayStatus(status: string) {
   }
 }
 
+function isUsablePaidEntitlement(e: Entitlements | null) {
+  if (!e) return false;
+  if (e.plan === null) return false;
+  if (!e.has_stripe_link) return false;
+  if (e.active_like !== true) return false;
+  return ["trialing", "active", "past_due"].includes(e.status);
+}
+
 export default function PricingClient() {
   const sp = useSearchParams();
 
@@ -288,14 +295,19 @@ export default function PricingClient() {
     if (res.ok && data) {
       const e = data as Entitlements;
 
-      if (e.plan !== null && e.status !== "none") {
+      if (isUsablePaidEntitlement(e)) {
         applyEntitlement(e);
         return e;
+      }
+
+      if (e.plan === null && e.status === "none") {
+        applyEntitlement(null);
+        return null;
       }
     }
 
     const live = await fetchCurrentSubscriptionRaw(token);
-    if (live && live.plan !== null && live.status !== "none") {
+    if (isUsablePaidEntitlement(live)) {
       applyEntitlement(live);
       return live;
     }
@@ -326,8 +338,13 @@ export default function PricingClient() {
     if (!res.ok || !data) return null;
 
     const e = data as Entitlements;
-    applyEntitlement(e);
-    return e;
+    if (isUsablePaidEntitlement(e)) {
+      applyEntitlement(e);
+      return e;
+    }
+
+    applyEntitlement(null);
+    return null;
   }
 
   async function fetchCurrentSubscriptionFromStripe(): Promise<Entitlements | null> {
@@ -339,11 +356,12 @@ export default function PricingClient() {
     if (!token) return null;
 
     const live = await fetchCurrentSubscriptionRaw(token);
-    if (live) {
+    if (isUsablePaidEntitlement(live)) {
       applyEntitlement(live);
       return live;
     }
 
+    applyEntitlement(null);
     return null;
   }
 
@@ -482,10 +500,10 @@ export default function PricingClient() {
   async function openPortal() {
     setMsg(null);
 
-    if (!ent?.has_stripe_link) {
+    if (!ent?.has_stripe_link || !isUsablePaidEntitlement(ent)) {
       setMsg({
         type: "error",
-        text: "Správa predplatného nie je dostupná (chýba Stripe väzba). Najprv si kúp plán.",
+        text: "Správa predplatného nie je dostupná. Najprv si aktivuj plán.",
       });
       return;
     }
