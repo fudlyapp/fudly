@@ -611,36 +611,38 @@ export default function HomePage() {
           </div>
         </section>
 
-        <section className="pb-16">
-          <div className="rounded-3xl p-6 md:p-10 surface-same-as-nav surface-border text-center">
-            <div className="text-2xl md:text-3xl font-semibold">Začni s Fudly ešte dnes</div>
-            <div className="mt-3 text-sm md:text-base muted max-w-2xl mx-auto">
-              Otestuj si, aké je to mať jedlo, nákupy aj plánovanie konečne pod kontrolou
-            </div>
+        {!loggedIn ? (
+          <section className="pb-16">
+            <div className="rounded-3xl p-6 md:p-10 surface-same-as-nav surface-border text-center">
+              <div className="text-2xl md:text-3xl font-semibold">Začni s Fudly ešte dnes</div>
+              <div className="mt-3 text-sm md:text-base muted max-w-2xl mx-auto">
+                Otestuj si, aké je to mať jedlo, nákupy aj plánovanie konečne pod kontrolou
+              </div>
 
-            <div className="mt-8 flex flex-col sm:flex-row gap-4 justify-center">
-              <Link
-                href="/login"
-                className="
-                  rounded-2xl px-8 py-4 text-center font-semibold transition
-                  bg-gradient-to-r from-amber-600 to-amber-500
-                  hover:from-amber-500 hover:to-amber-400
-                  text-white
-                  shadow-lg shadow-amber-600/40
-                "
-              >
-                Vyskúšaj na 14 dní zadarmo
-              </Link>
+              <div className="mt-8 flex flex-col sm:flex-row gap-4 justify-center">
+                <Link
+                  href="/login"
+                  className="
+                    rounded-2xl px-8 py-4 text-center font-semibold transition
+                    bg-gradient-to-r from-amber-600 to-amber-500
+                    hover:from-amber-500 hover:to-amber-400
+                    text-white
+                    shadow-lg shadow-amber-600/40
+                  "
+                >
+                  Vyskúšaj na 14 dní zadarmo
+                </Link>
 
-              <Link
-                href="/pricing"
-                className="rounded-2xl px-8 py-4 text-center font-semibold transition border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-zinc-900"
-              >
-                Pozrieť členstvá
-              </Link>
+                <Link
+                  href="/pricing"
+                  className="rounded-2xl px-8 py-4 text-center font-semibold transition border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-zinc-900"
+                >
+                  Pozrieť členstvá
+                </Link>
+              </div>
             </div>
-          </div>
-        </section>
+          </section>
+        ) : null}
 
         {!loggedIn ? (
           <section className="pb-20">

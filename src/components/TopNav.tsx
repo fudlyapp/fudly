@@ -92,7 +92,7 @@ export default function TopNav() {
     try {
       await supabaseRef.current?.auth.signOut();
     } finally {
-      window.location.href = "/login";
+      window.location.href = "/";
     }
   }
 
