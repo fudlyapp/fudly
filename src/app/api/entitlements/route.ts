@@ -1,4 +1,3 @@
-//src/app/api/entitlements/route.ts
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -105,10 +104,9 @@ function noStoreHeaders() {
   return { "Cache-Control": "no-store" };
 }
 
-async function findCustomerId(
+async function getStoredStripeCustomerId(
   supabase: ReturnType<typeof createSupabaseAdminClient>,
-  userId: string,
-  userEmail: string | null
+  userId: string
 ) {
   const { data: row, error } = await supabase
     .from("subscriptions")
@@ -117,22 +115,36 @@ async function findCustomerId(
     .maybeSingle();
 
   if (error) throw new Error(error.message);
+  return row?.stripe_customer_id ?? null;
+}
 
-  if (row?.stripe_customer_id) return row.stripe_customer_id as string;
+async function listCandidateCustomerIds(
+  storedCustomerId: string | null,
+  userId: string,
+  userEmail: string | null
+) {
+  const ids: string[] = [];
 
-  if (!userEmail) return null;
+  if (storedCustomerId) ids.push(storedCustomerId);
+
+  if (!userEmail) return ids;
 
   const customers = await stripe.customers.list({
     email: userEmail,
-    limit: 10,
+    limit: 20,
   });
 
-  const matched =
-    customers.data.find((c) => c.metadata?.user_id === userId) ??
-    customers.data[0] ??
-    null;
+  const preferred = customers.data
+    .filter((c) => c.metadata?.user_id === userId)
+    .map((c) => c.id);
 
-  return matched?.id ?? null;
+  const fallback = customers.data.map((c) => c.id);
+
+  for (const id of [...preferred, ...fallback]) {
+    if (!ids.includes(id)) ids.push(id);
+  }
+
+  return ids;
 }
 
 async function getCanonicalStripeSubscription(customerId: string) {
@@ -146,6 +158,33 @@ async function getCanonicalStripeSubscription(customerId: string) {
     subs.data.find((s) => ["active", "trialing", "past_due", "unpaid"].includes(s.status)) ??
     null
   );
+}
+
+async function findBestCustomerAndSubscription(
+  storedCustomerId: string | null,
+  userId: string,
+  userEmail: string | null
+) {
+  const candidateIds = await listCandidateCustomerIds(storedCustomerId, userId, userEmail);
+
+  let firstExistingCustomerId: string | null = null;
+
+  for (const customerId of candidateIds) {
+    if (!firstExistingCustomerId) firstExistingCustomerId = customerId;
+
+    const sub = await getCanonicalStripeSubscription(customerId);
+    if (sub) {
+      return {
+        customerId,
+        subscription: sub,
+      };
+    }
+  }
+
+  return {
+    customerId: firstExistingCustomerId,
+    subscription: null,
+  };
 }
 
 export async function GET(req: Request) {
@@ -176,9 +215,11 @@ export async function GET(req: Request) {
 
     const supabase = createSupabaseAdminClient();
 
-    const customerId = await findCustomerId(supabase, userId, userEmail);
+    const storedCustomerId = await getStoredStripeCustomerId(supabase, userId);
 
-    if (!customerId) {
+    const found = await findBestCustomerAndSubscription(storedCustomerId, userId, userEmail);
+
+    if (!found.customerId) {
       return NextResponse.json(
         {
           debug_user_id: userId,
@@ -200,13 +241,11 @@ export async function GET(req: Request) {
       );
     }
 
-    const sub = await getCanonicalStripeSubscription(customerId);
-
-    if (!sub) {
+    if (!found.subscription) {
       await supabase.from("subscriptions").upsert(
         {
           user_id: userId,
-          stripe_customer_id: customerId,
+          stripe_customer_id: found.customerId,
           stripe_subscription_id: null,
           plan: null,
           status: "none",
@@ -220,6 +259,7 @@ export async function GET(req: Request) {
         {
           debug_user_id: userId,
           debug_email: userEmail,
+          debug_customer_id: found.customerId,
           plan: null,
           status: "none" as const,
           active_like: false,
@@ -236,6 +276,9 @@ export async function GET(req: Request) {
         { headers: noStoreHeaders() }
       );
     }
+
+    const sub = found.subscription;
+    const customerId = found.customerId;
 
     const priceId = sub.items.data[0]?.price?.id ?? null;
     const plan = planFromPriceId(priceId);
@@ -262,7 +305,9 @@ export async function GET(req: Request) {
         {
           debug_user_id: userId,
           debug_email: userEmail,
+          debug_customer_id: customerId,
           debug_price_id: priceId,
+          debug_subscription_id: sub.id,
           plan: null,
           status,
           active_like: false,
@@ -317,6 +362,9 @@ export async function GET(req: Request) {
       {
         debug_user_id: userId,
         debug_email: userEmail,
+        debug_customer_id: customerId,
+        debug_subscription_id: sub.id,
+        debug_price_id: priceId,
         plan,
         status,
         active_like,
