@@ -353,7 +353,7 @@ export const DICT = {
       intolerances: "❌ Intolerancie / NESMÚ byť použité",
       avoid: "Vyhnúť sa",
       have: "Mám doma (chcem použiť v tomto týždni)",
-      favorites: "Obľúbené + možnosť zvoliť konkrétne jedlá na konkrétne dni",
+      favorites: "Obľúbené",
 
       loadSaved: "Načítať uložené",
       saveAsDefault: "Uložiť ako predvolené",

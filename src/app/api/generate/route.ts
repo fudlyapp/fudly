@@ -1,4 +1,4 @@
-// src/app/api/generate/route.ts
+//src/app/api/generate/route.ts
 import { NextResponse } from "next/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -14,6 +14,7 @@ type Body = {
   avoid?: string;
   have?: string;
   favorites?: string;
+  specifications?: string;
   style?: string;
   shoppingTrips?: string;
   repeatDays?: string;
@@ -473,6 +474,7 @@ export async function POST(req: Request) {
     const avoid = (body.avoid || "").trim();
     const have = (body.have || "").trim();
     const favorites = (body.favorites || "").trim();
+    const specifications = (body.specifications || "").trim();
 
     const shoppingTrips = clampInt(body.shoppingTrips ?? 2, 1, 4, 2);
     const repeatDays = clampInt(body.repeatDays ?? 2, 1, 3, 2);
@@ -522,6 +524,19 @@ Preferences:
 - avoid: ${avoid || "none"}
 - favorites: ${favorites || "none"}
 - have_at_home: ${have || "none"}
+
+Specific instructions:
+- specifications: ${specifications || "none"}
+
+How to treat specifications:
+- Specifications are higher priority than general favorites.
+- If specifications mention a concrete day, meal, repetition, or specific food, follow them as closely as possible.
+- Examples:
+  - "utorok a streda rovnaký obed" = lunch on day 2 and day 3 should be the same or intentionally repeated.
+  - "v piatok večer šunková pizza" = dinner on day 5 should match that request as closely as budget and restrictions allow.
+- If a specification conflicts with forbidden ingredients, forbidden ingredients always win.
+- If a specification conflicts with "avoid", try to honor the specification but still keep the plan practical.
+- If a specification is impossible within the budget or restrictions, do the closest realistic alternative and mention it briefly in the relevant day's "note".
 
 Style:
 - ${styleHint}

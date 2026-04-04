@@ -1,4 +1,4 @@
-// src/app/pricing/PricingClient.tsx
+//src/app/pricing/PricingClient.tsx
 "use client";
 
 import React, { useEffect, useState } from "react";
@@ -45,6 +45,25 @@ function Feature({ children }: { children: React.ReactNode }) {
   );
 }
 
+function splitPrice(price: string) {
+  const normalized = price.trim().replace(/\s+/g, "");
+  const match = normalized.match(/^(\d+)([.,]\d{2})?(€)?$/);
+
+  if (!match) {
+    return {
+      main: price,
+      cents: "",
+      currency: "",
+    };
+  }
+
+  return {
+    main: match[1] ?? "",
+    cents: match[2] ?? "",
+    currency: match[3] ?? "€",
+  };
+}
+
 function Card({
   badge,
   title,
@@ -66,6 +85,8 @@ function Card({
   cta: React.ReactNode;
   ctaNote?: string;
 }) {
+  const { main, cents, currency } = splitPrice(price);
+
   return (
     <div
       className={[
@@ -85,8 +106,20 @@ function Card({
         </div>
 
         <div className="text-right">
-          <div className="text-3xl font-bold">{price}</div>
-          <div className="text-xs muted-2">{period}</div>
+          <div className="flex items-start justify-end gap-1">
+            <span className="text-3xl font-bold leading-none">{main}</span>
+            {cents ? (
+              <span className="text-sm font-semibold leading-none relative top-[2px]">
+                {cents}
+              </span>
+            ) : null}
+            {currency ? (
+              <span className="text-base font-semibold leading-none relative top-[2px]">
+                {currency}
+              </span>
+            ) : null}
+          </div>
+          <div className="mt-1 text-xs muted-2">{period}</div>
         </div>
       </div>
 
@@ -252,7 +285,6 @@ export default function PricingClient() {
 
     const data = await res.json().catch(() => null);
 
-    // 1) ak entitlements vrátia validný plán, použi ho
     if (res.ok && data) {
       const e = data as Entitlements;
 
@@ -262,7 +294,6 @@ export default function PricingClient() {
       }
     }
 
-    // 2) fallback: entitlements sú flaky -> zober live Stripe stav
     const live = await fetchCurrentSubscriptionRaw(token);
     if (live && live.plan !== null && live.status !== "none") {
       applyEntitlement(live);
@@ -562,9 +593,7 @@ export default function PricingClient() {
     <main className="min-h-screen p-6 page-invert-bg">
       <div className="mx-auto w-full max-w-6xl">
         <header className="mb-8">
-          <div className="text-sm muted-2">Členstvá</div>
           <h1 className="mt-2 text-3xl font-bold">Vyber si plán</h1>
-          <div className="mt-2 text-sm muted">14 dní zdarma • Zrušíš kedykoľvek</div>
 
           {loggedIn ? (
             <div className="mt-3 text-xs muted-2">
@@ -602,7 +631,7 @@ export default function PricingClient() {
           <Card
             title="Basic"
             subtitle="Pre rýchly štart"
-            price="9 €"
+            price="7,99 €"
             period="mesačne"
             features={[
               "3 generovania týždenne",
@@ -612,25 +641,25 @@ export default function PricingClient() {
               "Základný finančný prehľad",
             ]}
             cta={basicCta}
-            ctaNote={isNone ? "14 dní zdarma • Zrušíš kedykoľvek" : "Spravovanie členstva prebieha cez Stripe"}
+            ctaNote={isNone ? "14 dní zdarma • Zrušíš kedykoľvek" : " "}
           />
 
           <Card
             badge="Odporúčané"
             title="Plus"
             subtitle="Pre maximum pohodlia"
-            price="13 €"
+            price="11,99 €"
             period="mesačne"
             highlighted
             features={[
-                "Celý obsah BASIC + navyše:",
-                "2 generovania týždenne navyše (spolu 5)",
-                "Viac štýlov (Fit / Vegánske / Tradičné / Exotické)",
-                "Prehľad kalórií",
-                "Rozšírený finančný prehľad",
-              ]}
+              "Celý obsah BASIC + navyše:",
+              "2 generovania týždenne navyše (spolu 5)",
+              "Viac štýlov (Fit / Vegánske / Tradičné / Exotické)",
+              "Prehľad kalórií",
+              "Rozšírený finančný prehľad",
+            ]}
             cta={plusCta}
-            ctaNote={isNone ? "14 dní zdarma • Zrušíš kedykoľvek" : "Správa prebieha cez Stripe"}
+            ctaNote={isNone ? "14 dní zdarma • Zrušíš kedykoľvek" : " "}
           />
         </div>
       </div>

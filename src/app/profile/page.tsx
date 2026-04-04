@@ -44,6 +44,7 @@ type ProfileRow = {
   avoid: string | null;
   have: string | null;
   favorites: string | null;
+  specifications: string | null;
 };
 
 type Entitlements = {
@@ -399,8 +400,7 @@ function BudgetActualBarChart({
 
     const budgetVal = hasBudget ? round2(budget) : null;
     const actualVal = hasActual ? round2(actual) : null;
-    const diffVal =
-      budgetVal != null && actualVal != null ? round2(actualVal - budgetVal) : null;
+    const diffVal = budgetVal != null && actualVal != null ? round2(actualVal - budgetVal) : null;
 
     return { budgetVal, actualVal, diffVal };
   }, [rows]);
@@ -619,9 +619,7 @@ function CategoryDonutChart({
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="text-sm font-semibold">Odhad výdavkov podľa kategórií</div>
-          <div className="mt-1 text-xs muted-2">
-            Rozdelenie podľa cien jednotlivých položiek.
-          </div>
+          <div className="mt-1 text-xs muted-2">Rozdelenie podľa cien jednotlivých položiek.</div>
         </div>
         {!isPlus ? (
           <div className="text-xs font-semibold rounded-full border border-gray-300 dark:border-gray-700 px-3 py-1">
@@ -712,10 +710,7 @@ function TopItemsBarChart({
                 <span className="shrink-0">{isPlus ? `${r.amount.toFixed(2)} €` : "•••"}</span>
               </div>
               <div className="h-4 rounded-full bg-gray-200 dark:bg-zinc-800 overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-sky-600"
-                  style={{ width: `${width}%` }}
-                />
+                <div className="h-full rounded-full bg-sky-600" style={{ width: `${width}%` }} />
               </div>
             </div>
           );
@@ -934,6 +929,7 @@ export default function ProfilePage() {
   const [avoid, setAvoid] = useState("");
   const [have, setHave] = useState("");
   const [favorites, setFavorites] = useState("");
+  const [specifications, setSpecifications] = useState("");
 
   const [yearFilter, setYearFilter] = useState<string>(currentYear);
   const [monthFilter, setMonthFilter] = useState<string>("all");
@@ -1040,7 +1036,7 @@ export default function ProfilePage() {
       const { data, error } = await supabase
         .from("profiles")
         .select(
-          "user_id, full_name, language, people_default, weekly_budget_eur_default, shopping_trips_default, repeat_days_default, style_default, intolerances, avoid, have, favorites"
+          "user_id, full_name, language, people_default, weekly_budget_eur_default, shopping_trips_default, repeat_days_default, style_default, intolerances, avoid, have, favorites, specifications"
         )
         .eq("user_id", user.id)
         .maybeSingle();
@@ -1069,6 +1065,7 @@ export default function ProfilePage() {
         setAvoid(p.avoid ?? "");
         setHave(p.have ?? "");
         setFavorites(p.favorites ?? "");
+        setSpecifications(p.specifications ?? "");
       }
 
       setPrefLoading(false);
@@ -1190,12 +1187,29 @@ export default function ProfilePage() {
     return keys.map((k) => ({ ym: k, items: map.get(k)! }));
   }, [rows, yearFilter, monthFilter]);
 
-  const financeFlatItems = useMemo(
-    () => financeWeeksFiltered.flatMap((g) => g.items),
-    [financeWeeksFiltered]
-  );
+  const financeFlatItems = useMemo(() => financeWeeksFiltered.flatMap((g) => g.items), [financeWeeksFiltered]);
+
+  function buildSaveDefaultsConfirmationMessage() {
+    const almostEmpty =
+      !people.trim() &&
+      !budget.trim() &&
+      !intolerances.trim() &&
+      !avoid.trim() &&
+      !have.trim() &&
+      !favorites.trim() &&
+      !specifications.trim();
+
+    if (almostEmpty) {
+      return "Vyzerá to, že formulár je takmer prázdny.\n\nNaozaj chceš prepísať predvolené nastavenia?";
+    }
+
+    return "Naozaj chceš aktualizovať predvolené nastavenia?\n\nTýmto prepíšeš svoje doterajšie predvolené hodnoty.";
+  }
 
   async function saveDefaults() {
+    const confirmed = window.confirm(buildSaveDefaultsConfirmationMessage());
+    if (!confirmed) return;
+
     setPrefMsg("");
     setPrefLoading(true);
 
@@ -1225,6 +1239,7 @@ export default function ProfilePage() {
       avoid: avoid.trim() || null,
       have: have.trim() || null,
       favorites: favorites.trim() || null,
+      specifications: specifications.trim() || null,
     };
 
     const { error } = await supabase.from("profiles").upsert(payload, { onConflict: "user_id" });
@@ -1415,6 +1430,15 @@ export default function ProfilePage() {
 
                   <Field label="Obľúbené">
                     <input value={favorites} onChange={(e) => setFavorites(e.target.value)} className="input-surface" placeholder="cestoviny, kura" />
+                  </Field>
+
+                  <Field label="Špecifikácie">
+                    <textarea
+                      value={specifications}
+                      onChange={(e) => setSpecifications(e.target.value)}
+                      className="input-surface min-h-[110px]"
+                      placeholder="napr. utorok a streda rovnaký obed, v piatok večer šunková pizza"
+                    />
                   </Field>
                 </div>
 
@@ -1666,9 +1690,7 @@ export default function ProfilePage() {
                     <div key={g.ym}>
                       <div className="text-sm muted-2 mb-3">{g.ym === "Neznámy" ? "Neznámy dátum" : `Mesiac: ${ymLabel(g.ym)}`}</div>
 
-                      {monthFilter !== "all" ? (
-                        <FinanceMonthSummary items={g.items} isPlus={!!isPlus} />
-                      ) : null}
+                      {monthFilter !== "all" ? <FinanceMonthSummary items={g.items} isPlus={!!isPlus} /> : null}
 
                       <div className="mt-4 grid grid-cols-1 gap-4">
                         {g.items.map(({ r, bud, est, act, missing, totalTrips }) => {

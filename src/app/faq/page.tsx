@@ -56,7 +56,11 @@ const FAQ: FaqItem[] = [
   },
   {
     q: "Ako funguje „Obľúbené“ v Generátore?",
-    a: "V časti Obľúbené si môžeš vypísať suroviny, prípadne aj konkretné jedlá, ktoré chceš mať v jedálničku na daný týždeň. Možnosť zadať konkrétnu požiadavku (napr. „rezeň so zemiakmi v nedeľu na obed :) ",
+    a: "V časti Obľúbené si môžeš vypísať suroviny, prípadne aj konkretné jedlá, ktoré chceš mať v jedálničku na daný týždeň.",
+  },
+   {
+    q: "Ako funguje „Špecifikácie“ v Generátore?",
+    a: "Možnosť zadať konkrétnu požiadavku (napr. „rezeň so zemiakmi v nedeľu na obed :) ",
   },
   {
     q: "Je to vhodné aj pre viac ľudí?",

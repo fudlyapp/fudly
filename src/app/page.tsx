@@ -53,6 +53,25 @@ function Step({ n, title, desc }: { n: string; title: string; desc: string }) {
   );
 }
 
+function splitPrice(price: string) {
+  const normalized = price.trim().replace(/\s+/g, "");
+  const match = normalized.match(/^(\d+)([.,]\d{2})?(€)?$/);
+
+  if (!match) {
+    return {
+      main: price,
+      cents: "",
+      currency: "",
+    };
+  }
+
+  return {
+    main: match[1] ?? "",
+    cents: match[2] ?? "",
+    currency: match[3] ?? "€",
+  };
+}
+
 function PricingCard({
   badge,
   title,
@@ -74,6 +93,8 @@ function PricingCard({
   features: string[];
   highlighted?: boolean;
 }) {
+  const { main, cents, currency } = splitPrice(price);
+
   return (
     <div
       className={[
@@ -93,8 +114,20 @@ function PricingCard({
         </div>
 
         <div className="text-right">
-          <div className="text-3xl font-bold">{price}</div>
-          <div className="text-xs muted-2">{period}</div>
+          <div className="flex items-start justify-end gap-1">
+            <span className="text-3xl font-bold leading-none">{main}</span>
+            {cents ? (
+              <span className="text-sm font-semibold leading-none relative top-[2px]">
+                {cents}
+              </span>
+            ) : null}
+            {currency ? (
+              <span className="text-base font-semibold leading-none relative top-[2px]">
+                {currency}
+              </span>
+            ) : null}
+          </div>
+          <div className="mt-1 text-xs muted-2">{period}</div>
         </div>
       </div>
 
@@ -283,25 +316,35 @@ export default function HomePage() {
     return (
       <main className="min-h-screen overflow-hidden page-invert-bg">
         <div className="mx-auto w-full max-w-6xl px-6">
-          <section className="pt-16 pb-12 relative">
-            <div className="absolute inset-0 flex justify-center -z-10">
+          <section className="pt-16 pb-12 relative isolate">
+            <div className="absolute inset-0 flex justify-center -z-20">
               <div className="w-[620px] h-[620px] bg-black/10 dark:bg-black/5 blur-[160px] rounded-full" />
             </div>
 
-            <div className="flex flex-col items-center text-center">
-              <div className="relative w-48 h-48 md:w-64 md:h-64">
-                <Image src="/logo_black.png" alt="Fudly logo" fill className="object-contain dark:hidden" priority />
-                <Image src="/logo_white.png" alt="Fudly logo" fill className="object-contain hidden dark:block" priority />
+            <div className="absolute inset-x-0 top-0 flex justify-center pointer-events-none -z-10">
+              <div className="relative w-[320px] h-[320px] md:w-[560px] md:h-[560px] opacity-[0.07] dark:opacity-[0.08]">
+                <Image
+                  src="/logo_black.png"
+                  alt=""
+                  fill
+                  className="object-contain dark:hidden"
+                  priority
+                />
+                <Image
+                  src="/logo_white.png"
+                  alt=""
+                  fill
+                  className="object-contain hidden dark:block"
+                  priority
+                />
               </div>
+            </div>
 
+            <div className="flex flex-col items-center text-center relative z-10">
               <h1 className="mt-4 font-bold tracking-tight leading-[1.04] px-3">
                 <span className="block text-[clamp(24px,5vw,50px)]">Vitaj späť, {firstName}</span>
                 <span className="block text-[clamp(20px,4.5vw,40px)] muted">pokračuj tam, kde si skončil/a</span>
               </h1>
-
-              <p className="mt-5 max-w-2xl text-base sm:text-lg text-black/70 dark:text-gray-300">
-                Generátor, profil aj členstvo máš pripravené. Stačí si vybrať, čo chceš práve otvoriť.
-              </p>
 
               <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
                 <BenefitPill>Aktuálny plán: {planLabel}</BenefitPill>
@@ -396,7 +439,6 @@ export default function HomePage() {
           </div>
 
           <div className="flex flex-col items-center text-center relative z-10">
-
             <h1 className="mt-8 font-bold tracking-tight leading-[0.95] px-3 max-w-5xl">
               <span className="block text-[clamp(34px,7vw,78px)]">
                 Inteligentný týždenný plán
@@ -622,7 +664,7 @@ export default function HomePage() {
         <section className="pb-16">
           <div className="rounded-3xl p-6 md:p-8 surface-same-as-nav surface-border">
             <div className="text-2xl font-semibold">Ako to funguje</div>
-            
+
             <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
               <Step n="1" title="Nastav základné parametre" desc="Počet osôb, budget, štýl jedál a iné preferencie" />
               <Step n="2" title="Vygeneruj plán" desc="Jedálniček + recepty + nákupné zoznamy " />
@@ -666,12 +708,12 @@ export default function HomePage() {
         {/* ČLENSTVÁ */}
         <section className="pb-20">
           <div className="text-2xl font-semibold text-center">Vyber si členstvo</div>
-          
+
           <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
             <PricingCard
               title="Basic"
               subtitle="Pre rýchly štart"
-              price="9 €"
+              price="7,99 €"
               period="mesačne"
               ctaLabel="Začať zdarma (14 dní)"
               ctaHref="/login"
@@ -688,7 +730,7 @@ export default function HomePage() {
               badge="Odporúčané"
               title="Plus"
               subtitle="Pre maximum pohodlia"
-              price="13 €"
+              price="11,99 €"
               period="mesačne"
               ctaLabel="Začať zdarma (14 dní)"
               ctaHref="/login"

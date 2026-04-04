@@ -92,8 +92,24 @@ export default function LoginClient() {
         return;
       }
     } catch (err: any) {
-      setMessage(err?.message ?? t.common.genericError);
-    } finally {
+  const raw = err?.message ?? "";
+
+  let friendly = t.common.genericError;
+
+  if (raw === "Invalid login credentials") {
+    friendly = "Nesprávny e-mail alebo heslo.";
+  } else if (raw === "Email not confirmed") {
+    friendly = "Najprv potvrď svoj e-mail.";
+  } else if (raw === "User already registered") {
+    friendly = "Tento e-mail je už zaregistrovaný.";
+  } else if (raw === "Password should be at least 6 characters") {
+    friendly = "Heslo musí mať aspoň 6 znakov.";
+  } else if (raw) {
+    friendly = raw;
+  }
+
+  setMessage(friendly);
+} finally {
       setLoading(false);
     }
   }

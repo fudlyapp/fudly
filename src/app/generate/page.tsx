@@ -60,6 +60,7 @@ type ProfileRow = {
   avoid: string | null;
   have: string | null;
   favorites: string | null;
+  specifications: string | null;
 };
 
 type MealPlanRowLite = {
@@ -154,7 +155,13 @@ const STYLE_OPTIONS: StyleOption[] = [
   { value: "rychle", label: "Rýchle", emoji: "⚡", desc: "max 20–30 min" },
   { value: "vyvazene", label: "Vyvážené", emoji: "🥗", desc: "bielkoviny + zelenina" },
   { value: "vegetarianske", label: "Vegetariánske", emoji: "🌱", desc: "bez mäsa" },
-  { value: "veganske",label: "Vegánske",emoji: "🌿", desc: "bez mäsa, rýb, vajec, mliečnych výrobkov a všetkých živočíšnych produktov", plusOnly: true},
+  {
+    value: "veganske",
+    label: "Vegánske",
+    emoji: "🌿",
+    desc: "bez mäsa, rýb, vajec, mliečnych výrobkov a všetkých živočíšnych produktov",
+    plusOnly: true,
+  },
   { value: "tradicne", label: "Tradičné", emoji: "🍲", desc: "domáca poctivá strava", plusOnly: true },
   { value: "exoticke", label: "Exotické", emoji: "🍜", desc: "ázia / mexiko / fusion", plusOnly: true },
   { value: "fit", label: "Fit", emoji: "🏋️", desc: "viac bielkovín, menej cukru", plusOnly: true },
@@ -329,6 +336,7 @@ export default function GeneratorPage() {
   const [avoid, setAvoid] = useState("");
   const [have, setHave] = useState("");
   const [favorites, setFavorites] = useState("");
+  const [specifications, setSpecifications] = useState("");
 
   const [style, setStyle] = useState(STYLE_OPTIONS[0].value);
   const [shoppingTrips, setShoppingTrips] = useState("2");
@@ -346,6 +354,9 @@ export default function GeneratorPage() {
 
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmMsg, setConfirmMsg] = useState("");
+
+  const [saveDefaultsConfirmOpen, setSaveDefaultsConfirmOpen] = useState(false);
+  const [saveDefaultsConfirmMsg, setSaveDefaultsConfirmMsg] = useState("");
 
   const [banner, setBanner] = useState<BannerState>(null);
   const [lastPayload, setLastPayload] = useState<any>(null);
@@ -476,30 +487,32 @@ export default function GeneratorPage() {
   }, [supabase, session, weekStart]);
 
   const usedGenerations = useMemo(() => {
-  const entUsed = typeof ent?.used === "number" && Number.isFinite(ent.used) ? ent.used : 0;
-  const rowUsed =
-    typeof existingRow?.generation_count === "number" && Number.isFinite(existingRow.generation_count)
-      ? existingRow.generation_count
-      : 0;
+    const entUsed = typeof ent?.used === "number" && Number.isFinite(ent.used) ? ent.used : 0;
+    const rowUsed =
+      typeof existingRow?.generation_count === "number" && Number.isFinite(existingRow.generation_count)
+        ? existingRow.generation_count
+        : 0;
 
-  return Math.max(entUsed, rowUsed);
-}, [existingRow, ent]);
+    return Math.max(entUsed, rowUsed);
+  }, [existingRow, ent]);
 
-const remainingGenerations = useMemo(() => {
-  if (typeof ent?.remaining === "number" && Number.isFinite(ent.remaining)) {
-    return Math.min(ent.remaining, Math.max(0, generationLimitSafe - usedGenerations));
-  }
+  const remainingGenerations = useMemo(() => {
+    if (typeof ent?.remaining === "number" && Number.isFinite(ent.remaining)) {
+      return Math.min(ent.remaining, Math.max(0, generationLimitSafe - usedGenerations));
+    }
 
-  return Math.max(0, generationLimitSafe - usedGenerations);
-}, [generationLimitSafe, usedGenerations, ent]);
+    return Math.max(0, generationLimitSafe - usedGenerations);
+  }, [generationLimitSafe, usedGenerations, ent]);
 
   const allowedStyles = useMemo(() => {
     if (Array.isArray(ent?.allowed_styles) && ent.allowed_styles.length > 0) {
       return new Set(ent.allowed_styles);
     }
-    return new Set(tier === "plus"
-      ? ["lacné", "rychle", "vyvazene", "vegetarianske", "veganske", "fit", "tradicne", "exoticke"]
-      : ["lacné", "rychle", "vyvazene", "vegetarianske"]);
+    return new Set(
+      tier === "plus"
+        ? ["lacné", "rychle", "vyvazene", "vegetarianske", "veganske", "fit", "tradicne", "exoticke"]
+        : ["lacné", "rychle", "vyvazene", "vegetarianske"]
+    );
   }, [ent, tier]);
 
   const paywalled = !!accessToken && !!ent && ent.can_generate === false;
@@ -521,7 +534,7 @@ const remainingGenerations = useMemo(() => {
     const { data, error } = await supabase
       .from("profiles")
       .select(
-        "user_id, full_name, language, people_default, weekly_budget_eur_default, shopping_trips_default, repeat_days_default, style_default, intolerances, avoid, have, favorites"
+        "user_id, full_name, language, people_default, weekly_budget_eur_default, shopping_trips_default, repeat_days_default, style_default, intolerances, avoid, have, favorites, specifications"
       )
       .eq("user_id", user.id)
       .maybeSingle();
@@ -555,9 +568,32 @@ const remainingGenerations = useMemo(() => {
     setAvoid(p.avoid ?? "");
     setHave(p.have ?? "");
     setFavorites(p.favorites ?? "");
+    setSpecifications(p.specifications ?? "");
 
     setPrefMsg(t.generator.loadedFromProfile);
     setPrefLoading(false);
+  }
+
+  function buildSaveDefaultsConfirmationMessage() {
+    const almostEmpty =
+      !people.trim() &&
+      !budget.trim() &&
+      !intolerances.trim() &&
+      !avoid.trim() &&
+      !have.trim() &&
+      !favorites.trim() &&
+      !specifications.trim();
+
+    if (almostEmpty) {
+      return "Vyzerá to, že formulár je takmer prázdny.\n\nNaozaj chceš aktualizovať predvolené nastavenia? Týmto prepíšeš svoje doterajšie predvolené hodnoty.";
+    }
+
+    return "Naozaj chceš aktualizovať predvolené nastavenia?\n\nTýmto prepíšeš svoje doterajšie predvolené hodnoty.";
+  }
+
+  function askSaveDefaultsConfirmation() {
+    setSaveDefaultsConfirmMsg(buildSaveDefaultsConfirmationMessage());
+    setSaveDefaultsConfirmOpen(true);
   }
 
   async function saveDefaultsToProfile() {
@@ -587,6 +623,7 @@ const remainingGenerations = useMemo(() => {
       avoid: avoid.trim() || null,
       have: have.trim() || null,
       favorites: favorites.trim() || null,
+      specifications: specifications.trim() || null,
     };
 
     const { error } = await supabase.from("profiles").upsert(payload as any, { onConflict: "user_id" });
@@ -705,6 +742,7 @@ const remainingGenerations = useMemo(() => {
       avoid,
       have,
       favorites,
+      specifications,
       style,
       shoppingTrips,
       repeatDays,
@@ -977,6 +1015,38 @@ const remainingGenerations = useMemo(() => {
           </div>
         </CenterModal>
 
+        <CenterModal
+          open={saveDefaultsConfirmOpen}
+          onClose={() => setSaveDefaultsConfirmOpen(false)}
+          title="Potvrdiť uloženie predvolených"
+        >
+          <div className="space-y-4">
+            <div className="text-sm muted whitespace-pre-wrap">{saveDefaultsConfirmMsg}</div>
+
+            <div className="flex flex-col sm:flex-row gap-2 sm:items-center sm:justify-end">
+              <button
+                type="button"
+                className="btn-primary px-4 py-2 text-sm"
+                onClick={async () => {
+                  setSaveDefaultsConfirmOpen(false);
+                  await saveDefaultsToProfile();
+                }}
+                disabled={prefLoading}
+              >
+                {prefLoading ? "Ukladám..." : "Áno, uložiť"}
+              </button>
+
+              <button
+                type="button"
+                className="rounded-xl border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-semibold hover:bg-gray-100 dark:hover:bg-zinc-900 transition"
+                onClick={() => setSaveDefaultsConfirmOpen(false)}
+              >
+                Zrušiť
+              </button>
+            </div>
+          </div>
+        </CenterModal>
+
         <form onSubmit={onSubmit} className="rounded-3xl p-6 surface-same-as-nav surface-border">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             <Field label={t.generator.week}>
@@ -1025,7 +1095,9 @@ const remainingGenerations = useMemo(() => {
               </select>
 
               {tier !== "plus" ? (
-                <div className="mt-1 text-xs muted-2">Fit / Tradičné / Exotické / Vegánske sú dostupné v PLUS členstve.</div>
+                <div className="mt-1 text-xs muted-2">
+                  Fit / Tradičné / Exotické / Vegánske sú dostupné v PLUS členstve.
+                </div>
               ) : null}
             </Field>
 
@@ -1083,6 +1155,15 @@ const remainingGenerations = useMemo(() => {
                 placeholder="cestoviny, kura"
               />
             </Field>
+
+            <Field label="Špecifikácie" hint="špeciálne požiadavky na aktuálny týždeň">
+              <textarea
+                value={specifications}
+                onChange={(e) => setSpecifications(e.target.value)}
+                className="input-surface min-h-[110px]"
+                placeholder="napr. utorok a streda rovnaký obed, v piatok večer šunková pizza"
+              />
+            </Field>
           </div>
 
           <div className="mt-6 flex flex-col gap-4">
@@ -1120,7 +1201,7 @@ const remainingGenerations = useMemo(() => {
 
                   <button
                     type="button"
-                    onClick={saveDefaultsToProfile}
+                    onClick={askSaveDefaultsConfirmation}
                     disabled={prefLoading || paywalled || !accessToken}
                     className={secondaryPill}
                   >
