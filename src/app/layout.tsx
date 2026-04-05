@@ -6,7 +6,7 @@ import TopNav from "@/components/TopNav";
 
 export const metadata: Metadata = {
   title: {
-    default: "Fudly – inteligentný plánovač",
+    default: "Fudly",
     template: "%s | Fudly",
   },
   description: "Inteligentný týždenný jedálniček na jedno kliknutie",
