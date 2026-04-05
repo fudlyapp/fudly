@@ -10,6 +10,11 @@ export const metadata: Metadata = {
     template: "%s | Fudly",
   },
   description: "Inteligentný týždenný jedálniček na jedno kliknutie",
+  icons: {
+    icon: "/logo_black.png",
+    shortcut: "/logo_black.png",
+    apple: "/logo_black.png",
+  },
 };
 
 const themeScript = `
