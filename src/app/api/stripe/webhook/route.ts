@@ -92,7 +92,16 @@ async function syncCustomerToDb(
   const priceId = canonical.items.data[0]?.price?.id ?? null;
   const plan = inferPlanFromPriceId(priceId);
   const status = canonical.status === "unpaid" ? "past_due" : canonical.status;
-
+console.log("STRIPE SYNC DEBUG", {
+  customerId,
+  subscriptionId: canonical.id,
+  status: canonical.status,
+  trial_end: canonical.trial_end,
+  current_period_end: (canonical as any).current_period_end,
+  cancel_at_period_end: canonical.cancel_at_period_end,
+  cancel_at: canonical.cancel_at,
+  canceled_at: canonical.canceled_at,
+});
   const { error } = await supabase.from("subscriptions").upsert(
     {
       user_id: userId,

@@ -330,6 +330,15 @@ export async function GET(req: Request) {
         const priceId = exactSub.items.data[0]?.price?.id ?? null;
         const plan = planFromPriceId(priceId);
         const status = normalizeStripeStatus(exactSub.status);
+        console.log("ENTITLEMENTS EXACT SUB DEBUG", {
+  subscriptionId: exactSub.id,
+  status: exactSub.status,
+  trial_end: exactSub.trial_end,
+  current_period_end_raw: (exactSub as any).current_period_end,
+  cancel_at_period_end: exactSub.cancel_at_period_end,
+  cancel_at: exactSub.cancel_at,
+  canceled_at: exactSub.canceled_at,
+});
         const trial_until = toIsoFromUnix(exactSub.trial_end ?? null);
         const current_period_end = toIsoFromUnix((exactSub as any).current_period_end ?? null);
 
@@ -420,6 +429,15 @@ export async function GET(req: Request) {
       const priceId = sub.items.data[0]?.price?.id ?? null;
       const plan = planFromPriceId(priceId);
       const status = normalizeStripeStatus(sub.status);
+      console.log("ENTITLEMENTS CUSTOMER SCAN DEBUG", {
+  subscriptionId: sub.id,
+  status: sub.status,
+  trial_end: sub.trial_end,
+  current_period_end_raw: (sub as any).current_period_end,
+  cancel_at_period_end: sub.cancel_at_period_end,
+  cancel_at: sub.cancel_at,
+  canceled_at: sub.canceled_at,
+});
       const trial_until = toIsoFromUnix(sub.trial_end ?? null);
       const current_period_end = toIsoFromUnix((sub as any).current_period_end ?? null);
 
