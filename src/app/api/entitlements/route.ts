@@ -1,4 +1,4 @@
-//src/app/api/stripe/webhook/route.ts
+//src/app/api/entitlements/route.ts
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -373,15 +373,6 @@ export async function GET(req: Request) {
         const trial_until = toIsoFromUnix(exactSub.trial_end ?? null);
         const current_period_end = getCurrentPeriodEndIso(exactSub);
 
-        console.log("ENTITLEMENTS EXACT SUB DEBUG", {
-          subscriptionId: exactSub.id,
-          status: exactSub.status,
-          trial_end: exactSub.trial_end,
-          current_period_end_top_level: (exactSub as any).current_period_end,
-          current_period_end_item_0: exactSub.items?.data?.[0]?.current_period_end,
-          current_period_end_iso: current_period_end,
-        });
-
         const payload = {
           user_id: userId,
           stripe_customer_id: customerId ?? null,
@@ -392,21 +383,7 @@ export async function GET(req: Request) {
           current_period_end,
         };
 
-        console.log("ENTITLEMENTS EXACT SUB UPSERT PAYLOAD", payload);
-
-        const { error: upsertError } = await saveSubscriptionRow(supabase, payload);
-
-        if (upsertError) {
-          console.log("ENTITLEMENTS EXACT SUB UPSERT ERROR", upsertError);
-        }
-
-        const { data: verify, error: verifyError } = await supabase
-          .from("subscriptions")
-          .select("user_id, plan, status, trial_until, current_period_end, stripe_customer_id, stripe_subscription_id")
-          .eq("user_id", userId)
-          .maybeSingle();
-
-        console.log("ENTITLEMENTS EXACT SUB VERIFY", { verify, verifyError });
+        await saveSubscriptionRow(supabase, payload);
 
         if (!plan) {
           return NextResponse.json(
@@ -484,15 +461,6 @@ export async function GET(req: Request) {
       const trial_until = toIsoFromUnix(sub.trial_end ?? null);
       const current_period_end = getCurrentPeriodEndIso(sub);
 
-      console.log("ENTITLEMENTS CUSTOMER SCAN DEBUG", {
-        subscriptionId: sub.id,
-        status: sub.status,
-        trial_end: sub.trial_end,
-        current_period_end_top_level: (sub as any).current_period_end,
-        current_period_end_item_0: sub.items?.data?.[0]?.current_period_end,
-        current_period_end_iso: current_period_end,
-      });
-
       const payload = {
         user_id: userId,
         stripe_customer_id: customerId,
@@ -503,21 +471,7 @@ export async function GET(req: Request) {
         current_period_end,
       };
 
-      console.log("ENTITLEMENTS CUSTOMER SCAN UPSERT PAYLOAD", payload);
-
-      const { error: upsertError } = await saveSubscriptionRow(supabase, payload);
-
-      if (upsertError) {
-        console.log("ENTITLEMENTS CUSTOMER SCAN UPSERT ERROR", upsertError);
-      }
-
-      const { data: verify, error: verifyError } = await supabase
-        .from("subscriptions")
-        .select("user_id, plan, status, trial_until, current_period_end, stripe_customer_id, stripe_subscription_id")
-        .eq("user_id", userId)
-        .maybeSingle();
-
-      console.log("ENTITLEMENTS CUSTOMER SCAN VERIFY", { verify, verifyError });
+      await saveSubscriptionRow(supabase, payload);
 
       if (!plan) {
         return NextResponse.json(

@@ -120,22 +120,11 @@ async function syncCustomerToDb(
       trial_until: null,
     };
 
-    console.log("STRIPE SYNC NO SUB PAYLOAD", payload);
-
     const { error } = await saveSubscriptionRow(supabase, payload);
 
     if (error) {
-      console.log("STRIPE SYNC NO SUB UPSERT ERROR", error);
       return { ok: false as const, reason: error.message };
     }
-
-    const { data: verify, error: verifyError } = await supabase
-      .from("subscriptions")
-      .select("user_id, status, current_period_end, trial_until")
-      .eq("user_id", userId)
-      .maybeSingle();
-
-    console.log("STRIPE SYNC NO SUB VERIFY", { verify, verifyError });
 
     return { ok: true as const };
   }
@@ -143,23 +132,6 @@ async function syncCustomerToDb(
   const priceId = canonical.items.data[0]?.price?.id ?? null;
   const plan = inferPlanFromPriceId(priceId);
   const status = canonical.status === "unpaid" ? "past_due" : canonical.status;
-  const currentPeriodEndIso = getCurrentPeriodEndIso(canonical);
-  const trialUntilIso = toIsoFromUnix(canonical.trial_end ?? null);
-
-  console.log("STRIPE SYNC DEBUG", {
-    customerId,
-    userId,
-    subscriptionId: canonical.id,
-    status: canonical.status,
-    trial_end: canonical.trial_end,
-    current_period_end_top_level: (canonical as any).current_period_end,
-    current_period_end_item_0: canonical.items?.data?.[0]?.current_period_end,
-    current_period_end_iso: currentPeriodEndIso,
-    trial_until_iso: trialUntilIso,
-    cancel_at_period_end: canonical.cancel_at_period_end,
-    cancel_at: canonical.cancel_at,
-    canceled_at: canonical.canceled_at,
-  });
 
   const payload = {
     user_id: userId,
@@ -167,26 +139,15 @@ async function syncCustomerToDb(
     stripe_subscription_id: canonical.id,
     plan,
     status,
-    current_period_end: currentPeriodEndIso,
-    trial_until: trialUntilIso,
+    current_period_end: getCurrentPeriodEndIso(canonical),
+    trial_until: toIsoFromUnix(canonical.trial_end ?? null),
   };
-
-  console.log("STRIPE SYNC UPSERT PAYLOAD", payload);
 
   const { error } = await saveSubscriptionRow(supabase, payload);
 
   if (error) {
-    console.log("STRIPE SYNC UPSERT ERROR", error);
     return { ok: false as const, reason: error.message };
   }
-
-  const { data: verify, error: verifyError } = await supabase
-    .from("subscriptions")
-    .select("user_id, plan, status, current_period_end, trial_until, stripe_customer_id, stripe_subscription_id")
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  console.log("STRIPE SYNC VERIFY", { verify, verifyError });
 
   return { ok: true as const };
 }
