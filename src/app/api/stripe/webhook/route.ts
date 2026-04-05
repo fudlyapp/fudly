@@ -1,4 +1,4 @@
-// src/app/api/stripe/webhook/route.ts
+//src/app/api/stripe/webhook/route.ts
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -12,6 +12,25 @@ function toIsoFromUnix(unix?: number | null) {
   return unix ? new Date(unix * 1000).toISOString() : null;
 }
 
+function getCurrentPeriodEndIso(sub: Stripe.Subscription | null | undefined) {
+  if (!sub) return null;
+
+  const topLevel = (sub as any).current_period_end;
+  if (typeof topLevel === "number" && Number.isFinite(topLevel)) {
+    return toIsoFromUnix(topLevel);
+  }
+
+  const itemEnds = (sub.items?.data ?? [])
+    .map((item) => item.current_period_end)
+    .filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+
+  if (itemEnds.length > 0) {
+    return toIsoFromUnix(Math.max(...itemEnds));
+  }
+
+  return null;
+}
+
 function inferPlanFromPriceId(priceId: string | null): "basic" | "plus" {
   return priceId === process.env.STRIPE_PRICE_PLUS ? "plus" : "basic";
 }
@@ -22,7 +41,6 @@ async function resolveUserIdFromCustomer(
 ) {
   if (!customerId) return null;
 
-  // 1) skús DB väzbu
   const { data: row } = await supabase
     .from("subscriptions")
     .select("user_id")
@@ -31,7 +49,6 @@ async function resolveUserIdFromCustomer(
 
   if (row?.user_id) return row.user_id as string;
 
-  // 2) skús customer metadata
   try {
     const cust = await stripe.customers.retrieve(customerId);
     if (!("deleted" in cust) && cust?.metadata?.user_id) {
@@ -67,7 +84,6 @@ async function syncCustomerToDb(
 
   const canonical = await getCanonicalSubscriptionForCustomer(customerId);
 
-  // customer existuje, ale subscription už žiadna nie je
   if (!canonical) {
     const { error } = await supabase.from("subscriptions").upsert(
       {
@@ -92,16 +108,19 @@ async function syncCustomerToDb(
   const priceId = canonical.items.data[0]?.price?.id ?? null;
   const plan = inferPlanFromPriceId(priceId);
   const status = canonical.status === "unpaid" ? "past_due" : canonical.status;
-console.log("STRIPE SYNC DEBUG", {
-  customerId,
-  subscriptionId: canonical.id,
-  status: canonical.status,
-  trial_end: canonical.trial_end,
-  current_period_end: (canonical as any).current_period_end,
-  cancel_at_period_end: canonical.cancel_at_period_end,
-  cancel_at: canonical.cancel_at,
-  canceled_at: canonical.canceled_at,
-});
+
+  console.log("STRIPE SYNC DEBUG", {
+    customerId,
+    subscriptionId: canonical.id,
+    status: canonical.status,
+    trial_end: canonical.trial_end,
+    current_period_end_top_level: (canonical as any).current_period_end,
+    current_period_end_item_0: canonical.items?.data?.[0]?.current_period_end,
+    cancel_at_period_end: canonical.cancel_at_period_end,
+    cancel_at: canonical.cancel_at,
+    canceled_at: canonical.canceled_at,
+  });
+
   const { error } = await supabase.from("subscriptions").upsert(
     {
       user_id: userId,
@@ -109,7 +128,7 @@ console.log("STRIPE SYNC DEBUG", {
       stripe_subscription_id: canonical.id,
       plan,
       status,
-      current_period_end: toIsoFromUnix((canonical as any).current_period_end ?? null),
+      current_period_end: getCurrentPeriodEndIso(canonical),
       trial_until: toIsoFromUnix(canonical.trial_end ?? null),
     },
     { onConflict: "user_id" }
@@ -145,7 +164,6 @@ export async function POST(req: Request) {
   const supabase = createSupabaseAdminClient();
 
   try {
-    // checkout completed
     if (event.type === "checkout.session.completed") {
       const session = event.data.object as Stripe.Checkout.Session;
 
@@ -162,7 +180,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ received: true, sync: result });
     }
 
-    // subscription create/update/delete
     if (
       event.type === "customer.subscription.created" ||
       event.type === "customer.subscription.updated" ||

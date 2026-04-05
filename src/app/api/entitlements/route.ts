@@ -1,4 +1,3 @@
-//src/app/api/entitlements/route.ts
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -109,6 +108,25 @@ function planFromPriceId(priceId: string | null): Plan | null {
 
 function toIsoFromUnix(unix?: number | null) {
   return unix ? new Date(unix * 1000).toISOString() : null;
+}
+
+function getCurrentPeriodEndIso(sub: Stripe.Subscription | null | undefined) {
+  if (!sub) return null;
+
+  const topLevel = (sub as any).current_period_end;
+  if (typeof topLevel === "number" && Number.isFinite(topLevel)) {
+    return toIsoFromUnix(topLevel);
+  }
+
+  const itemEnds = (sub.items?.data ?? [])
+    .map((item) => item.current_period_end)
+    .filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+
+  if (itemEnds.length > 0) {
+    return toIsoFromUnix(Math.max(...itemEnds));
+  }
+
+  return null;
 }
 
 function noStoreHeaders() {
@@ -319,7 +337,6 @@ export async function GET(req: Request) {
 
     const storedRow = await getStoredSubscriptionRow(supabase, userId);
 
-    // 1) Najspoľahlivejšie: ak máme subscription ID, načítaj priamo tú konkrétnu subscription
     if (storedRow?.stripe_subscription_id) {
       const exactSub = await tryRetrieveSubscriptionById(storedRow.stripe_subscription_id);
 
@@ -330,17 +347,20 @@ export async function GET(req: Request) {
         const priceId = exactSub.items.data[0]?.price?.id ?? null;
         const plan = planFromPriceId(priceId);
         const status = normalizeStripeStatus(exactSub.status);
+
         console.log("ENTITLEMENTS EXACT SUB DEBUG", {
-  subscriptionId: exactSub.id,
-  status: exactSub.status,
-  trial_end: exactSub.trial_end,
-  current_period_end_raw: (exactSub as any).current_period_end,
-  cancel_at_period_end: exactSub.cancel_at_period_end,
-  cancel_at: exactSub.cancel_at,
-  canceled_at: exactSub.canceled_at,
-});
+          subscriptionId: exactSub.id,
+          status: exactSub.status,
+          trial_end: exactSub.trial_end,
+          current_period_end_top_level: (exactSub as any).current_period_end,
+          current_period_end_item_0: exactSub.items?.data?.[0]?.current_period_end,
+          cancel_at_period_end: exactSub.cancel_at_period_end,
+          cancel_at: exactSub.cancel_at,
+          canceled_at: exactSub.canceled_at,
+        });
+
         const trial_until = toIsoFromUnix(exactSub.trial_end ?? null);
-        const current_period_end = toIsoFromUnix((exactSub as any).current_period_end ?? null);
+        const current_period_end = getCurrentPeriodEndIso(exactSub);
 
         await supabase.from("subscriptions").upsert(
           {
@@ -416,7 +436,6 @@ export async function GET(req: Request) {
       }
     }
 
-    // 2) Fallback: skús customer lookup
     const found = await findBestCustomerAndSubscription(
       storedRow?.stripe_customer_id ?? null,
       userId,
@@ -429,17 +448,20 @@ export async function GET(req: Request) {
       const priceId = sub.items.data[0]?.price?.id ?? null;
       const plan = planFromPriceId(priceId);
       const status = normalizeStripeStatus(sub.status);
+
       console.log("ENTITLEMENTS CUSTOMER SCAN DEBUG", {
-  subscriptionId: sub.id,
-  status: sub.status,
-  trial_end: sub.trial_end,
-  current_period_end_raw: (sub as any).current_period_end,
-  cancel_at_period_end: sub.cancel_at_period_end,
-  cancel_at: sub.cancel_at,
-  canceled_at: sub.canceled_at,
-});
+        subscriptionId: sub.id,
+        status: sub.status,
+        trial_end: sub.trial_end,
+        current_period_end_top_level: (sub as any).current_period_end,
+        current_period_end_item_0: sub.items?.data?.[0]?.current_period_end,
+        cancel_at_period_end: sub.cancel_at_period_end,
+        cancel_at: sub.cancel_at,
+        canceled_at: sub.canceled_at,
+      });
+
       const trial_until = toIsoFromUnix(sub.trial_end ?? null);
-      const current_period_end = toIsoFromUnix((sub as any).current_period_end ?? null);
+      const current_period_end = getCurrentPeriodEndIso(sub);
 
       await supabase.from("subscriptions").upsert(
         {
@@ -514,7 +536,6 @@ export async function GET(req: Request) {
       );
     }
 
-    // 3) Posledná záchrana: keď Stripe lookup zlyhá, ale DB už má validný stav, použi DB
     if (
       storedRow &&
       storedRow.plan &&
@@ -534,7 +555,6 @@ export async function GET(req: Request) {
       );
     }
 
-    // 4) Žiadne členstvo
     if (!found.customerId && !storedRow?.stripe_customer_id) {
       return NextResponse.json(
         {
