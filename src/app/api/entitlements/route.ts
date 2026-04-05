@@ -1,3 +1,4 @@
+//src/app/api/stripe/webhook/route.ts
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -127,6 +128,48 @@ function getCurrentPeriodEndIso(sub: Stripe.Subscription | null | undefined) {
   }
 
   return null;
+}
+
+async function saveSubscriptionRow(
+  supabase: ReturnType<typeof createSupabaseAdminClient>,
+  payload: {
+    user_id: string;
+    plan: "basic" | "plus" | null;
+    status: string | null;
+    trial_until: string | null;
+    current_period_end: string | null;
+    stripe_customer_id: string | null;
+    stripe_subscription_id: string | null;
+  }
+) {
+  const { data: existing, error: existingError } = await supabase
+    .from("subscriptions")
+    .select("user_id")
+    .eq("user_id", payload.user_id)
+    .maybeSingle();
+
+  if (existingError) {
+    return { error: existingError };
+  }
+
+  if (existing?.user_id) {
+    const { error } = await supabase
+      .from("subscriptions")
+      .update({
+        plan: payload.plan,
+        status: payload.status,
+        trial_until: payload.trial_until,
+        current_period_end: payload.current_period_end,
+        stripe_customer_id: payload.stripe_customer_id,
+        stripe_subscription_id: payload.stripe_subscription_id,
+      })
+      .eq("user_id", payload.user_id);
+
+    return { error };
+  }
+
+  const { error } = await supabase.from("subscriptions").insert(payload);
+  return { error };
 }
 
 function noStoreHeaders() {
@@ -368,9 +411,7 @@ export async function GET(req: Request) {
 
         console.log("ENTITLEMENTS EXACT SUB UPSERT PAYLOAD", payload);
 
-        const { error: upsertError } = await supabase.from("subscriptions").upsert(payload, {
-          onConflict: "user_id",
-        });
+        const { error: upsertError } = await saveSubscriptionRow(supabase, payload);
 
         if (upsertError) {
           console.log("ENTITLEMENTS EXACT SUB UPSERT ERROR", upsertError);
@@ -481,9 +522,7 @@ export async function GET(req: Request) {
 
       console.log("ENTITLEMENTS CUSTOMER SCAN UPSERT PAYLOAD", payload);
 
-      const { error: upsertError } = await supabase.from("subscriptions").upsert(payload, {
-        onConflict: "user_id",
-      });
+      const { error: upsertError } = await saveSubscriptionRow(supabase, payload);
 
       if (upsertError) {
         console.log("ENTITLEMENTS CUSTOMER SCAN UPSERT ERROR", upsertError);
