@@ -312,6 +312,62 @@ function computeActualFromTrips(plan: any) {
 
   return { sum: any ? Number(sum.toFixed(2)) : null, missing, totalTrips };
 }
+function computeCaloriesFromPlan(plan: any) {
+  const days = Array.isArray(plan?.days) ? plan.days : [];
+  if (!days.length) {
+    return {
+      avg: null as number | null,
+      weekly: null as number | null,
+      has: false,
+    };
+  }
+
+  let weeklyTotal = 0;
+  let anyCalories = false;
+
+  for (const day of days) {
+    const breakfast =
+      typeof day?.breakfast_kcal === "number" && Number.isFinite(day.breakfast_kcal)
+        ? day.breakfast_kcal
+        : 0;
+
+    const lunch =
+      typeof day?.lunch_kcal === "number" && Number.isFinite(day.lunch_kcal)
+        ? day.lunch_kcal
+        : 0;
+
+    const dinner =
+      typeof day?.dinner_kcal === "number" && Number.isFinite(day.dinner_kcal)
+        ? day.dinner_kcal
+        : 0;
+
+    const hasAnyMealKcal =
+      (typeof day?.breakfast_kcal === "number" && Number.isFinite(day.breakfast_kcal)) ||
+      (typeof day?.lunch_kcal === "number" && Number.isFinite(day.lunch_kcal)) ||
+      (typeof day?.dinner_kcal === "number" && Number.isFinite(day.dinner_kcal));
+
+    if (hasAnyMealKcal) {
+      weeklyTotal += Math.round(breakfast + lunch + dinner);
+      anyCalories = true;
+    }
+  }
+
+  if (!anyCalories) {
+    return {
+      avg: null as number | null,
+      weekly: null as number | null,
+      has: false,
+    };
+  }
+
+  const daysCount = days.length || 7;
+
+  return {
+    avg: Math.round(weeklyTotal / daysCount),
+    weekly: Math.round(weeklyTotal),
+    has: true,
+  };
+}
 
 function toIntOrNull(raw: string, opts?: { min?: number; max?: number }) {
   const v = (raw ?? "").toString().trim();
@@ -1162,7 +1218,7 @@ const planLabel = hasActivePlan && ent?.plan ? ent.plan.toUpperCase() : "ŽIADNY
     return keys.map((k) => ({ ym: k, items: map.get(k)! }));
   }, [rows, yearFilter, monthFilter]);
 
-  const caloriesWeeksFiltered = useMemo(() => {
+    const caloriesWeeksFiltered = useMemo(() => {
     const base = rows
       .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.week_start))
       .filter((r) => {
@@ -1174,9 +1230,7 @@ const planLabel = hasActivePlan && ent?.plan ? ent.plan.toUpperCase() : "ŽIADNY
       })
       .map((r) => {
         const plan = r.plan ?? r.plan_generated ?? null;
-        const avg = plan?.summary?.avg_daily_kcal;
-        const weekly = plan?.summary?.weekly_total_kcal;
-        const has = typeof avg === "number" || typeof weekly === "number";
+        const { avg, weekly, has } = computeCaloriesFromPlan(plan);
         return { r, plan, avg, weekly, has };
       })
       .filter((x) => x.has);
@@ -1189,7 +1243,6 @@ const planLabel = hasActivePlan && ent?.plan ? ent.plan.toUpperCase() : "ŽIADNY
     const keys = Array.from(map.keys()).sort((a, b) => (a < b ? 1 : -1));
     return keys.map((k) => ({ ym: k, items: map.get(k)! }));
   }, [rows, yearFilter, monthFilter]);
-
   const financeWeeksFiltered = useMemo(() => {
     const base = rows
       .filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.week_start))
@@ -1683,7 +1736,7 @@ const planLabel = hasActivePlan && ent?.plan ? ent.plan.toUpperCase() : "ŽIADNY
                                     Týždeň {formatDateSK(r.week_start)} – {formatDateSK(weekEnd)}
                                   </div>
                                   <div className="mt-1 text-sm muted-2">
-                                    Priemer: <span className="font-semibold">{typeof avg === "number" ? avg : "—"}</span> kcal/deň {" • "}
+                                    Priemer denne (domácnosť): <span className="font-semibold">{typeof avg === "number" ? avg : "—"}</span> kcal/deň {" • "}
                                     Týždeň: <span className="font-semibold">{typeof weekly === "number" ? weekly : "—"}</span> kcal
                                   </div>
                                 </div>
