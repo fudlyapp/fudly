@@ -257,12 +257,7 @@ function buildEntitlementsFromDbRow(
   }
 
   const limits = planLimits(plan);
-  const active_like = isActiveLike(
-    status,
-    now,
-    row.current_period_end,
-    row.trial_until
-  );
+  const active_like = isActiveLike(status, now, row.current_period_end, row.trial_until);
 
   return {
     ...debug,
@@ -342,11 +337,15 @@ export async function GET(req: Request) {
 
       if (exactSub) {
         const customerId =
-          typeof exactSub.customer === "string" ? exactSub.customer : exactSub.customer?.id ?? storedRow.stripe_customer_id;
+          typeof exactSub.customer === "string"
+            ? exactSub.customer
+            : exactSub.customer?.id ?? storedRow.stripe_customer_id;
 
         const priceId = exactSub.items.data[0]?.price?.id ?? null;
         const plan = planFromPriceId(priceId);
         const status = normalizeStripeStatus(exactSub.status);
+        const trial_until = toIsoFromUnix(exactSub.trial_end ?? null);
+        const current_period_end = getCurrentPeriodEndIso(exactSub);
 
         console.log("ENTITLEMENTS EXACT SUB DEBUG", {
           subscriptionId: exactSub.id,
@@ -354,26 +353,36 @@ export async function GET(req: Request) {
           trial_end: exactSub.trial_end,
           current_period_end_top_level: (exactSub as any).current_period_end,
           current_period_end_item_0: exactSub.items?.data?.[0]?.current_period_end,
-          cancel_at_period_end: exactSub.cancel_at_period_end,
-          cancel_at: exactSub.cancel_at,
-          canceled_at: exactSub.canceled_at,
+          current_period_end_iso: current_period_end,
         });
 
-        const trial_until = toIsoFromUnix(exactSub.trial_end ?? null);
-        const current_period_end = getCurrentPeriodEndIso(exactSub);
+        const payload = {
+          user_id: userId,
+          stripe_customer_id: customerId ?? null,
+          stripe_subscription_id: exactSub.id,
+          plan,
+          status,
+          trial_until,
+          current_period_end,
+        };
 
-        await supabase.from("subscriptions").upsert(
-          {
-            user_id: userId,
-            stripe_customer_id: customerId ?? null,
-            stripe_subscription_id: exactSub.id,
-            plan,
-            status,
-            trial_until,
-            current_period_end,
-          },
-          { onConflict: "user_id" }
-        );
+        console.log("ENTITLEMENTS EXACT SUB UPSERT PAYLOAD", payload);
+
+        const { error: upsertError } = await supabase.from("subscriptions").upsert(payload, {
+          onConflict: "user_id",
+        });
+
+        if (upsertError) {
+          console.log("ENTITLEMENTS EXACT SUB UPSERT ERROR", upsertError);
+        }
+
+        const { data: verify, error: verifyError } = await supabase
+          .from("subscriptions")
+          .select("user_id, plan, status, trial_until, current_period_end, stripe_customer_id, stripe_subscription_id")
+          .eq("user_id", userId)
+          .maybeSingle();
+
+        console.log("ENTITLEMENTS EXACT SUB VERIFY", { verify, verifyError });
 
         if (!plan) {
           return NextResponse.json(
@@ -448,6 +457,8 @@ export async function GET(req: Request) {
       const priceId = sub.items.data[0]?.price?.id ?? null;
       const plan = planFromPriceId(priceId);
       const status = normalizeStripeStatus(sub.status);
+      const trial_until = toIsoFromUnix(sub.trial_end ?? null);
+      const current_period_end = getCurrentPeriodEndIso(sub);
 
       console.log("ENTITLEMENTS CUSTOMER SCAN DEBUG", {
         subscriptionId: sub.id,
@@ -455,26 +466,36 @@ export async function GET(req: Request) {
         trial_end: sub.trial_end,
         current_period_end_top_level: (sub as any).current_period_end,
         current_period_end_item_0: sub.items?.data?.[0]?.current_period_end,
-        cancel_at_period_end: sub.cancel_at_period_end,
-        cancel_at: sub.cancel_at,
-        canceled_at: sub.canceled_at,
+        current_period_end_iso: current_period_end,
       });
 
-      const trial_until = toIsoFromUnix(sub.trial_end ?? null);
-      const current_period_end = getCurrentPeriodEndIso(sub);
+      const payload = {
+        user_id: userId,
+        stripe_customer_id: customerId,
+        stripe_subscription_id: sub.id,
+        plan,
+        status,
+        trial_until,
+        current_period_end,
+      };
 
-      await supabase.from("subscriptions").upsert(
-        {
-          user_id: userId,
-          stripe_customer_id: customerId,
-          stripe_subscription_id: sub.id,
-          plan,
-          status,
-          trial_until,
-          current_period_end,
-        },
-        { onConflict: "user_id" }
-      );
+      console.log("ENTITLEMENTS CUSTOMER SCAN UPSERT PAYLOAD", payload);
+
+      const { error: upsertError } = await supabase.from("subscriptions").upsert(payload, {
+        onConflict: "user_id",
+      });
+
+      if (upsertError) {
+        console.log("ENTITLEMENTS CUSTOMER SCAN UPSERT ERROR", upsertError);
+      }
+
+      const { data: verify, error: verifyError } = await supabase
+        .from("subscriptions")
+        .select("user_id, plan, status, trial_until, current_period_end, stripe_customer_id, stripe_subscription_id")
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      console.log("ENTITLEMENTS CUSTOMER SCAN VERIFY", { verify, verifyError });
 
       if (!plan) {
         return NextResponse.json(
