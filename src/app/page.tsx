@@ -1,3 +1,4 @@
+//src/app/page.tsx
 "use client";
 
 import Image from "next/image";
@@ -278,7 +279,51 @@ export default function HomePage() {
     };
   }, [supabase, loggedIn]);
 
-  const planLabel = ent?.plan ? ent.plan.toUpperCase() : "ŽIADNY";
+    useEffect(() => {
+    if (!supabase || !loggedIn) return;
+
+    const refreshEntitlements = async () => {
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+
+      if (!token) {
+        setEnt(null);
+        return;
+      }
+
+      const res = await fetch(`/api/entitlements?t=${Date.now()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      });
+
+      const json = await res.json().catch(() => null);
+
+      if (res.ok && json) {
+        setEnt(json as Entitlements);
+      } else {
+        setEnt(null);
+      }
+    };
+
+    const onFocus = () => {
+      void refreshEntitlements();
+    };
+
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        void refreshEntitlements();
+      }
+    };
+
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [supabase, loggedIn]);
+  const planLabel = ent?.active_like && ent?.plan ? ent.plan.toUpperCase() : "ŽIADNY";
   const firstName =
     userEmail?.split("@")[0]?.split(".")[0]?.replace(/^./, (s) => s.toUpperCase()) || "vitaj späť";
 

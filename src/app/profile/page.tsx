@@ -937,9 +937,10 @@ export default function ProfilePage() {
   const [entLoading, setEntLoading] = useState(false);
   const [ent, setEnt] = useState<Entitlements | null>(null);
 
-  const isPlus = ent?.plan === "plus";
-  const caloriesEnabled = !!ent?.calories_enabled;
-  const planLabel = ent?.plan ? ent.plan.toUpperCase() : "ŽIADNY";
+  const hasActivePlan = !!ent?.active_like;
+const isPlus = hasActivePlan && ent?.plan === "plus";
+const caloriesEnabled = hasActivePlan && !!ent?.calories_enabled;
+const planLabel = hasActivePlan && ent?.plan ? ent.plan.toUpperCase() : "ŽIADNY";
 
   async function fetchEntitlements(signal?: AbortSignal) {
     if (!accessToken) {
@@ -1016,6 +1017,37 @@ export default function ProfilePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accessToken, rows.length]);
 
+    useEffect(() => {
+    if (!accessToken) return;
+
+    let ac: AbortController | null = null;
+
+    const refresh = () => {
+      ac?.abort();
+      ac = new AbortController();
+      fetchEntitlements(ac.signal);
+    };
+
+    const onFocus = () => {
+      refresh();
+    };
+
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        refresh();
+      }
+    };
+
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      ac?.abort();
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accessToken, rows.length]);
   useEffect(() => {
     if (tab === "calories" && (!caloriesEnabled || !isPlus)) setTab("plans");
   }, [tab, caloriesEnabled, isPlus]);
