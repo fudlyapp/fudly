@@ -43,33 +43,16 @@ async function saveSubscriptionRow(
     stripe_subscription_id: string | null;
   }
 ) {
-  const { data: existing, error: existingError } = await supabase
-    .from("subscriptions")
-    .select("user_id")
-    .eq("user_id", payload.user_id)
-    .maybeSingle();
+  const { error } = await supabase.rpc("upsert_subscription_state", {
+    p_user_id: payload.user_id,
+    p_plan: payload.plan,
+    p_status: payload.status,
+    p_trial_until: payload.trial_until,
+    p_current_period_end: payload.current_period_end,
+    p_stripe_customer_id: payload.stripe_customer_id,
+    p_stripe_subscription_id: payload.stripe_subscription_id,
+  });
 
-  if (existingError) {
-    return { error: existingError };
-  }
-
-  if (existing?.user_id) {
-    const { error } = await supabase
-      .from("subscriptions")
-      .update({
-        plan: payload.plan,
-        status: payload.status,
-        trial_until: payload.trial_until,
-        current_period_end: payload.current_period_end,
-        stripe_customer_id: payload.stripe_customer_id,
-        stripe_subscription_id: payload.stripe_subscription_id,
-      })
-      .eq("user_id", payload.user_id);
-
-    return { error };
-  }
-
-  const { error } = await supabase.from("subscriptions").insert(payload);
   return { error };
 }
 
