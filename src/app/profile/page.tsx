@@ -1755,9 +1755,7 @@ const planLabel = hasActivePlan && ent?.plan ? ent.plan.toUpperCase() : "ŽIADNY
             {tab === "finance" ? (
               <section className="rounded-3xl p-6 surface-same-as-nav surface-border">
                 <h2 className="text-xl font-semibold">Financie</h2>
-                <p className="mt-1 text-sm muted">
-                  BASIC: stĺpcový graf budget vs reálna cena + preview kategórií a TOP 5. PLUS: plné rozdelenie nakúpených položiek podľa kategórie a TOP 5 najdrahších položiek s konkrétnymi hodnotami.
-                </p>
+                
 
                 {loading ? <div className="mt-4 text-sm muted-2">Načítavam…</div> : null}
                 {error ? <div className="mt-4 text-sm text-red-500">Chyba: {error}</div> : null}
