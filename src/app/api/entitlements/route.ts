@@ -1,3 +1,4 @@
+//src/app/api/entitlements/route.ts
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -9,6 +10,16 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string);
 
 type Plan = "basic" | "plus";
 type Status = "inactive" | "trialing" | "active" | "past_due" | "canceled" | "none";
+
+type SubscriptionRow = {
+  user_id: string;
+  plan: Plan | null;
+  status: Status | null;
+  trial_until: string | null;
+  current_period_end: string | null;
+  stripe_customer_id: string | null;
+  stripe_subscription_id: string | null;
+};
 
 function planLimits(plan: Plan) {
   if (plan === "plus") {
@@ -104,18 +115,31 @@ function noStoreHeaders() {
   return { "Cache-Control": "no-store" };
 }
 
-async function getStoredStripeCustomerId(
+async function getStoredSubscriptionRow(
   supabase: ReturnType<typeof createSupabaseAdminClient>,
   userId: string
-) {
-  const { data: row, error } = await supabase
+): Promise<SubscriptionRow | null> {
+  const { data, error } = await supabase
     .from("subscriptions")
-    .select("stripe_customer_id")
+    .select(
+      "user_id, plan, status, trial_until, current_period_end, stripe_customer_id, stripe_subscription_id"
+    )
     .eq("user_id", userId)
     .maybeSingle();
 
   if (error) throw new Error(error.message);
-  return row?.stripe_customer_id ?? null;
+  return (data as SubscriptionRow | null) ?? null;
+}
+
+async function tryRetrieveSubscriptionById(subscriptionId: string | null) {
+  if (!subscriptionId) return null;
+
+  try {
+    const sub = await stripe.subscriptions.retrieve(subscriptionId);
+    return sub;
+  } catch {
+    return null;
+  }
 }
 
 async function listCandidateCustomerIds(
@@ -187,6 +211,58 @@ async function findBestCustomerAndSubscription(
   };
 }
 
+function buildEntitlementsFromDbRow(
+  row: SubscriptionRow,
+  now: number,
+  used: number,
+  debug: Record<string, any> = {}
+) {
+  const plan = row.plan;
+  const status = (row.status ?? "none") as Status;
+
+  if (!plan) {
+    return {
+      ...debug,
+      plan: null,
+      status,
+      active_like: false,
+      can_generate: false,
+      weekly_limit: 0,
+      used,
+      remaining: 0,
+      calories_enabled: false,
+      allowed_styles: [],
+      trial_until: row.trial_until,
+      current_period_end: row.current_period_end,
+      has_stripe_link: !!row.stripe_customer_id,
+    };
+  }
+
+  const limits = planLimits(plan);
+  const active_like = isActiveLike(
+    status,
+    now,
+    row.current_period_end,
+    row.trial_until
+  );
+
+  return {
+    ...debug,
+    plan,
+    status,
+    active_like,
+    can_generate: active_like && !!row.stripe_customer_id,
+    weekly_limit: limits.weekly_limit,
+    used,
+    remaining: Math.max(0, limits.weekly_limit - used),
+    calories_enabled: limits.calories_enabled,
+    allowed_styles: limits.allowed_styles,
+    trial_until: row.trial_until,
+    current_period_end: row.current_period_end,
+    has_stripe_link: !!row.stripe_customer_id,
+  };
+}
+
 export async function GET(req: Request) {
   try {
     const auth = req.headers.get("authorization") || "";
@@ -215,125 +291,10 @@ export async function GET(req: Request) {
 
     const supabase = createSupabaseAdminClient();
 
-    const storedCustomerId = await getStoredStripeCustomerId(supabase, userId);
-
-    const found = await findBestCustomerAndSubscription(storedCustomerId, userId, userEmail);
-
-    if (!found.customerId) {
-      return NextResponse.json(
-        {
-          debug_user_id: userId,
-          debug_email: userEmail,
-          plan: null,
-          status: "none" as const,
-          active_like: false,
-          can_generate: false,
-          weekly_limit: 0,
-          used: 0,
-          remaining: 0,
-          calories_enabled: false,
-          allowed_styles: [],
-          trial_until: null,
-          current_period_end: null,
-          has_stripe_link: false,
-        },
-        { headers: noStoreHeaders() }
-      );
-    }
-
-    if (!found.subscription) {
-      await supabase.from("subscriptions").upsert(
-        {
-          user_id: userId,
-          stripe_customer_id: found.customerId,
-          stripe_subscription_id: null,
-          plan: null,
-          status: "none",
-          trial_until: null,
-          current_period_end: null,
-        },
-        { onConflict: "user_id" }
-      );
-
-      return NextResponse.json(
-        {
-          debug_user_id: userId,
-          debug_email: userEmail,
-          debug_customer_id: found.customerId,
-          plan: null,
-          status: "none" as const,
-          active_like: false,
-          can_generate: false,
-          weekly_limit: 0,
-          used: 0,
-          remaining: 0,
-          calories_enabled: false,
-          allowed_styles: [],
-          trial_until: null,
-          current_period_end: null,
-          has_stripe_link: true,
-        },
-        { headers: noStoreHeaders() }
-      );
-    }
-
-    const sub = found.subscription;
-    const customerId = found.customerId;
-
-    const priceId = sub.items.data[0]?.price?.id ?? null;
-    const plan = planFromPriceId(priceId);
-    const status = normalizeStripeStatus(sub.status);
-
-    const trial_until = toIsoFromUnix(sub.trial_end ?? null);
-    const current_period_end = toIsoFromUnix((sub as any).current_period_end ?? null);
-
-    await supabase.from("subscriptions").upsert(
-      {
-        user_id: userId,
-        stripe_customer_id: customerId,
-        stripe_subscription_id: sub.id,
-        plan,
-        status,
-        trial_until,
-        current_period_end,
-      },
-      { onConflict: "user_id" }
-    );
-
-    if (!plan) {
-      return NextResponse.json(
-        {
-          debug_user_id: userId,
-          debug_email: userEmail,
-          debug_customer_id: customerId,
-          debug_price_id: priceId,
-          debug_subscription_id: sub.id,
-          plan: null,
-          status,
-          active_like: false,
-          can_generate: false,
-          weekly_limit: 0,
-          used: 0,
-          remaining: 0,
-          calories_enabled: false,
-          allowed_styles: [],
-          trial_until,
-          current_period_end,
-          has_stripe_link: true,
-        },
-        { headers: noStoreHeaders() }
-      );
-    }
-
-    const limits = planLimits(plan);
-    const active_like = isActiveLike(status, now, current_period_end, trial_until);
-    const can_generate = active_like && !!customerId;
-
     const url = new URL(req.url);
     const week_start = url.searchParams.get("week_start");
 
     let used = 0;
-
     if (week_start && /^\d{4}-\d{2}-\d{2}$/.test(week_start)) {
       const { data: usage, error: usageErr } = await supabase
         .from("generation_usage")
@@ -356,27 +317,253 @@ export async function GET(req: Request) {
       used = usage?.count ?? 0;
     }
 
-    const remaining = Math.max(0, limits.weekly_limit - used);
+    const storedRow = await getStoredSubscriptionRow(supabase, userId);
+
+    // 1) Najspoľahlivejšie: ak máme subscription ID, načítaj priamo tú konkrétnu subscription
+    if (storedRow?.stripe_subscription_id) {
+      const exactSub = await tryRetrieveSubscriptionById(storedRow.stripe_subscription_id);
+
+      if (exactSub) {
+        const customerId =
+          typeof exactSub.customer === "string" ? exactSub.customer : exactSub.customer?.id ?? storedRow.stripe_customer_id;
+
+        const priceId = exactSub.items.data[0]?.price?.id ?? null;
+        const plan = planFromPriceId(priceId);
+        const status = normalizeStripeStatus(exactSub.status);
+        const trial_until = toIsoFromUnix(exactSub.trial_end ?? null);
+        const current_period_end = toIsoFromUnix((exactSub as any).current_period_end ?? null);
+
+        await supabase.from("subscriptions").upsert(
+          {
+            user_id: userId,
+            stripe_customer_id: customerId ?? null,
+            stripe_subscription_id: exactSub.id,
+            plan,
+            status,
+            trial_until,
+            current_period_end,
+          },
+          { onConflict: "user_id" }
+        );
+
+        if (!plan) {
+          return NextResponse.json(
+            {
+              debug_route_version: "entitlements-v4",
+              debug_user_id: userId,
+              debug_email: userEmail,
+              debug_source: "stripe_exact_subscription",
+              debug_stored_customer_id: storedRow.stripe_customer_id,
+              debug_stored_subscription_id: storedRow.stripe_subscription_id,
+              debug_customer_id: customerId ?? null,
+              debug_subscription_id: exactSub.id,
+              debug_price_id: priceId,
+              plan: null,
+              status,
+              active_like: false,
+              can_generate: false,
+              weekly_limit: 0,
+              used,
+              remaining: 0,
+              calories_enabled: false,
+              allowed_styles: [],
+              trial_until,
+              current_period_end,
+              has_stripe_link: !!customerId,
+            },
+            { headers: noStoreHeaders() }
+          );
+        }
+
+        const limits = planLimits(plan);
+        const active_like = isActiveLike(status, now, current_period_end, trial_until);
+
+        return NextResponse.json(
+          {
+            debug_route_version: "entitlements-v4",
+            debug_user_id: userId,
+            debug_email: userEmail,
+            debug_source: "stripe_exact_subscription",
+            debug_stored_customer_id: storedRow.stripe_customer_id,
+            debug_stored_subscription_id: storedRow.stripe_subscription_id,
+            debug_customer_id: customerId ?? null,
+            debug_subscription_id: exactSub.id,
+            debug_price_id: priceId,
+            plan,
+            status,
+            active_like,
+            can_generate: active_like && !!customerId,
+            weekly_limit: limits.weekly_limit,
+            used,
+            remaining: Math.max(0, limits.weekly_limit - used),
+            calories_enabled: limits.calories_enabled,
+            allowed_styles: limits.allowed_styles,
+            trial_until,
+            current_period_end,
+            has_stripe_link: !!customerId,
+          },
+          { headers: noStoreHeaders() }
+        );
+      }
+    }
+
+    // 2) Fallback: skús customer lookup
+    const found = await findBestCustomerAndSubscription(
+      storedRow?.stripe_customer_id ?? null,
+      userId,
+      userEmail
+    );
+
+    if (found.customerId && found.subscription) {
+      const sub = found.subscription;
+      const customerId = found.customerId;
+      const priceId = sub.items.data[0]?.price?.id ?? null;
+      const plan = planFromPriceId(priceId);
+      const status = normalizeStripeStatus(sub.status);
+      const trial_until = toIsoFromUnix(sub.trial_end ?? null);
+      const current_period_end = toIsoFromUnix((sub as any).current_period_end ?? null);
+
+      await supabase.from("subscriptions").upsert(
+        {
+          user_id: userId,
+          stripe_customer_id: customerId,
+          stripe_subscription_id: sub.id,
+          plan,
+          status,
+          trial_until,
+          current_period_end,
+        },
+        { onConflict: "user_id" }
+      );
+
+      if (!plan) {
+        return NextResponse.json(
+          {
+            debug_route_version: "entitlements-v4",
+            debug_user_id: userId,
+            debug_email: userEmail,
+            debug_source: "stripe_customer_scan",
+            debug_stored_customer_id: storedRow?.stripe_customer_id ?? null,
+            debug_stored_subscription_id: storedRow?.stripe_subscription_id ?? null,
+            debug_customer_id: customerId,
+            debug_subscription_id: sub.id,
+            debug_price_id: priceId,
+            plan: null,
+            status,
+            active_like: false,
+            can_generate: false,
+            weekly_limit: 0,
+            used,
+            remaining: 0,
+            calories_enabled: false,
+            allowed_styles: [],
+            trial_until,
+            current_period_end,
+            has_stripe_link: true,
+          },
+          { headers: noStoreHeaders() }
+        );
+      }
+
+      const limits = planLimits(plan);
+      const active_like = isActiveLike(status, now, current_period_end, trial_until);
+
+      return NextResponse.json(
+        {
+          debug_route_version: "entitlements-v4",
+          debug_user_id: userId,
+          debug_email: userEmail,
+          debug_source: "stripe_customer_scan",
+          debug_stored_customer_id: storedRow?.stripe_customer_id ?? null,
+          debug_stored_subscription_id: storedRow?.stripe_subscription_id ?? null,
+          debug_customer_id: customerId,
+          debug_subscription_id: sub.id,
+          debug_price_id: priceId,
+          plan,
+          status,
+          active_like,
+          can_generate: active_like && !!customerId,
+          weekly_limit: limits.weekly_limit,
+          used,
+          remaining: Math.max(0, limits.weekly_limit - used),
+          calories_enabled: limits.calories_enabled,
+          allowed_styles: limits.allowed_styles,
+          trial_until,
+          current_period_end,
+          has_stripe_link: true,
+        },
+        { headers: noStoreHeaders() }
+      );
+    }
+
+    // 3) Posledná záchrana: keď Stripe lookup zlyhá, ale DB už má validný stav, použi DB
+    if (
+      storedRow &&
+      storedRow.plan &&
+      storedRow.status &&
+      ["trialing", "active", "past_due"].includes(storedRow.status)
+    ) {
+      return NextResponse.json(
+        buildEntitlementsFromDbRow(storedRow, now, used, {
+          debug_route_version: "entitlements-v4",
+          debug_user_id: userId,
+          debug_email: userEmail,
+          debug_source: "db_fallback",
+          debug_stored_customer_id: storedRow.stripe_customer_id,
+          debug_stored_subscription_id: storedRow.stripe_subscription_id,
+        }),
+        { headers: noStoreHeaders() }
+      );
+    }
+
+    // 4) Žiadne členstvo
+    if (!found.customerId && !storedRow?.stripe_customer_id) {
+      return NextResponse.json(
+        {
+          debug_route_version: "entitlements-v4",
+          debug_user_id: userId,
+          debug_email: userEmail,
+          debug_source: "no_customer",
+          debug_stored_customer_id: storedRow?.stripe_customer_id ?? null,
+          debug_stored_subscription_id: storedRow?.stripe_subscription_id ?? null,
+          plan: null,
+          status: "none" as const,
+          active_like: false,
+          can_generate: false,
+          weekly_limit: 0,
+          used,
+          remaining: 0,
+          calories_enabled: false,
+          allowed_styles: [],
+          trial_until: null,
+          current_period_end: null,
+          has_stripe_link: false,
+        },
+        { headers: noStoreHeaders() }
+      );
+    }
 
     return NextResponse.json(
       {
+        debug_route_version: "entitlements-v4",
         debug_user_id: userId,
         debug_email: userEmail,
-        debug_customer_id: customerId,
-        debug_subscription_id: sub.id,
-        debug_price_id: priceId,
-        plan,
-        status,
-        active_like,
-        can_generate,
-        weekly_limit: limits.weekly_limit,
+        debug_source: "customer_without_subscription",
+        debug_stored_customer_id: storedRow?.stripe_customer_id ?? null,
+        debug_stored_subscription_id: storedRow?.stripe_subscription_id ?? null,
+        debug_customer_id: found.customerId ?? storedRow?.stripe_customer_id ?? null,
+        plan: null,
+        status: "none" as const,
+        active_like: false,
+        can_generate: false,
+        weekly_limit: 0,
         used,
-        remaining,
-        calories_enabled: limits.calories_enabled,
-        allowed_styles: limits.allowed_styles,
-        trial_until,
-        current_period_end,
-        has_stripe_link: true,
+        remaining: 0,
+        calories_enabled: false,
+        allowed_styles: [],
+        trial_until: null,
+        current_period_end: null,
+        has_stripe_link: !!(found.customerId ?? storedRow?.stripe_customer_id),
       },
       { headers: noStoreHeaders() }
     );
