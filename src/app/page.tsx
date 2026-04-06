@@ -345,9 +345,9 @@ export default function HomePage() {
         {loggedIn ? (
           <>
             <section className="pt-16 pb-12 relative isolate">
-              <div className="absolute inset-0 flex justify-center -z-20">
-                <div className="w-[620px] h-[620px] bg-black/10 dark:bg-black/5 blur-[160px] rounded-full" />
-              </div>
+  <div className="pointer-events-none absolute inset-0 flex justify-center -z-20">
+    <div className="w-[620px] h-[620px] bg-black/10 dark:bg-black/5 blur-[160px] rounded-full" />
+  </div>
 
               <div className="absolute inset-x-0 top-0 flex justify-center pointer-events-none -z-10">
                 <div className="relative w-[320px] h-[320px] md:w-[560px] md:h-[560px] opacity-[0.07] dark:opacity-[0.08]">
@@ -403,9 +403,9 @@ export default function HomePage() {
           </>
         ) : (
           <section className="pt-20 pb-14 relative isolate">
-            <div className="absolute inset-0 flex justify-center -z-20">
-              <div className="w-[760px] h-[760px] bg-black/10 dark:bg-black/5 blur-[180px] rounded-full" />
-            </div>
+  <div className="pointer-events-none absolute inset-0 flex justify-center -z-20">
+    <div className="w-[760px] h-[760px] bg-black/10 dark:bg-black/5 blur-[180px] rounded-full" />
+  </div>
 
             <div className="absolute inset-x-0 top-8 md:top-0 flex justify-center pointer-events-none -z-10">
               <div className="relative w-[360px] h-[360px] md:w-[640px] md:h-[640px] opacity-[0.07] dark:opacity-[0.08]">
