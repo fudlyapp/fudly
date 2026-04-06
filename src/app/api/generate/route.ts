@@ -990,23 +990,23 @@ function rebuildShoppingFromRecipes(plan: any, haveRaw: string, shoppingTrips: n
   }
 
   const byTrip = new Map<number, any[]>();
-  for (const entry of remainingByTrip.values()) {
-    const price = estimateItemPrice(
-      canonicalIngredientName(entry.name),
-      entry.unit,
-      entry.amount,
-      priceHints
-    );
+Array.from(remainingByTrip.values()).forEach((entry) => {
+  const price = estimateItemPrice(
+    canonicalIngredientName(entry.name),
+    entry.unit,
+    entry.amount,
+    priceHints
+  );
 
-    const item = {
-      name: entry.name,
-      quantity: formatQuantity(entry.amount, entry.unit),
-      estimated_price_eur: price,
-      category_key: entry.category_key,
-    };
+  const item = {
+    name: entry.name,
+    quantity: formatQuantity(entry.amount, entry.unit),
+    estimated_price_eur: price,
+    category_key: entry.category_key,
+  };
 
-    byTrip.set(entry.trip, [...(byTrip.get(entry.trip) ?? []), item]);
-  }
+  byTrip.set(entry.trip, [...(byTrip.get(entry.trip) ?? []), item]);
+});
 
   plan.shopping = ranges.map((range) => {
     const items = (byTrip.get(range.trip) ?? []).sort((a, b) =>
