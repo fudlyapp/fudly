@@ -380,7 +380,7 @@ export default function HomePage() {
               </div>
             </section>
 
-            <section className="pb-12">
+            <section className="relative z-10 pb-12">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <AppActionCard
                   title="Vygenerovať jedálniček"
