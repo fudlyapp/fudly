@@ -630,7 +630,7 @@ function parseQuantityPrefix(input: string): ParsedQuantity | null {
   const normalized = normalizeBaseName(input);
   if (!normalized) return null;
 
-  const m = normalized.match(/^(\d+\s+\d+\/\d+|\d+\/\d+|\d+(?:[.,]\d+)?)(?:\s+([a-z]+(?:\s+[a-z]+)?))?/i);
+  const m = normalized.match(/^(\d+\s+\d+\/\d+|\d+\/\d+|\d+(?:[.,]\d+)?)(?:\s*([a-z]+(?:\s+[a-z]+)?))?/i);
   if (!m) return null;
 
   const amount = parseSimpleNumber(m[1]);
@@ -653,6 +653,7 @@ function parseQuantityPrefix(input: string): ParsedQuantity | null {
       "ks",
       "kus",
       "kusy",
+      "kusov",
       "konzerva",
       "konzervy",
       "balenie",
@@ -690,6 +691,57 @@ function parseQuantityPrefix(input: string): ParsedQuantity | null {
     unit: normalizeUnit(unitRaw),
     consumed,
   };
+}
+
+function parseAmountAndUnit(rawAmount: string, rawUnit: string) {
+  const amount = parseSimpleNumber(rawAmount);
+  if (amount == null || amount <= 0) return null;
+
+  return {
+    amount: toBaseAmount(amount, rawUnit),
+    unit: normalizeUnit(rawUnit),
+  };
+}
+
+function parseQuantityAnywhere(input: string) {
+  const raw = (input || "").trim();
+  if (!raw) return null;
+
+  const normalized = normalizeBaseName(raw);
+
+  const patterns = [
+    /^(\d+\s+\d+\/\d+|\d+\/\d+|\d+(?:[.,]\d+)?)\s*(kg|g|l|ml|ks|kus|kusy|kusov|konzerva|konzervy|balenie|balenia|bochnik|hlavka|hlavky|strucik|struciky|platok|platky|lyzica|lyzice|lyzicka|lyzicky)\s+(.+)$/i,
+    /^(.+?)\s+(\d+\s+\d+\/\d+|\d+\/\d+|\d+(?:[.,]\d+)?)\s*(kg|g|l|ml|ks|kus|kusy|kusov|konzerva|konzervy|balenie|balenia|bochnik|hlavka|hlavky|strucik|struciky|platok|platky|lyzica|lyzice|lyzicka|lyzicky)$/i,
+    /^(.+?)\s*[-:]\s*(\d+\s+\d+\/\d+|\d+\/\d+|\d+(?:[.,]\d+)?)\s*(kg|g|l|ml|ks|kus|kusy|kusov|konzerva|konzervy|balenie|balenia|bochnik|hlavka|hlavky|strucik|struciky|platok|platky|lyzica|lyzice|lyzicka|lyzicky)$/i,
+  ];
+
+  for (let i = 0; i < patterns.length; i++) {
+    const p = patterns[i];
+    const m = normalized.match(p);
+    if (!m) continue;
+
+    if (i === 0) {
+      const parsed = parseAmountAndUnit(m[1], m[2]);
+      if (!parsed) continue;
+
+      return {
+        name: prettifyDisplayName(m[3]),
+        amount: parsed.amount,
+        unit: parsed.unit,
+      };
+    }
+
+    const parsed = parseAmountAndUnit(m[2], m[3]);
+    if (!parsed) continue;
+
+    return {
+      name: prettifyDisplayName(m[1]),
+      amount: parsed.amount,
+      unit: parsed.unit,
+    };
+  }
+
+  return null;
 }
 
 function formatQuantity(amount: number, unit: string) {
@@ -810,29 +862,22 @@ function parsePantryStock(haveRaw: string): PantryStock[] {
   if (!text) return [];
 
   const parts = text
-    .split(/[,;\n]+|\s+a\s+(?=\d)/gi)
+    .split(/\n|,|;/)
     .map((x) => x.trim())
     .filter(Boolean);
 
   const out: PantryStock[] = [];
 
   for (const part of parts) {
-    const normalized = normalizeBaseName(part);
-    if (!normalized) continue;
-
-    const parsed = parseQuantityPrefix(part);
+    const parsed = parseQuantityAnywhere(part);
     if (!parsed) continue;
 
-    const rest = normalizeSpaces(normalized.slice(parsed.consumed.length));
-    if (!rest) continue;
-
-    const displayName = prettifyDisplayName(rest);
-    const canonical = canonicalIngredientName(rest);
+    const canonical = canonicalIngredientName(parsed.name);
     if (!canonical) continue;
 
     out.push({
       canonical_name: canonical,
-      display_name: displayName,
+      display_name: parsed.name,
       amount: parsed.amount,
       unit: parsed.unit,
     });
