@@ -566,15 +566,40 @@ Rules:
 - Do not place ingredients for day 4-7 into trip 1 when there are 2 trips.
 ${caloriesBlock}
 
+IMPORTANT LOGIC FOR INGREDIENTS YOU ALREADY HAVE AT HOME:
+- Treat have_at_home as real existing stock that should be consumed before adding new purchases.
+- First determine the total weekly ingredient needs from all planned meals and recipes.
+- Then subtract have_at_home from those weekly needs.
+- Only the missing remainder may appear in the shopping list.
+- Never buy the full weekly amount if part of it is already available at home.
+- Example: if have_at_home contains "banány 4 ks" and the whole week uses 5 bananas in total, shopping must contain only 1 additional banana in total, not 2, not 3, not 5.
+- Example: if have_at_home contains "vajcia 6 ks" and the week uses 4 eggs total, eggs should not appear in shopping at all.
+- Apply this subtraction chronologically from day 1 forward.
+- Existing stock should be consumed by the earliest days/meals first, and only the remaining unmet quantity should be assigned to the appropriate shopping trip.
+- If an ingredient is first needed on later days and current stock still covers earlier use, do not buy extra pieces too early without reason.
+
+IMPORTANT LOGIC FOR SHOPPING TRIPS:
+- Shopping trips must be based on when ingredients are actually needed after subtracting home stock.
+- Do not put all missing quantity into trip 1 by default.
+- If part of an ingredient is needed in days 1-3 and another part only in days 4-7, split it between trips accordingly.
+- For fresh and shorter-life items like bananas, berries, leafy greens, soft bread, fresh herbs and similar, strongly prefer buying the later-needed portion in the later trip instead of the first trip.
+- Do not add safety reserve, extra spare pieces, or "just in case" quantities unless clearly necessary.
+- Quantities should be realistic and economical, but not artificially inflated.
+
+CONSISTENCY:
+- Shopping quantities must be consistent with recipe ingredient totals across the whole week.
+- The shopping list must not contradict the recipes.
+- If recipes together require fewer pieces than the shopping list suggests after subtracting home stock, reduce the shopping list.
+- Keep item naming consistent inside the same shopping list. Do not create duplicate item names that differ only by singular/plural, capitalization, or minor wording changes.
+- Prefer one consistent naming form, for example use either "jablká" or "jablko", not both.
+- Prefer one consistent naming form, for example use either "banány" or "banán", not both.
+
 SHOPPING:
 - For each trip include estimated_cost_eur.
 - For each shopping item include estimated_price_eur.
 - trip.estimated_cost_eur must equal the sum of estimated_price_eur for all items in that trip.
 - summary.estimated_total_cost_eur must equal the sum of all trip.estimated_cost_eur values.
 - Item prices should be realistic retail estimates in EUR for the quantity listed.
-- Keep item naming consistent inside the same shopping list. Do not create duplicate item names that differ only by singular/plural, capitalization, or minor wording changes.
-- Prefer one consistent naming form, for example use either "jablká" or "jablko", not both.
-- Prefer one consistent naming form, for example use either "banány" or "banán", not both.
 
 RECIPES:
 - Generate a recipe for EVERY meal: breakfast, lunch and dinner.
