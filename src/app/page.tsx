@@ -392,11 +392,13 @@ export default function HomePage() {
                   title="Otvoriť profil"
                   desc="Pozri si uložené plány, recepty a nákupné zoznamy."
                   href="/profile"
+                  primary
                 />
                 <AppActionCard
                   title="Spravovať členstvo"
                   desc="Skontroluj plán, limity a prípadne prejdi na vyššie členstvo."
                   href="/pricing"
+                  primary
                 />
               </div>
             </section>
