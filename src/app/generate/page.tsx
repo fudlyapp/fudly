@@ -343,6 +343,7 @@ export default function GeneratorPage() {
   const [repeatDays, setRepeatDays] = useState("2");
 
   const [loading, setLoading] = useState(false);
+  const [loadingSeconds, setLoadingSeconds] = useState(0);
   const [textResult, setTextResult] = useState("");
   const [plan, setPlan] = useState<PlanJSON | null>(null);
 
@@ -444,6 +445,19 @@ export default function GeneratorPage() {
 
     return () => ac.abort();
   }, [accessToken, weekStart]);
+
+useEffect(() => {
+  if (!loading) {
+    setLoadingSeconds(0);
+    return;
+  }
+
+  const timer = setInterval(() => {
+    setLoadingSeconds((s) => s + 1);
+  }, 1000);
+
+  return () => clearInterval(timer);
+}, [loading]);
 
   const tier = (ent?.plan ?? "basic") as "basic" | "plus";
   const generationLimitSafe = ent?.weekly_limit ?? (tier === "plus" ? 5 : 3);
@@ -1234,6 +1248,12 @@ export default function GeneratorPage() {
                 )}
               </div>
             </div>
+
+                {loading ? (
+  <div className="text-xs muted-2">
+    Generovanie prebieha… Čas generovania: {loadingSeconds}s
+  </div>
+) : null}
 
             <div className={fineText}>{t.generator.planningTip}</div>
 
