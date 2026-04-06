@@ -1,4 +1,3 @@
-//src/app/api/generate/route.ts
 import { NextResponse } from "next/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -22,6 +21,147 @@ type Body = {
 
 type Plan = "basic" | "plus";
 type Status = "inactive" | "trialing" | "active" | "past_due" | "canceled";
+
+type ParsedQuantity = {
+  amount: number;
+  unit: string;
+  consumed: string;
+};
+
+type IngredientUsage = {
+  day: number;
+  canonical_name: string;
+  display_name: string;
+  amount: number;
+  unit: string;
+  category_key: string;
+};
+
+type PantryStock = {
+  canonical_name: string;
+  display_name: string;
+  amount: number;
+  unit: string;
+};
+
+type PriceHint = {
+  price_per_unit: number;
+  samples: number;
+};
+
+type TripRange = {
+  trip: number;
+  from: number;
+  to: number;
+  covers_days: string;
+};
+
+const DAY_NAMES_SK = ["Pondelok", "Utorok", "Streda", "Štvrtok", "Piatok", "Sobota", "Nedeľa"];
+
+const NAME_STOPWORDS = new Set([
+  "cerstvy",
+  "cerstva",
+  "cerstve",
+  "zrely",
+  "zrela",
+  "zrele",
+  "velky",
+  "velka",
+  "velke",
+  "maly",
+  "mala",
+  "male",
+  "domaci",
+  "domaca",
+  "domace",
+  "bio",
+  "nakrajany",
+  "nakrajana",
+  "nakrajane",
+  "krajany",
+  "krajana",
+  "krajane",
+  "vareny",
+  "varena",
+  "varene",
+  "uvareny",
+  "uvarena",
+  "uvarene",
+  "duseny",
+  "dusena",
+  "dusene",
+  "peceny",
+  "pecena",
+  "pecene",
+  "surovy",
+  "surova",
+  "surove",
+  "jemny",
+  "jemna",
+  "jemne",
+  "hladky",
+  "hladka",
+  "hladke",
+  "biely",
+  "biela",
+  "biele",
+  "cely",
+  "cela",
+  "cele",
+  "polotucny",
+  "polotucna",
+  "polotucne",
+  "bez",
+  "kosti",
+  "koste",
+  "kostou",
+]);
+
+const SIMPLE_ALIASES: Record<string, string> = {
+  banan: "banan",
+  banany: "banan",
+  zemiak: "zemiak",
+  zemiaky: "zemiak",
+  zemiakov: "zemiak",
+  vajce: "vajce",
+  vajcia: "vajce",
+  vajec: "vajce",
+  kuracie: "kuraci",
+  hovadzie: "hovadzi",
+  bravcove: "bravcovi",
+  ryza: "ryza",
+  ryze: "ryza",
+  paradajka: "paradajka",
+  paradajky: "paradajka",
+  uhorka: "uhorka",
+  uhorky: "uhorka",
+  papriky: "paprika",
+  paprika: "paprika",
+  jablko: "jablko",
+  jablka: "jablko",
+  jahoda: "jahoda",
+  jahody: "jahoda",
+  cucoriedka: "cucoriedka",
+  cucoriedky: "cucoriedka",
+  slahacka: "smotana",
+  smotana: "smotana",
+  tvaroh: "tvaroh",
+  jogurt: "jogurt",
+  syr: "syr",
+  syra: "syr",
+  sunka: "sunka",
+  sunky: "sunka",
+  huby: "huba",
+  sampinon: "sampinon",
+  sampinony: "sampinon",
+  brokolica: "brokolica",
+  kuskus: "kuskus",
+  "kus kus": "kuskus",
+  vlocky: "vlocky",
+  ovsene: "ovseny",
+  vločka: "vlocky",
+  vločky: "vlocky",
+};
 
 function planLimits(plan: Plan) {
   if (plan === "plus") {
@@ -198,8 +338,6 @@ function addDaysISO(iso: string, add: number) {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
-const DAY_NAMES_SK = ["Pondelok", "Utorok", "Streda", "Štvrtok", "Piatok", "Sobota", "Nedeľa"];
-
 function styleHintFromValue(style: string) {
   switch (style) {
     case "rychle":
@@ -375,6 +513,515 @@ function normalizeShoppingCoversDays(plan: any, shoppingTrips: number) {
     return plan;
   }
 
+  return plan;
+}
+
+function stripDiacritics(s: string) {
+  return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+function normalizeSpaces(s: string) {
+  return s.replace(/\s+/g, " ").trim();
+}
+
+function normalizeBaseName(name: string) {
+  return normalizeSpaces(
+    stripDiacritics(
+      (name || "")
+        .toLowerCase()
+        .replace(/(\d)([a-zA-Z])/g, "$1 $2")
+        .replace(/([a-zA-Z])(\d)/g, "$1 $2")
+    )
+      .replace(/[()]/g, " ")
+      .replace(/[^a-z0-9\s]/g, " ")
+  );
+}
+
+function normalizeToken(token: string) {
+  const t = normalizeBaseName(token);
+  if (!t) return "";
+
+  if (SIMPLE_ALIASES[t]) return SIMPLE_ALIASES[t];
+
+  if (t.endsWith("ami") && t.length > 5) return t.slice(0, -3);
+  if (t.endsWith("och") && t.length > 5) return t.slice(0, -3);
+  if (t.endsWith("ove") && t.length > 5) return t.slice(0, -1);
+  if (t.endsWith("ovej") && t.length > 6) return t.slice(0, -3);
+  if (t.endsWith("ych") && t.length > 5) return t.slice(0, -3);
+  if (t.endsWith("ami") && t.length > 5) return t.slice(0, -3);
+  if (t.endsWith("y") && t.length > 4) return t.slice(0, -1);
+  if (t.endsWith("i") && t.length > 4) return t.slice(0, -1);
+
+  return t;
+}
+
+function canonicalIngredientName(name: string) {
+  const base = normalizeBaseName(name);
+  if (!base) return "";
+
+  const tokens = base
+    .split(" ")
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .filter((x) => !NAME_STOPWORDS.has(x))
+    .map(normalizeToken)
+    .filter(Boolean);
+
+  return tokens.join(" ");
+}
+
+function prettifyDisplayName(name: string) {
+  return normalizeSpaces((name || "").trim().replace(/\s+/g, " "));
+}
+
+function parseSimpleNumber(raw: string) {
+  const s = raw.replace(",", ".").trim();
+
+  if (/^\d+\s+\d+\/\d+$/.test(s)) {
+    const [whole, frac] = s.split(/\s+/);
+    const [a, b] = frac.split("/");
+    const n = Number(whole) + Number(a) / Number(b);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  if (/^\d+\/\d+$/.test(s)) {
+    const [a, b] = s.split("/");
+    const n = Number(a) / Number(b);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+
+function normalizeUnit(raw: string) {
+  const u = normalizeBaseName(raw);
+
+  if (!u) return "ks";
+
+  if (["kg", "kilogram", "kilogramy", "kilogramov"].includes(u)) return "g";
+  if (["g", "gram", "gramy", "gramov"].includes(u)) return "g";
+  if (["l", "liter", "litre", "litrov"].includes(u)) return "ml";
+  if (["ml", "mililiter", "mililitre", "mililitrov"].includes(u)) return "ml";
+
+  if (["ks", "kus", "kusy", "kusov"].includes(u)) return "ks";
+  if (["konzerva", "konzervy", "konzerv"].includes(u)) return "konzerva";
+  if (["balenie", "balenia", "baleni"].includes(u)) return "balenie";
+  if (["bochnik", "bochnik", "bochniky", "bochnikov"].includes(u)) return "bochnik";
+  if (["hlavka", "hlavky", "hlavok"].includes(u)) return "hlavka";
+  if (["strucik", "struciky", "strucikov"].includes(u)) return "strucik";
+  if (["platok", "platky", "platkov"].includes(u)) return "platok";
+  if (["lyzica", "lyzice", "lyzic", "lyzicka", "lyzicky", "lyziciek"].includes(u)) return "lyzica";
+
+  return u;
+}
+
+function toBaseAmount(amount: number, rawUnit: string) {
+  const normalized = normalizeUnit(rawUnit);
+  const raw = normalizeBaseName(rawUnit);
+
+  if (normalized === "g" && ["kg", "kilogram", "kilogramy", "kilogramov"].includes(raw)) return amount * 1000;
+  if (normalized === "ml" && ["l", "liter", "litre", "litrov"].includes(raw)) return amount * 1000;
+
+  return amount;
+}
+
+function parseQuantityPrefix(input: string): ParsedQuantity | null {
+  const normalized = normalizeBaseName(input);
+  if (!normalized) return null;
+
+  const m = normalized.match(/^(\d+\s+\d+\/\d+|\d+\/\d+|\d+(?:[.,]\d+)?)(?:\s+([a-z]+(?:\s+[a-z]+)?))?/i);
+  if (!m) return null;
+
+  const amount = parseSimpleNumber(m[1]);
+  if (amount == null || amount <= 0) return null;
+
+  let unitRaw = (m[2] || "").trim();
+  let consumed = m[1];
+
+  if (unitRaw) {
+    const unitWords = unitRaw.split(" ");
+    const first = unitWords[0] || "";
+    const second = unitWords.slice(0, 2).join(" ");
+
+    const knownTwoWord = ["velky bochnik", "maly bochnik"];
+    const knownOneWord = [
+      "kg",
+      "g",
+      "l",
+      "ml",
+      "ks",
+      "kus",
+      "kusy",
+      "konzerva",
+      "konzervy",
+      "balenie",
+      "balenia",
+      "bochnik",
+      "hlavka",
+      "hlavky",
+      "strucik",
+      "struciky",
+      "platok",
+      "platky",
+      "lyzica",
+      "lyzice",
+      "lyzicka",
+      "lyzicky",
+    ];
+
+    if (knownTwoWord.includes(second)) {
+      unitRaw = second;
+      consumed = `${m[1]} ${second}`;
+    } else if (knownOneWord.includes(first)) {
+      unitRaw = first;
+      consumed = `${m[1]} ${first}`;
+    } else {
+      unitRaw = "ks";
+      consumed = m[1];
+    }
+  } else {
+    unitRaw = "ks";
+    consumed = m[1];
+  }
+
+  return {
+    amount: toBaseAmount(amount, unitRaw),
+    unit: normalizeUnit(unitRaw),
+    consumed,
+  };
+}
+
+function formatQuantity(amount: number, unit: string) {
+  if (!Number.isFinite(amount) || amount <= 0) return "";
+
+  if (unit === "g") {
+    if (amount >= 1000 && amount % 1000 === 0) return `${amount / 1000} kg`;
+    if (amount >= 1000) return `${Number((amount / 1000).toFixed(2))} kg`;
+    return `${Math.round(amount)} g`;
+  }
+
+  if (unit === "ml") {
+    if (amount >= 1000 && amount % 1000 === 0) return `${amount / 1000} l`;
+    if (amount >= 1000) return `${Number((amount / 1000).toFixed(2))} l`;
+    return `${Math.round(amount)} ml`;
+  }
+
+  if (unit === "ks") return `${Number(amount.toFixed(2))} ks`;
+  if (unit === "konzerva") return `${Number(amount.toFixed(2))} konzervy`;
+  if (unit === "balenie") return `${Number(amount.toFixed(2))} balenia`;
+  if (unit === "bochnik") return `${Number(amount.toFixed(2))} bochník`;
+  if (unit === "hlavka") return `${Number(amount.toFixed(2))} hlávky`;
+  if (unit === "strucik") return `${Number(amount.toFixed(2))} strúčiky`;
+  if (unit === "platok") return `${Number(amount.toFixed(2))} plátky`;
+  if (unit === "lyzica") return `${Number(amount.toFixed(2))} lyžice`;
+
+  return `${Number(amount.toFixed(2))} ${unit}`;
+}
+
+function inferCategoryKey(name: string) {
+  const n = canonicalIngredientName(name);
+
+  if (/(paradajk|uhork|paprik|cibul|cesnak|mrkv|zemiak|salat|brokolic|karfiol|cuket|spenat|zelenin|petrzlen)/.test(n))
+    return "veg";
+  if (/(jablk|banan|hrusk|pomaranc|citron|kiwi|jahod|malin|hrozn|cucoried)/.test(n)) return "fruit";
+  if (/(kurac|hovadz|bravc|mlet|slan|sunka|klobas|morcac)/.test(n)) return "meat";
+  if (/(losos|tuniak|tresk|pstruh|ryb)/.test(n)) return "fish";
+  if (/(mliek|jogurt|syr|tvaroh|smotan|maslo|mozzarel|parmez|vajce)/.test(n)) return "dairy";
+  if (/(chlieb|rozok|baget|tortill|toast|zeml|bochnik)/.test(n)) return "bakery";
+  if (/(ryza|cestov|muk|ovsen|sosov|cicer|fazul|konzerv|olej|kuskus|muesli|musli)/.test(n)) return "dry";
+  if (/(mrazen)/.test(n)) return "frozen";
+  if (/(sol|koren|rasc|kari|oregano|bazalk|skoric|paprika)/.test(n)) return "spices";
+
+  return "other";
+}
+
+function getTripRanges(shoppingTrips: number): TripRange[] {
+  if (shoppingTrips === 1) return [{ trip: 1, from: 1, to: 7, covers_days: "1-7" }];
+  if (shoppingTrips === 2) {
+    return [
+      { trip: 1, from: 1, to: 3, covers_days: "1-3" },
+      { trip: 2, from: 4, to: 7, covers_days: "4-7" },
+    ];
+  }
+  if (shoppingTrips === 3) {
+    return [
+      { trip: 1, from: 1, to: 2, covers_days: "1-2" },
+      { trip: 2, from: 3, to: 4, covers_days: "3-4" },
+      { trip: 3, from: 5, to: 7, covers_days: "5-7" },
+    ];
+  }
+  return [
+    { trip: 1, from: 1, to: 2, covers_days: "1-2" },
+    { trip: 2, from: 3, to: 4, covers_days: "3-4" },
+    { trip: 3, from: 5, to: 6, covers_days: "5-6" },
+    { trip: 4, from: 7, to: 7, covers_days: "7-7" },
+  ];
+}
+
+function tripForDay(day: number, shoppingTrips: number) {
+  const ranges = getTripRanges(shoppingTrips);
+  return ranges.find((r) => day >= r.from && day <= r.to)?.trip ?? ranges[ranges.length - 1].trip;
+}
+
+function extractDayFromRecipeKey(key: string) {
+  const m = normalizeRecipeKey(key).match(/^d(\d)_(breakfast|lunch|dinner)$/);
+  if (!m) return null;
+  const day = Number(m[1]);
+  return Number.isFinite(day) ? day : null;
+}
+
+function parseIngredientUsagesFromRecipes(recipes: Record<string, any>): IngredientUsage[] {
+  const usages: IngredientUsage[] = [];
+
+  for (const [rawKey, recipe] of Object.entries(recipes || {})) {
+    const day = extractDayFromRecipeKey(rawKey);
+    if (!day) continue;
+
+    const ingredients = Array.isArray((recipe as any)?.ingredients) ? (recipe as any).ingredients : [];
+    for (const item of ingredients) {
+      const name = prettifyDisplayName(item?.name || "");
+      const quantity = String(item?.quantity || "").trim();
+
+      if (!name || !quantity) continue;
+
+      const parsed = parseQuantityPrefix(quantity);
+      if (!parsed) continue;
+
+      const canonical = canonicalIngredientName(name);
+      if (!canonical) continue;
+
+      usages.push({
+        day,
+        canonical_name: canonical,
+        display_name: name,
+        amount: parsed.amount,
+        unit: parsed.unit,
+        category_key: inferCategoryKey(name),
+      });
+    }
+  }
+
+  return usages;
+}
+
+function parsePantryStock(haveRaw: string): PantryStock[] {
+  const text = (haveRaw || "").trim();
+  if (!text) return [];
+
+  const parts = text
+    .split(/[,;\n]+|\s+a\s+(?=\d)/gi)
+    .map((x) => x.trim())
+    .filter(Boolean);
+
+  const out: PantryStock[] = [];
+
+  for (const part of parts) {
+    const normalized = normalizeBaseName(part);
+    if (!normalized) continue;
+
+    const parsed = parseQuantityPrefix(part);
+    if (!parsed) continue;
+
+    const rest = normalizeSpaces(normalized.slice(parsed.consumed.length));
+    if (!rest) continue;
+
+    const displayName = prettifyDisplayName(rest);
+    const canonical = canonicalIngredientName(rest);
+    if (!canonical) continue;
+
+    out.push({
+      canonical_name: canonical,
+      display_name: displayName,
+      amount: parsed.amount,
+      unit: parsed.unit,
+    });
+  }
+
+  return out;
+}
+
+function buildPriceHintMap(plan: any) {
+  const map = new Map<string, PriceHint>();
+
+  const shopping = Array.isArray(plan?.shopping) ? plan.shopping : [];
+  for (const trip of shopping) {
+    const items = Array.isArray(trip?.items) ? trip.items : [];
+    for (const item of items) {
+      const price = Number(item?.estimated_price_eur);
+      if (!Number.isFinite(price) || price < 0) continue;
+
+      const name = String(item?.name || "").trim();
+      const quantity = String(item?.quantity || "").trim();
+
+      const canonical = canonicalIngredientName(name);
+      const parsed = parseQuantityPrefix(quantity);
+
+      if (!canonical || !parsed || parsed.amount <= 0) continue;
+
+      const key = `${canonical}|${parsed.unit}`;
+      const unitPrice = price / parsed.amount;
+
+      const prev = map.get(key);
+      if (!prev) {
+        map.set(key, { price_per_unit: unitPrice, samples: 1 });
+      } else {
+        const nextSamples = prev.samples + 1;
+        map.set(key, {
+          price_per_unit: (prev.price_per_unit * prev.samples + unitPrice) / nextSamples,
+          samples: nextSamples,
+        });
+      }
+    }
+  }
+
+  return map;
+}
+
+function fallbackUnitPrice(canonicalName: string, unit: string) {
+  const category = inferCategoryKey(canonicalName);
+
+  if (unit === "g") {
+    if (category === "meat") return 0.015;
+    if (category === "fish") return 0.02;
+    if (category === "fruit") return 0.005;
+    if (category === "veg") return 0.004;
+    if (category === "dairy") return 0.007;
+    return 0.006;
+  }
+
+  if (unit === "ml") {
+    if (category === "dairy") return 0.0025;
+    return 0.003;
+  }
+
+  if (unit === "ks") {
+    if (category === "fruit") return 0.7;
+    if (category === "veg") return 0.8;
+    if (category === "dairy") return 0.35;
+    return 1.2;
+  }
+
+  if (unit === "konzerva") return 2;
+  if (unit === "balenie") return 2.5;
+  if (unit === "bochnik") return 2.5;
+  if (unit === "hlavka") return 1.8;
+  if (unit === "strucik") return 0.12;
+  if (unit === "platok") return 0.18;
+  if (unit === "lyzica") return 0.15;
+
+  return 1.5;
+}
+
+function estimateItemPrice(
+  canonicalName: string,
+  unit: string,
+  amount: number,
+  priceHints: Map<string, PriceHint>
+) {
+  const key = `${canonicalName}|${unit}`;
+  const hint = priceHints.get(key);
+  const perUnit = hint?.price_per_unit ?? fallbackUnitPrice(canonicalName, unit);
+  return Number((perUnit * amount).toFixed(2));
+}
+
+function rebuildShoppingFromRecipes(plan: any, haveRaw: string, shoppingTrips: number) {
+  const recipes = plan?.recipes && typeof plan.recipes === "object" ? plan.recipes : {};
+  const usages = parseIngredientUsagesFromRecipes(recipes);
+
+  if (!usages.length) {
+    return normalizeShoppingCoversDays(plan, shoppingTrips);
+  }
+
+  const priceHints = buildPriceHintMap(plan);
+  const pantry = parsePantryStock(haveRaw);
+
+  const pantryMap = new Map<string, number>();
+  for (const p of pantry) {
+    const key = `${p.canonical_name}|${p.unit}`;
+    pantryMap.set(key, (pantryMap.get(key) ?? 0) + p.amount);
+  }
+
+  const usagesSorted = usages
+    .slice()
+    .sort((a, b) => {
+      if (a.day !== b.day) return a.day - b.day;
+      return a.display_name.localeCompare(b.display_name, "sk");
+    });
+
+  const remainingByTrip = new Map<
+    string,
+    { trip: number; covers_days: string; name: string; amount: number; unit: string; category_key: string }
+  >();
+
+  const ranges = getTripRanges(shoppingTrips);
+
+  for (const usage of usagesSorted) {
+    const stockKey = `${usage.canonical_name}|${usage.unit}`;
+    const available = pantryMap.get(stockKey) ?? 0;
+    let needed = usage.amount;
+
+    if (available > 0) {
+      const consumed = Math.min(available, needed);
+      needed -= consumed;
+      pantryMap.set(stockKey, available - consumed);
+    }
+
+    if (needed <= 0) continue;
+
+    const trip = tripForDay(usage.day, shoppingTrips);
+    const covers = ranges.find((r) => r.trip === trip)?.covers_days ?? "1-7";
+    const tripKey = `${trip}|${usage.canonical_name}|${usage.unit}`;
+
+    const prev = remainingByTrip.get(tripKey);
+    if (!prev) {
+      remainingByTrip.set(tripKey, {
+        trip,
+        covers_days: covers,
+        name: usage.display_name,
+        amount: needed,
+        unit: usage.unit,
+        category_key: usage.category_key,
+      });
+    } else {
+      prev.amount += needed;
+      remainingByTrip.set(tripKey, prev);
+    }
+  }
+
+  const byTrip = new Map<number, any[]>();
+  for (const entry of remainingByTrip.values()) {
+    const price = estimateItemPrice(
+      canonicalIngredientName(entry.name),
+      entry.unit,
+      entry.amount,
+      priceHints
+    );
+
+    const item = {
+      name: entry.name,
+      quantity: formatQuantity(entry.amount, entry.unit),
+      estimated_price_eur: price,
+      category_key: entry.category_key,
+    };
+
+    byTrip.set(entry.trip, [...(byTrip.get(entry.trip) ?? []), item]);
+  }
+
+  plan.shopping = ranges.map((range) => {
+    const items = (byTrip.get(range.trip) ?? []).sort((a, b) =>
+      String(a.name).localeCompare(String(b.name), "sk")
+    );
+
+    return {
+      trip: range.trip,
+      covers_days: range.covers_days,
+      estimated_cost_eur: 0,
+      items,
+    };
+  });
+
+  sumShoppingEstimates(plan);
   return plan;
 }
 
@@ -594,6 +1241,12 @@ CONSISTENCY:
 - Prefer one consistent naming form, for example use either "jablká" or "jablko", not both.
 - Prefer one consistent naming form, for example use either "banány" or "banán", not both.
 
+IMPORTANT FOR RECIPE INGREDIENTS:
+- Every recipe ingredient quantity must start with a numeric value.
+- Use practical units such as: g, kg, ml, l, ks, konzerva, balenie, bochník, hlávka, strúčik, plátok, lyžica.
+- Avoid vague ingredient quantities like "trochu", "podľa chuti", "primerane" in the ingredients array.
+- If the same ingredient appears multiple times during the week, keep its naming consistent across recipes.
+
 SHOPPING:
 - For each trip include estimated_cost_eur.
 - For each shopping item include estimated_price_eur.
@@ -699,6 +1352,7 @@ Counts:
     parsed.summary = ensurePerPersonCalories(parsed.summary);
 
     normalizeShoppingCoversDays(parsed, shoppingTrips);
+    rebuildShoppingFromRecipes(parsed, have, shoppingTrips);
     sumShoppingEstimates(parsed);
 
     const { error: upErr } = await supabase.from("generation_usage").upsert(
