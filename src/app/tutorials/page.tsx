@@ -44,7 +44,7 @@ export default function TutorialsPage() {
         <header className="text-center">
 
           <h1 className="mt-6 text-3xl md:text-5xl font-bold tracking-tight">
-            Videonávody
+            Ako funguje Fudly?
           </h1>
 
           <p className="mt-4 max-w-2xl mx-auto text-sm md:text-base muted">
@@ -56,30 +56,30 @@ export default function TutorialsPage() {
         <div className="mt-10 space-y-6">
           <TutorialCard
             step="Krok 1"
-            title="Ako vygenerovať jedálniček"
-            desc="Ukážka nastavenia preferencií a samotného vygenerovania plánu na týždeň."
+            title="Vygeneruj si jedálniček za pár sekúnd"
+            desc="Ukážka nastavenia preferencií a samotného vygenerovania týždenného plánu."
             src="/tutorials/generovanie.mp4"
           />
 
           <TutorialCard
             step="Krok 2"
-            title="Ako funguje jedálniček"
-            desc="Prehľad vygenerovaného jedálnička, receptov, úprav a práce s plánom v profile."
+            title="Pozri si svoj plán na celý týždeň"
+            desc="Uvidíš celý plán na týždeň, recepty, aj možnosť úprav podľa seba."
             src="/tutorials/jedalnicek.mp4"
           />
 
           <TutorialCard
             step="Krok 3"
-            title="Ako fungujú financie"
-            desc="Vysvetlenie finančného prehľadu, odhadov cien a práce s rozpočtom."
+            title="Prehľad výdavkov a rozpočtu na jednom mieste"
+            desc="Maj svoje výdavky pod kontrolou jednoducho a prehľadne."
             src="/tutorials/financie.mp4"
           />
         </div>
 
         <section className="mt-10 rounded-3xl p-6 md:p-8 surface-same-as-nav surface-border text-center">
-          <div className="text-2xl font-semibold">Ďalšie tipy nájdeš na Instagrame</div>
+          <div className="text-2xl font-semibold">Ďalšie tipy na šetrenie času a peňazí nájdeš na našom Instagrame</div>
           <p className="mt-3 text-sm md:text-base muted max-w-2xl mx-auto">
-            Pozri si highlights, krátke ukážky a ďalší obsah k Fudly aj na našom Instagrame.
+            Reálne tipy, ukážky appky a šetrenie v praxi
           </p>
 
           <div className="mt-6">
@@ -95,7 +95,7 @@ export default function TutorialsPage() {
                 shadow-lg shadow-amber-600/40
               "
             >
-              Otvoriť Instagram
+              Pozrieť Instagram
             </a>
           </div>
         </section>
