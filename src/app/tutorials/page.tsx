@@ -20,16 +20,18 @@ function TutorialCard({ step, title, desc, src }: TutorialCardProps) {
       <h2 className="mt-4 text-xl md:text-2xl font-semibold">{title}</h2>
       <p className="mt-2 text-sm md:text-base muted max-w-3xl">{desc}</p>
 
-      <div className="mt-5 overflow-hidden rounded-2xl surface-border bg-black">
-        <video
-          className="w-full h-auto block"
-          controls
-          playsInline
-          preload="metadata"
-        >
-          <source src={src} type="video/mp4" />
-          Tvoj prehliadač nepodporuje prehrávanie videa.
-        </video>
+      <div className="mt-5 flex justify-center">
+        <div className="w-full max-w-[420px] sm:max-w-[460px] md:max-w-[520px] overflow-hidden rounded-2xl surface-border bg-black">
+          <video
+            className="w-full h-auto block"
+            controls
+            playsInline
+            preload="metadata"
+          >
+            <source src={src} type="video/mp4" />
+            Tvoj prehliadač nepodporuje prehrávanie videa.
+          </video>
+        </div>
       </div>
     </section>
   );
@@ -100,17 +102,6 @@ export default function TutorialsPage() {
             </a>
           </div>
         </section>
-
-        <footer className="mt-10 border-t border-gray-200 dark:border-gray-800 pt-6 text-center">
-          <a
-            href={INSTAGRAM_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-sm muted hover:opacity-80 transition"
-          >
-            Instagram
-          </a>
-        </footer>
       </div>
     </main>
   );
