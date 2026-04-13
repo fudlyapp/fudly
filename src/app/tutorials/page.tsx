@@ -21,7 +21,7 @@ function TutorialCard({ step, title, desc, src }: TutorialCardProps) {
       <p className="mt-2 text-sm md:text-base muted max-w-3xl">{desc}</p>
 
       <div className="mt-5 flex justify-center">
-        <div className="w-full max-w-[420px] sm:max-w-[460px] md:max-w-[520px] overflow-hidden rounded-2xl surface-border bg-black">
+        <div className="w-full max-w-[340px] sm:max-w-[380px] md:max-w-[420px] overflow-hidden rounded-2xl surface-border bg-black">
           <video
             className="w-full h-auto block"
             controls
@@ -42,9 +42,6 @@ export default function TutorialsPage() {
     <main className="min-h-screen page-invert-bg">
       <div className="mx-auto w-full max-w-5xl px-6 py-10 md:py-14">
         <header className="text-center">
-          <div className="inline-flex items-center rounded-full border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-semibold surface-same-as-nav">
-            Krátke videonávody k Fudly
-          </div>
 
           <h1 className="mt-6 text-3xl md:text-5xl font-bold tracking-tight">
             Videonávody
