@@ -129,6 +129,7 @@ export default function TopNav() {
                 <>
                   <NavLink href="/generate" label="Generátor" />
                   <NavLink href="/pricing" label="Členstvá" />
+                  <NavLink href="/tutorials" label="Návody" />
                   <NavLink href="/contact" label="Kontakt" />
                   <NavLink href="/docs" label="Dokumenty" />
                   <NavLink href="/faq" label="FAQ" />
@@ -152,6 +153,7 @@ export default function TopNav() {
               ) : (
                 <>
                   <NavLink href="/pricing" label="Členstvá" />
+                  <NavLink href="/tutorials" label="Návody" />
                   <NavLink href="/contact" label="Kontakt" />
                   <NavLink href="/faq" label="FAQ" />
                   <PrimaryNavLink href="/login" label="Prihlásiť sa | Vytvoriť účet" />
@@ -193,6 +195,7 @@ export default function TopNav() {
               <>
                 <NavLink href="/generate" label="Generátor" onClick={closeMobile} />
                 <NavLink href="/pricing" label="Členstvá" onClick={closeMobile} />
+                <NavLink href="/tutorials" label="Návody" onClick={closeMobile} />
                 <NavLink href="/contact" label="Kontakt" onClick={closeMobile} />
                 <NavLink href="/docs" label="Dokumenty" onClick={closeMobile} />
                 <NavLink href="/faq" label="FAQ" onClick={closeMobile} />
@@ -217,6 +220,7 @@ export default function TopNav() {
             ) : (
               <>
                 <NavLink href="/pricing" label="Členstvá" onClick={closeMobile} />
+                <NavLink href="/tutorials" label="Návody" onClick={closeMobile} />
                 <NavLink href="/contact" label="Kontakt" onClick={closeMobile} />
                 <NavLink href="/faq" label="FAQ" onClick={closeMobile} />
                 <PrimaryNavLink href="/login" label="Prihlásiť sa | Vytvoriť účet" onClick={closeMobile} />
