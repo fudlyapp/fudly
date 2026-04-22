@@ -5,6 +5,13 @@ import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { useT } from "@/lib/i18n/useT";
+import {
+  Flame,
+  ShoppingCart,
+  SlidersHorizontal,
+  Utensils,
+  Wallet,
+} from "lucide-react";
 
 type ShoppingItem = {
   name: string;
@@ -396,26 +403,54 @@ function TabButton({
   onClick,
   children,
   locked,
+  icon,
+  mobileLabel,
 }: {
   active: boolean;
   onClick: () => void;
   children: React.ReactNode;
   locked?: boolean;
+  icon?: React.ReactNode;
+  mobileLabel?: string;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
       className={[
-        "rounded-full px-4 py-2 text-sm font-semibold transition border whitespace-nowrap flex items-center gap-2",
+        "transition border",
+        "flex items-center gap-3 text-left",
+        "w-full rounded-2xl px-4 py-3 sm:w-auto sm:rounded-full sm:px-4 sm:py-2",
         active
           ? "bg-black text-white border-black dark:bg-white dark:text-black dark:border-white"
           : "bg-transparent border-gray-300 text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-zinc-900",
         locked ? "opacity-80" : "",
       ].join(" ")}
     >
-      {locked ? <span title="Len pre PLUS">🔒</span> : null}
-      {children}
+      <span
+        className={[
+          "flex h-9 w-9 shrink-0 items-center justify-center rounded-full border text-current",
+          active
+            ? "border-white/20 dark:border-black/20"
+            : "border-gray-300 dark:border-gray-700",
+        ].join(" ")}
+      >
+        {icon}
+      </span>
+
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-semibold sm:hidden">
+          {mobileLabel ?? children}
+        </span>
+        <span className="hidden sm:block text-sm font-semibold whitespace-nowrap">
+          {children}
+        </span>
+      </span>
+
+      <span className="ml-auto flex items-center gap-2 shrink-0">
+        {locked ? <span title="Len pre PLUS">🔒</span> : null}
+        <span className="sm:hidden text-base">›</span>
+      </span>
     </button>
   );
 }
@@ -1342,6 +1377,44 @@ const planLabel = hasActivePlan && ent?.plan ? ent.plan.toUpperCase() : "ŽIADNY
 
   const lockedCalories = !(isPlus && caloriesEnabled);
 
+  const tabs = [
+    {
+      key: "plans" as TabKey,
+      label: "Uložené jedálničky",
+      mobileLabel: "Jedálničky",
+      icon: <Utensils size={18} />,
+      locked: false,
+    },
+    {
+      key: "shopping" as TabKey,
+      label: "Uložené nákupné zoznamy",
+      mobileLabel: "Nákupy",
+      icon: <ShoppingCart size={18} />,
+      locked: false,
+    },
+    {
+      key: "calories" as TabKey,
+      label: "Kalórie",
+      mobileLabel: "Kalórie",
+      icon: <Flame size={18} />,
+      locked: lockedCalories,
+    },
+    {
+      key: "finance" as TabKey,
+      label: "Financie",
+      mobileLabel: "Financie",
+      icon: <Wallet size={18} />,
+      locked: false,
+    },
+    {
+      key: "defaults" as TabKey,
+      label: "Predvolené",
+      mobileLabel: "Predvolené",
+      icon: <SlidersHorizontal size={18} />,
+      locked: false,
+    },
+  ];
+
   return (
     <main className="min-h-screen px-4 sm:px-6 py-6 page-invert-bg overflow-x-hidden">
       <div className="mx-auto w-full max-w-5xl min-w-0">
@@ -1371,37 +1444,28 @@ const planLabel = hasActivePlan && ent?.plan ? ent.plan.toUpperCase() : "ŽIADNY
 
         {email && (
           <>
-            <div className="mb-6 -mx-4 px-4 overflow-x-auto no-scrollbar">
-              <div className="flex gap-2 min-w-max">
-                <TabButton active={tab === "plans"} onClick={() => setTab("plans")}>
-                  Uložené jedálničky
-                </TabButton>
-                <TabButton active={tab === "shopping"} onClick={() => setTab("shopping")}>
-                  Uložené nákupné zoznamy
-                </TabButton>
-
-                <TabButton
-                  active={tab === "calories"}
-                  locked={lockedCalories}
-                  onClick={() => {
-                    if (lockedCalories) {
-                      window.location.href = "/pricing";
-                      return;
-                    }
-                    setTab("calories");
-                  }}
-                >
-                  Kalórie
-                </TabButton>
-
-                <TabButton active={tab === "finance"} onClick={() => setTab("finance")}>
-                  Financie
-                </TabButton>
-                <TabButton active={tab === "defaults"} onClick={() => setTab("defaults")}>
-                  Predvolené
-                </TabButton>
-              </div>
-            </div>
+            <div className="mb-6">
+  <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:gap-2">
+    {tabs.map((item) => (
+      <TabButton
+        key={item.key}
+        active={tab === item.key}
+        locked={item.locked}
+        icon={item.icon}
+        mobileLabel={item.mobileLabel}
+        onClick={() => {
+          if (item.key === "calories" && lockedCalories) {
+            window.location.href = "/pricing";
+            return;
+          }
+          setTab(item.key);
+        }}
+      >
+        {item.label}
+      </TabButton>
+    ))}
+  </div>
+</div>
 
             {(tab === "plans" || tab === "shopping" || tab === "calories" || tab === "finance") && (
               <div className="mb-4 flex flex-col sm:flex-row sm:items-center gap-2 min-w-0">
