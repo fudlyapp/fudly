@@ -849,35 +849,43 @@ export default function WeekDetailPage() {
           </div>
 
           <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 w-full sm:w-auto">
-            <Link
-              href={`/profile/${weekStart}/export`}
-              className="rounded-xl border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-semibold hover:bg-gray-100 dark:hover:bg-zinc-900 transition w-full sm:w-auto text-center"
-            >
-              Export (tlač)
-            </Link>
-            <button
-              type="button"
-              onClick={exportTXT}
-              className="rounded-xl border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-semibold hover:bg-gray-100 dark:hover:bg-zinc-900 transition w-full sm:w-auto"
-            >
-              Export TXT
-            </button>
+  <Link
+    href={`/profile/${weekStart}/export`}
+    className="rounded-xl border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-semibold hover:bg-gray-100 dark:hover:bg-zinc-900 transition w-full sm:w-auto text-center"
+  >
+    Tlačiť nákupný zoznam
+  </Link>
 
-            <button
-              type="button"
-              onClick={() => {
-                if (dirty && !confirm("Máš neuložené zmeny. Naozaj chceš odísť?")) return;
-                window.location.href = "/profile";
-              }}
-              className="rounded-xl border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-semibold hover:bg-gray-100 dark:hover:bg-zinc-900 transition w-full sm:w-auto text-center"
-            >
-              Späť
-            </button>
+  <button
+    type="button"
+    onClick={exportTXT}
+    className="rounded-xl border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-semibold hover:bg-gray-100 dark:hover:bg-zinc-900 transition w-full sm:w-auto"
+  >
+    Export nákupného zoznamu (TXT)
+  </button>
 
-            <button type="button" onClick={saveEdits} disabled={saving} className="btn-primary px-4 py-2 text-sm w-full sm:w-auto">
-              {saving ? "Ukladám…" : "Uložiť"}
-            </button>
-          </div>
+  <Link
+    href={`/profile/${weekStart}/menu-export`}
+    className="rounded-xl border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-semibold hover:bg-gray-100 dark:hover:bg-zinc-900 transition w-full sm:w-auto text-center"
+  >
+    Export jedálnička (PDF)
+  </Link>
+
+  <button
+    type="button"
+    onClick={() => {
+      if (dirty && !confirm("Máš neuložené zmeny. Naozaj chceš odísť?")) return;
+      window.location.href = "/profile";
+    }}
+    className="rounded-xl border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm font-semibold hover:bg-gray-100 dark:hover:bg-zinc-900 transition w-full sm:w-auto text-center"
+  >
+    Späť
+  </button>
+
+  <button type="button" onClick={saveEdits} disabled={saving} className="btn-primary px-4 py-2 text-sm w-full sm:w-auto">
+    {saving ? "Ukladám…" : "Uložiť"}
+  </button>
+</div>
         </div>
 
         <section className="rounded-2xl p-6 surface-same-as-nav surface-border">

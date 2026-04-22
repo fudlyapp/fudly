@@ -423,7 +423,7 @@ function TabButton({
         "w-full rounded-2xl px-4 py-3 sm:w-auto sm:rounded-full sm:px-4 sm:py-2",
         active
           ? "bg-black text-white border-black dark:bg-white dark:text-black dark:border-white"
-          : "bg-transparent border-gray-300 text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-zinc-900",
+          : "bg-transparent border-gray-400 text-gray-900 hover:bg-gray-100 dark:border-gray-900 dark:text-gray-400 dark:hover:bg-zinc-900",
         locked ? "opacity-80" : "",
       ].join(" ")}
     >
