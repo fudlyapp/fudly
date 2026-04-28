@@ -157,6 +157,15 @@ function planHasCalories(plan: PlanJSON | null) {
       typeof d.dinner_kcal === "number"
   );
 }
+function parseDecimalInput(value: string): number | null {
+  const raw = value.trim();
+  if (!raw) return null;
+
+  const normalized = raw.replace(",", ".");
+  const num = Number(normalized);
+
+  return Number.isFinite(num) && num >= 0 ? num : null;
+}
 
 function inferCategoryKey(name: string): CategoryKey {
   const n = (name || "").toLowerCase();
@@ -630,21 +639,24 @@ export default function WeekDetailPage() {
   }, [shopping]);
 
   function updateActualCost(tripIdx: number, value: string) {
-    setDirty(true);
-    const v = value.trim();
-    const num = v === "" ? null : Number(v);
+  setDirty(true);
+  const v = value.trim();
+  const normalized = v.replace(",", ".");
+  const num = v === "" ? null : Number(normalized);
 
-    setPlan((prev) => {
-      if (!prev) return prev;
-      const next = deepClone(prev);
+  setPlan((prev) => {
+    if (!prev) return prev;
+    const next = deepClone(prev);
 
-      next.shopping = Array.isArray(next.shopping) ? next.shopping : [];
-      if (!next.shopping[tripIdx]) return prev;
+    next.shopping = Array.isArray(next.shopping) ? next.shopping : [];
+    if (!next.shopping[tripIdx]) return prev;
 
-      next.shopping[tripIdx].actual_cost_eur = v === "" ? null : Number.isFinite(num) ? num : null;
-      return next;
-    });
-  }
+    next.shopping[tripIdx].actual_cost_eur =
+      v === "" ? null : Number.isFinite(num) ? num : null;
+
+    return next;
+  });
+}
 
   function updateShoppingItem(tripIdx: number, itemIdx: number, patch: Partial<ShoppingItem>) {
     setDirty(true);
@@ -705,8 +717,7 @@ export default function WeekDetailPage() {
 
     if (!name) return;
 
-    const parsedPrice =
-      rawPrice === "" ? null : Number.isFinite(Number(rawPrice)) && Number(rawPrice) >= 0 ? Number(rawPrice) : null;
+    const parsedPrice = parseDecimalInput(rawPrice);
 
     setDirty(true);
     setPlan((prev) => {
@@ -1090,6 +1101,7 @@ export default function WeekDetailPage() {
                       value={t.actual_cost_eur ?? ""}
                       onChange={(e) => updateActualCost(tripIdx, e.target.value)}
                       placeholder="napr. 32.50"
+                      inputMode="decimal"
                     />
                   </div>
                 </div>
@@ -1114,20 +1126,16 @@ export default function WeekDetailPage() {
                             />
                             <div className="relative min-w-0">
                               <input
-                                className="input-surface !text-xs !leading-tight py-2 pr-8 min-w-0"
-                                value={item.estimated_price_eur ?? ""}
-                                onChange={(e) =>
-                                  updateShoppingItem(tripIdx, originalIndex, {
-                                    estimated_price_eur:
-                                      e.target.value.trim() === ""
-                                        ? null
-                                        : Number.isFinite(Number(e.target.value)) && Number(e.target.value) >= 0
-                                        ? Number(e.target.value)
-                                        : null,
-                                  })
-                                }
-                                placeholder="Cena"
-                              />
+  className="input-surface !text-xs !leading-tight py-2 pr-8 min-w-0"
+  value={item.estimated_price_eur ?? ""}
+  onChange={(e) =>
+    updateShoppingItem(tripIdx, originalIndex, {
+      estimated_price_eur: parseDecimalInput(e.target.value),
+    })
+  }
+  placeholder="Cena"
+  inputMode="decimal"
+/>
                               <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold muted pointer-events-none">
                                 €
                               </span>
@@ -1177,6 +1185,7 @@ export default function WeekDetailPage() {
                       value={addPrice[tripIdx] ?? ""}
                       onChange={(e) => setAddPrice((p) => ({ ...p, [tripIdx]: e.target.value }))}
                       placeholder="Cena €"
+                      inputMode="decimal"
                     />
                     <button type="button" onClick={() => addShoppingItem(tripIdx)} className="btn-primary w-full md:w-auto text-xs px-4 py-2">
                       Pridať
