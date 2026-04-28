@@ -135,6 +135,20 @@ function addDaysISO(iso: string, add: number) {
   return toISODate(d);
 }
 
+function parseDecimalInput(value: string): number | null {
+  const raw = value.trim();
+  if (!raw) return null;
+
+  const normalized = raw.replace(",", ".");
+  const num = Number(normalized);
+
+  return Number.isFinite(num) && num >= 0 ? num : null;
+}
+
+function itemPriceDraftKey(tripIdx: number, itemIdx: number) {
+  return `${tripIdx}_${itemIdx}`;
+}
+
 function formatDateSK(iso?: string) {
   if (!iso) return "";
   const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -156,15 +170,6 @@ function planHasCalories(plan: PlanJSON | null) {
       typeof d.lunch_kcal === "number" ||
       typeof d.dinner_kcal === "number"
   );
-}
-function parseDecimalInput(value: string): number | null {
-  const raw = value.trim();
-  if (!raw) return null;
-
-  const normalized = raw.replace(",", ".");
-  const num = Number(normalized);
-
-  return Number.isFinite(num) && num >= 0 ? num : null;
 }
 
 function inferCategoryKey(name: string): CategoryKey {
@@ -343,6 +348,9 @@ export default function WeekDetailPage() {
   const params = useParams<{ week_start: string }>();
   const weekStart = (params?.week_start || "").toString();
   const noteRefs = useRef<Record<number, HTMLTextAreaElement | null>>({});
+
+  const [actualCostDrafts, setActualCostDrafts] = useState<Record<number, string>>({});
+const [itemPriceDrafts, setItemPriceDrafts] = useState<Record<string, string>>({});
 
   const [authLoading, setAuthLoading] = useState(true);
   const [session, setSession] = useState<Session | null>(null);
@@ -641,8 +649,7 @@ export default function WeekDetailPage() {
   function updateActualCost(tripIdx: number, value: string) {
   setDirty(true);
   const v = value.trim();
-  const normalized = v.replace(",", ".");
-  const num = v === "" ? null : Number(normalized);
+  const num = parseDecimalInput(v);
 
   setPlan((prev) => {
     if (!prev) return prev;
@@ -651,9 +658,7 @@ export default function WeekDetailPage() {
     next.shopping = Array.isArray(next.shopping) ? next.shopping : [];
     if (!next.shopping[tripIdx]) return prev;
 
-    next.shopping[tripIdx].actual_cost_eur =
-      v === "" ? null : Number.isFinite(num) ? num : null;
-
+    next.shopping[tripIdx].actual_cost_eur = v === "" ? null : num;
     return next;
   });
 }
@@ -1097,12 +1102,29 @@ export default function WeekDetailPage() {
                   <div className="w-full lg:w-[260px] min-w-0">
                     <div className="text-xs muted mb-1">Reálna cena (€)</div>
                     <input
-                      className="input-surface !text-xs !leading-tight py-2"
-                      value={t.actual_cost_eur ?? ""}
-                      onChange={(e) => updateActualCost(tripIdx, e.target.value)}
-                      placeholder="napr. 32.50"
-                      inputMode="decimal"
-                    />
+  className="input-surface !text-xs !leading-tight py-2"
+  value={
+    actualCostDrafts[tripIdx] !== undefined
+      ? actualCostDrafts[tripIdx]
+      : t.actual_cost_eur?.toString() ?? ""
+  }
+  onChange={(e) =>
+    setActualCostDrafts((prev) => ({
+      ...prev,
+      [tripIdx]: e.target.value,
+    }))
+  }
+  onBlur={(e) => {
+    updateActualCost(tripIdx, e.target.value);
+    setActualCostDrafts((prev) => {
+      const next = { ...prev };
+      delete next[tripIdx];
+      return next;
+    });
+  }}
+  placeholder="napr. 17,50"
+  inputMode="decimal"
+/>
                   </div>
                 </div>
 
@@ -1125,21 +1147,37 @@ export default function WeekDetailPage() {
                               onChange={(e) => updateShoppingItem(tripIdx, originalIndex, { quantity: e.target.value })}
                             />
                             <div className="relative min-w-0">
-                              <input
-  className="input-surface !text-xs !leading-tight py-2 pr-8 min-w-0"
-  value={item.estimated_price_eur ?? ""}
-  onChange={(e) =>
-    updateShoppingItem(tripIdx, originalIndex, {
-      estimated_price_eur: parseDecimalInput(e.target.value),
-    })
-  }
-  placeholder="Cena"
-  inputMode="decimal"
-/>
-                              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold muted pointer-events-none">
-                                €
-                              </span>
-                            </div>
+  <input
+    className="input-surface !text-xs !leading-tight py-2 pr-8 min-w-0"
+    value={
+      itemPriceDrafts[itemPriceDraftKey(tripIdx, originalIndex)] !== undefined
+        ? itemPriceDrafts[itemPriceDraftKey(tripIdx, originalIndex)]
+        : item.estimated_price_eur?.toString() ?? ""
+    }
+    onChange={(e) =>
+      setItemPriceDrafts((prev) => ({
+        ...prev,
+        [itemPriceDraftKey(tripIdx, originalIndex)]: e.target.value,
+      }))
+    }
+    onBlur={(e) => {
+      updateShoppingItem(tripIdx, originalIndex, {
+        estimated_price_eur: parseDecimalInput(e.target.value),
+      });
+
+      setItemPriceDrafts((prev) => {
+        const next = { ...prev };
+        delete next[itemPriceDraftKey(tripIdx, originalIndex)];
+        return next;
+      });
+    }}
+    placeholder="Cena"
+    inputMode="decimal"
+  />
+  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-semibold muted pointer-events-none">
+    €
+  </span>
+</div>
                             <button
                               type="button"
                               onClick={() => removeShoppingItem(tripIdx, originalIndex)}
