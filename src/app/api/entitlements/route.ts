@@ -4,6 +4,7 @@ import Stripe from "stripe";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
 export const runtime = "nodejs";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string);
@@ -216,16 +217,21 @@ async function listCandidateCustomerIds(
 }
 
 async function getCanonicalStripeSubscription(customerId: string) {
-  const subs = await stripe.subscriptions.list({
-    customer: customerId,
-    status: "all",
-    limit: 20,
-  });
+  try {
+    const subs = await stripe.subscriptions.list({
+      customer: customerId,
+      status: "all",
+      limit: 20,
+    });
 
-  return (
-    subs.data.find((s) => ["active", "trialing", "past_due", "unpaid"].includes(s.status)) ??
-    null
-  );
+    return (
+      subs.data.find((s) => ["active", "trialing", "past_due", "unpaid"].includes(s.status)) ??
+      null
+    );
+  } catch (e) {
+    console.warn("Skipping invalid Stripe customer in entitlements:", customerId, e);
+    return null;
+  }
 }
 
 async function findBestCustomerAndSubscription(
