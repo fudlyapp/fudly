@@ -1,23 +1,22 @@
 // src/lib/i18n/useT.tsx
 "use client";
 
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { DICT, type Dict, type Lang } from "@/lib/i18n/dict";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
 const COOKIE = "fudly_lang";
-
-function getCookie(name: string) {
-  if (typeof document === "undefined") return null;
-  const m = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
-  return m ? decodeURIComponent(m[2]) : null;
-}
 
 function setCookie(name: string, value: string, days = 365) {
   if (typeof document === "undefined") return;
   const d = new Date();
   d.setTime(d.getTime() + days * 24 * 60 * 60 * 1000);
   document.cookie = `${name}=${encodeURIComponent(value)}; expires=${d.toUTCString()}; path=/`;
+}
+
+function deleteCookie(name: string) {
+  if (typeof document === "undefined") return;
+  document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`;
 }
 
 type Ctx = {
@@ -28,28 +27,18 @@ type Ctx = {
 
 const I18nCtx = createContext<Ctx | null>(null);
 
-function isLang(x: string | null | undefined): x is Lang {
-  return x === "sk" || x === "en" || x === "ua";
-}
-
 export function LangProvider({ children }: { children: React.ReactNode }) {
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
   const [lang, setLangState] = useState<Lang>("sk");
 
-  // init z cookie (+ migrácia uk -> ua)
+  // Language switcher is currently disabled in the UI, so keep Slovak as the
+  // app language and clear any stale language cookie from older versions.
   useEffect(() => {
-    const c = getCookie(COOKIE);
-
-    if (c === "uk") {
-      setLangState("ua");
-      setCookie(COOKIE, "ua");
-      return;
-    }
-
-    if (isLang(c)) setLangState(c);
+    deleteCookie(COOKIE);
+    setLangState("sk");
   }, []);
 
-  const setLang = async (l: Lang) => {
+  const setLang = useCallback(async (l: Lang) => {
     setLangState(l);
     setCookie(COOKIE, l);
 
@@ -57,9 +46,7 @@ export function LangProvider({ children }: { children: React.ReactNode }) {
     const { data: sess } = await supabase.auth.getSession();
     const user = sess.session?.user;
     if (!user) return;
-
-    
-  };
+  }, [supabase]);
 
   const value = useMemo<Ctx>(
     () => ({
@@ -67,7 +54,7 @@ export function LangProvider({ children }: { children: React.ReactNode }) {
       t: DICT[lang],
       setLang: (l: Lang) => void setLang(l),
     }),
-    [lang] // supabase je stabilný cez useMemo vyššie
+    [lang, setLang]
   );
 
   return <I18nCtx.Provider value={value}>{children}</I18nCtx.Provider>;

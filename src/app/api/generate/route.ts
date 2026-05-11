@@ -57,6 +57,12 @@ type TripRange = {
   covers_days: string;
 };
 
+type PurchaseQuantity = {
+  quantity: string;
+  amount: number;
+  unit: string;
+};
+
 const DAY_NAMES_SK = ["Pondelok", "Utorok", "Streda", "Štvrtok", "Piatok", "Sobota", "Nedeľa"];
 
 const NAME_STOPWORDS = new Set([
@@ -772,6 +778,126 @@ function formatQuantity(amount: number, unit: string) {
   return `${Number(amount.toFixed(2))} ${unit}`;
 }
 
+function roundUpToPackage(amount: number, packages: number[]) {
+  for (const size of packages) {
+    if (amount <= size) return size;
+  }
+
+  const largest = packages[packages.length - 1] ?? amount;
+  return Math.ceil(amount / largest) * largest;
+}
+
+function formatPackCount(total: number, packSize: number, unit: string, label = "balenie") {
+  const count = Math.max(1, Math.ceil(total / packSize));
+  if (count === 1) return `1 x ${formatQuantity(packSize, unit)} ${label}`;
+  return `${count} x ${formatQuantity(packSize, unit)} ${label}`;
+}
+
+function isLikelyBread(canonicalName: string) {
+  return /(chlieb|toast|bochnik|baget|rozok|zeml)/.test(canonicalName);
+}
+
+function shouldBuyAsWeeklyPackage(canonicalName: string, unit: string) {
+  if (/maslo|margarin|vajce|syr|mozzarel|parmez/.test(canonicalName)) return true;
+  if (/(ryza|cestov|muka|muk|vlock|ovsen|kuskus|sosov|cicer|fazul|konzerv)/.test(canonicalName)) return true;
+  if (unit === "konzerva") return true;
+  return false;
+}
+
+function purchaseQuantityForShopping(name: string, amount: number, unit: string): PurchaseQuantity {
+  const canonical = canonicalIngredientName(name);
+  const category = inferCategoryKey(name);
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return { quantity: "", amount: 0, unit };
+  }
+
+  if (/maslo|margarin/.test(canonical) && unit === "g") {
+    const rounded = roundUpToPackage(amount, [100, 250]);
+    return {
+      quantity: formatPackCount(rounded, rounded <= 100 ? 100 : 250, "g"),
+      amount: rounded,
+      unit: "g",
+    };
+  }
+
+  if (isLikelyBread(canonical)) {
+    if (unit === "platok" || unit === "g" || unit === "bochnik") {
+      return { quantity: "1 bochník / balenie (cca 500 g)", amount: 1, unit: "bochnik" };
+    }
+    if (unit === "ks") {
+      const rounded = Math.max(1, Math.ceil(amount));
+      return { quantity: `${rounded} ks`, amount: rounded, unit: "ks" };
+    }
+  }
+
+  if (/mliek/.test(canonical) && unit === "ml") {
+    const rounded = roundUpToPackage(amount, [500, 1000]);
+    return {
+      quantity: rounded <= 500 ? "1 x 0.5 l balenie" : formatPackCount(rounded, 1000, "ml"),
+      amount: rounded,
+      unit: "ml",
+    };
+  }
+
+  if (/vajce/.test(canonical) && unit === "ks") {
+    const rounded = roundUpToPackage(amount, [6, 10, 20]);
+    return {
+      quantity: formatPackCount(rounded, rounded <= 6 ? 6 : rounded <= 10 ? 10 : 20, "ks", "balenie"),
+      amount: rounded,
+      unit: "ks",
+    };
+  }
+
+  if (/jogurt|tvaroh|smotan/.test(canonical) && unit === "g") {
+    const rounded = roundUpToPackage(amount, [150, 250, 500]);
+    const pack = rounded <= 150 ? 150 : rounded <= 250 ? 250 : 500;
+    return { quantity: formatPackCount(rounded, pack, "g"), amount: rounded, unit: "g" };
+  }
+
+  if (/syr|mozzarel|parmez/.test(canonical) && unit === "g") {
+    const rounded = roundUpToPackage(amount, [100, 200, 250, 500]);
+    const pack = rounded <= 100 ? 100 : rounded <= 200 ? 200 : rounded <= 250 ? 250 : 500;
+    return { quantity: formatPackCount(rounded, pack, "g"), amount: rounded, unit: "g" };
+  }
+
+  if ((category === "meat" || category === "fish") && unit === "g") {
+    const rounded = roundUpToPackage(amount, [250, 500, 1000]);
+    const pack = rounded <= 250 ? 250 : rounded <= 500 ? 500 : 1000;
+    return { quantity: formatPackCount(rounded, pack, "g"), amount: rounded, unit: "g" };
+  }
+
+  if (/(ryza|cestov|muka|muk|vlock|ovsen|kuskus|sosov|cicer|fazul)/.test(canonical) && unit === "g") {
+    const rounded = /muka|muk/.test(canonical)
+      ? roundUpToPackage(amount, [1000])
+      : roundUpToPackage(amount, [500, 1000]);
+    const pack = rounded <= 500 ? 500 : 1000;
+    return { quantity: formatPackCount(rounded, pack, "g"), amount: rounded, unit: "g" };
+  }
+
+  if (unit === "konzerva" || /konzerv/.test(canonical)) {
+    const rounded = Math.max(1, Math.ceil(amount));
+    return { quantity: `${rounded} konzerva${rounded === 1 ? "" : "y"}`, amount: rounded, unit: "konzerva" };
+  }
+
+  if (unit === "balenie") {
+    const rounded = Math.max(1, Math.ceil(amount));
+    return { quantity: rounded === 1 ? "1 balenie" : `${rounded} balenia`, amount: rounded, unit: "balenie" };
+  }
+
+  if (["ks", "hlavka", "strucik"].includes(unit)) {
+    const rounded = Math.max(1, Math.ceil(amount));
+    return { quantity: formatQuantity(rounded, unit), amount: rounded, unit };
+  }
+
+  if ((category === "veg" || category === "fruit") && unit === "g") {
+    const rounded = Math.ceil(amount / 100) * 100;
+    return { quantity: formatQuantity(rounded, "g"), amount: rounded, unit: "g" };
+  }
+
+  return { quantity: formatQuantity(amount, unit), amount, unit };
+}
+
 function inferCategoryKey(name: string) {
   const n = canonicalIngredientName(name);
 
@@ -971,6 +1097,11 @@ function estimateItemPrice(
   return Number((perUnit * amount).toFixed(2));
 }
 
+function isBasicPantryItem(canonicalName: string): boolean {
+  const n = canonicalName.toLowerCase();
+  return /(^|\s)(olej|sol|cukor|voda|ocot|korenie|cierne korenie|rasca|oregano|bazalka|kari|skorica|mleta paprika)(\s|$)/.test(n);
+}
+
 function rebuildShoppingFromRecipes(plan: any, haveRaw: string, shoppingTrips: number) {
   const recipes = plan?.recipes && typeof plan.recipes === "object" ? plan.recipes : {};
   const usages = parseIngredientUsagesFromRecipes(recipes);
@@ -1003,6 +1134,9 @@ function rebuildShoppingFromRecipes(plan: any, haveRaw: string, shoppingTrips: n
   const ranges = getTripRanges(shoppingTrips);
 
   for (const usage of usagesSorted) {
+    // Skip basic pantry staples from shopping list
+    if (isBasicPantryItem(usage.canonical_name)) continue;
+
     const stockKey = `${usage.canonical_name}|${usage.unit}`;
     const available = pantryMap.get(stockKey) ?? 0;
     let needed = usage.amount;
@@ -1015,7 +1149,14 @@ function rebuildShoppingFromRecipes(plan: any, haveRaw: string, shoppingTrips: n
 
     if (needed <= 0) continue;
 
-    const trip = tripForDay(usage.day, shoppingTrips);
+    const defaultTrip = tripForDay(usage.day, shoppingTrips);
+    const weeklyPackage = shouldBuyAsWeeklyPackage(usage.canonical_name, usage.unit);
+    const existingWeeklyTrip = weeklyPackage
+      ? Array.from(remainingByTrip.values()).find(
+          (entry) => entry.name && canonicalIngredientName(entry.name) === usage.canonical_name && entry.unit === usage.unit
+        )?.trip
+      : null;
+    const trip = existingWeeklyTrip ?? defaultTrip;
     const covers = ranges.find((r) => r.trip === trip)?.covers_days ?? "1-7";
     const tripKey = `${trip}|${usage.canonical_name}|${usage.unit}`;
 
@@ -1037,16 +1178,17 @@ function rebuildShoppingFromRecipes(plan: any, haveRaw: string, shoppingTrips: n
 
   const byTrip = new Map<number, any[]>();
   Array.from(remainingByTrip.values()).forEach((entry) => {
+    const purchase = purchaseQuantityForShopping(entry.name, entry.amount, entry.unit);
     const price = estimateItemPrice(
       canonicalIngredientName(entry.name),
-      entry.unit,
-      entry.amount,
+      purchase.unit,
+      purchase.amount,
       priceHints
     );
 
     const item = {
       name: entry.name,
-      quantity: formatQuantity(entry.amount, entry.unit),
+      quantity: purchase.quantity,
       estimated_price_eur: price,
       category_key: entry.category_key,
     };
@@ -1235,6 +1377,10 @@ Hard restriction:
 Preferences:
 - avoid: ${avoid || "none"}
 - favorites: ${favorites || "none"}
+  IMPORTANT: Favorites are only a light preference, not a requirement for every day.
+  IMPORTANT: Do NOT use any single favorite ingredient more than 2 meals across the entire week.
+  A repeated batch-cooked meal counts each day it appears, so a favorite ingredient in a 2-day repeated lunch already uses the full weekly limit.
+  If multiple favorites are provided, rotate them gently and still keep the plan natural.
 - have_at_home: ${have || "none"}
 
 Specific instructions:
@@ -1276,18 +1422,35 @@ BUDGET TARGET:
 Rules:
 - Batch cooking is allowed, but do not over-optimize just for the lowest possible price.
 - Reuse ingredients across days when practical.
+- Reuse opened packages intelligently, but do not make the week repetitive.
 - Split shopping into exactly ${shoppingTrips} trips.
 - Provide realistic quantities.
-- Every shopping trip must contain ONLY ingredients needed for the days covered by that trip.
+- Every shopping trip must mainly contain ingredients needed for the days covered by that trip.
+- Exception: durable weekly packages like butter, eggs, cheese, rice, pasta, oats, flour, legumes and cans may be bought once in the first relevant trip and used later in the week.
 - If an ingredient is needed both in early days and in later days, split it between both trips instead of putting everything into the first trip.
 - For 2 trips per week, trip 1 must cover days 1-3 and trip 2 must cover days 4-7.
 - For 3 trips per week, use practical split 1-2, 3-4, 5-7.
 - For 4 trips per week, use practical split 1-2, 3-4, 5-6, 7.
-- Do not place ingredients for day 4-7 into trip 1 when there are 2 trips.
+- Do not place fresh ingredients for day 4-7 into trip 1 when there are 2 trips.
+EXCLUDED FROM SHOPPING:
+- Do NOT include in shopping list: olej (akýkoľvek typ vrátane olivového), soľ, čierne korenie, bežné koreniny, cukor, voda, ocot.
+- These are basic pantry staples that are assumed to be always available in every kitchen.
+- If a recipe requires these items, it is OK to mention them in the recipe ingredients, but they MUST NOT appear in the shopping list.
+
+PACKAGING STANDARDS FOR SLOVAKIA:
+- When an ingredient quantity is calculated, round UP to the nearest realistic package size sold in Slovak shops.
+- Examples of common package sizes: butter/margarine 100g/250g, milk 0.5l/1l, bread 1 whole loaf or toast package (~500-750g), yogurt 150g/250g/500g, cheese 100g/200g/250g, meat/fish 250g/500g/1kg, eggs 6/10/20 ks, pasta/rice/oats 500g, flour 1kg, canned food whole cans, vegetables individual pieces unless normally sold by weight, fruits individual or 250g/500g bags.
+- When recipe calls for 80g maslo, shopping should show "1 x 100g balenie", NOT "80g".
+- When recipe calls for 4 slices of bread, shopping should show "1 bochník / balenie", NOT "4 plátky".
+- When recipe calls for 10g butter, shopping should show a purchasable pack such as "1 x 100g balenie".
+- Shopping list must reflect what someone actually buys in a store, not fractional pieces.
+- ZERO WASTE: If a package must be bought (for example 100g butter, 500g pasta, 250g cheese), try to use a practical amount of that package across the week so the user is not left with many tiny leftovers.
+- Do not solve zero waste by repeating one favorite ingredient too often; favorites still have the max 2-meal limit above.
+
 ${caloriesBlock}
 
 IMPORTANT LOGIC FOR INGREDIENTS YOU ALREADY HAVE AT HOME:
-- Treat have_at_home as real existing stock that should be consumed before adding new purchases.
+- Treat have_at_home as real existing stock that should be consumed FIRST before adding new purchases.
 - First determine the total weekly ingredient needs from all planned meals and recipes.
 - Then subtract have_at_home from those weekly needs.
 - Only the missing remainder may appear in the shopping list.
@@ -1302,9 +1465,10 @@ IMPORTANT LOGIC FOR SHOPPING TRIPS:
 - Shopping trips must be based on when ingredients are actually needed after subtracting home stock.
 - Do not put all missing quantity into trip 1 by default.
 - If part of an ingredient is needed in days 1-3 and another part only in days 4-7, split it between trips accordingly.
-- For fresh and shorter-life items like bananas, berries, leafy greens, soft bread, fresh herbs and similar, strongly prefer buying the later-needed portion in the later trip instead of the first trip.
-- Do not add safety reserve, extra spare pieces, or "just in case" quantities unless clearly necessary.
-- Quantities should be realistic and economical, but not artificially inflated.
+- For fresh and shorter-life items like bananas, berries, leafy greens, soft bread, fresh herbs and similar, strongly prefer buying the later-needed portion in the later trip.
+- Apply have_at_home logic BEFORE deciding what goes into each trip.
+- Do not add safety reserve or extra spare pieces unless clearly necessary.
+- Every shopping item quantity must correspond to actual, purchasable package size in Slovak shops (see PACKAGING STANDARDS above).
 
 CONSISTENCY:
 - Shopping quantities must be consistent with recipe ingredient totals across the whole week.
