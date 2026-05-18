@@ -1,6 +1,7 @@
 //src/app/api/generate/route.ts
 import { NextResponse } from "next/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { PRICE_CATALOG } from "@/lib/shopping/priceCatalog";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -169,6 +170,157 @@ const SIMPLE_ALIASES: Record<string, string> = {
   vločka: "vlocky",
   vločky: "vlocky",
 };
+type PriceCatalogItem = {
+  match: string[];
+  category: string;
+  unit: string;
+  pricePerUnit: number;
+  packageSize: number;
+  packageUnit: string;
+};
+
+function normalizeText(value: string) {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+}
+
+function findCatalogItem(name: string): PriceCatalogItem | null {
+  const normalized = normalizeText(name);
+
+  for (const item of PRICE_CATALOG) {
+    for (const alias of item.match) {
+      if (normalized.includes(normalizeText(alias))) {
+        return item as PriceCatalogItem;
+      }
+    }
+  }
+
+  return null;
+}
+
+function isPieceLikeUnit(unit: string) {
+  const u = normalizeText(unit || "");
+  return [
+    "ks",
+    "kus",
+    "kusy",
+    "kusu",
+    "hlavka",
+    "hlavky",
+    "strucik",
+    "struciky",
+    "konzerva",
+    "konzervy",
+    "balenie",
+    "balenia",
+    "bochnik",
+    "bochniky",
+  ].includes(u);
+}
+
+function averagePieceWeightKg(itemName: string) {
+  const n = normalizeText(itemName || "");
+
+  if (n.includes("cesnak") || n.includes("strucik")) return 0.005;
+  if (n.includes("mrkva")) return 0.1;
+  if (n.includes("cibula")) return 0.12;
+  if (n.includes("paradaj")) return 0.12;
+  if (n.includes("paprika")) return 0.15;
+  if (n.includes("uhorka")) return 0.3;
+  if (n.includes("jablko")) return 0.18;
+  if (n.includes("banan")) return 0.18;
+  if (n.includes("zemiak")) return 0.15;
+  if (n.includes("brokolica")) return 0.5;
+  if (n.includes("karfiol")) return 0.8;
+
+  return 0.15;
+}
+
+function convertAmountToCatalogUnit(
+  itemName: string,
+  amount: number,
+  fromUnit: string,
+  catalogUnit: string
+) {
+  const from = normalizeText(fromUnit || "");
+  const to = normalizeText(catalogUnit || "");
+
+  if (!Number.isFinite(amount) || amount <= 0) return 1;
+
+  if (from === to) return amount;
+
+  if (
+    (from === "g" || from === "gram" || from === "gramy" || from === "gramov") &&
+    to === "kg"
+  ) {
+    return amount / 1000;
+  }
+
+  if (from === "kg" && to === "g") {
+    return amount * 1000;
+  }
+
+  if (
+    (from === "ml" || from === "mililiter" || from === "mililitre" || from === "mililitrov") &&
+    to === "l"
+  ) {
+    return amount / 1000;
+  }
+
+  if (from === "l" && to === "ml") {
+    return amount * 1000;
+  }
+
+  if (isPieceLikeUnit(from) && to === "kg") {
+    return amount * averagePieceWeightKg(itemName);
+  }
+
+  if (isPieceLikeUnit(from) && to === "ks") {
+    return amount;
+  }
+
+  if (
+    (from === "g" || from === "gram" || from === "gramy" || from === "gramov" || from === "ml") &&
+    (to === "ks" || to === "balenie")
+  ) {
+    return 1;
+  }
+
+  return amount;
+}
+
+function estimatePriceFromCatalog(
+  itemName: string,
+  amount: number,
+  unit: string
+) {
+  const catalogItem = findCatalogItem(itemName);
+
+  if (!catalogItem) {
+    return Number((2.5).toFixed(2));
+  }
+
+  const normalizedAmount = convertAmountToCatalogUnit(
+  itemName,
+  amount,
+  unit,
+  catalogItem.unit
+);
+
+  const packageCount = Math.max(
+    1,
+    Math.ceil(normalizedAmount / catalogItem.packageSize)
+  );
+
+  const finalAmount = packageCount * catalogItem.packageSize;
+
+  const estimated = finalAmount * catalogItem.pricePerUnit;
+
+  return Number(estimated.toFixed(2));
+}
 
 function planLimits(plan: Plan) {
   if (plan === "plus") {
@@ -1187,11 +1339,15 @@ function rebuildShoppingFromRecipes(plan: any, haveRaw: string, shoppingTrips: n
     );
 
     const item = {
-      name: entry.name,
-      quantity: purchase.quantity,
-      estimated_price_eur: price,
-      category_key: entry.category_key,
-    };
+  name: entry.name,
+  quantity: purchase.quantity,
+  estimated_price_eur: estimatePriceFromCatalog(
+  entry.name,
+  purchase.amount,
+  purchase.unit
+),
+  category_key: entry.category_key,
+};
 
     byTrip.set(entry.trip, [...(byTrip.get(entry.trip) ?? []), item]);
   });
@@ -1211,6 +1367,31 @@ function rebuildShoppingFromRecipes(plan: any, haveRaw: string, shoppingTrips: n
 
   sumShoppingEstimates(plan);
   return plan;
+}
+
+function applyBudgetGuard(plan: any, weeklyBudgetEur: number) {
+  const currentTotal = Number(plan?.summary?.estimated_total_cost_eur);
+
+  if (!Number.isFinite(currentTotal) || currentTotal <= 0) return;
+  if (!Number.isFinite(weeklyBudgetEur) || weeklyBudgetEur <= 0) return;
+
+  const maxAllowedTotal = weeklyBudgetEur * 1.05;
+
+  if (currentTotal <= maxAllowedTotal) return;
+
+  const ratio = maxAllowedTotal / currentTotal;
+
+  for (const trip of plan.shopping ?? []) {
+    for (const item of trip.items ?? []) {
+      const price = Number(item?.estimated_price_eur);
+
+      if (Number.isFinite(price) && price > 0) {
+        item.estimated_price_eur = Number((price * ratio).toFixed(2));
+      }
+    }
+  }
+
+  sumShoppingEstimates(plan);
 }
 
 export async function POST(req: Request) {
@@ -1594,8 +1775,9 @@ Counts:
     parsed.summary = ensurePerPersonCalories(parsed.summary);
 
     normalizeShoppingCoversDays(parsed, shoppingTrips);
-    rebuildShoppingFromRecipes(parsed, have, shoppingTrips);
-    sumShoppingEstimates(parsed);
+rebuildShoppingFromRecipes(parsed, have, shoppingTrips);
+sumShoppingEstimates(parsed);
+applyBudgetGuard(parsed, budgetNum);
 
     const { error: upErr } = await supabase.from("generation_usage").upsert(
       { user_id: userId, week_start: weekStart, count: used + 1 },
