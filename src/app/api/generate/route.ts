@@ -1394,6 +1394,106 @@ function applyBudgetGuard(plan: any, weeklyBudgetEur: number) {
   sumShoppingEstimates(plan);
 }
 
+
+type SupabaseAdminClient = ReturnType<typeof createSupabaseAdminClient>;
+
+function parsePlanLike(value: unknown): any {
+  if (!value) return null;
+
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+
+  if (typeof value === "object") return value;
+
+  return null;
+}
+
+function collectMealTitlesFromPlan(planValue: unknown) {
+  const plan = parsePlanLike(planValue);
+  const titles: string[] = [];
+
+  const days = Array.isArray(plan?.days) ? plan.days : [];
+  for (const day of days) {
+    for (const mealKey of ["breakfast", "lunch", "dinner"] as const) {
+      const mealTitle = day?.[mealKey];
+
+      if (typeof mealTitle === "string" && mealTitle.trim()) {
+        titles.push(mealTitle.trim());
+      } else if (
+        mealTitle &&
+        typeof mealTitle === "object" &&
+        typeof mealTitle.name === "string" &&
+        mealTitle.name.trim()
+      ) {
+        titles.push(mealTitle.name.trim());
+      }
+    }
+  }
+
+  return titles;
+}
+
+function uniqueMealTitles(titles: string[], max = 50) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const title of titles) {
+    const cleaned = title.replace(/\s+/g, " ").trim();
+    if (!cleaned) continue;
+
+    const key = normalizeText(cleaned);
+    if (seen.has(key)) continue;
+
+    seen.add(key);
+    result.push(cleaned);
+
+    if (result.length >= max) break;
+  }
+
+  return result;
+}
+
+async function getRecentMealNamesForUser(
+  supabase: SupabaseAdminClient,
+  userId: string,
+  currentWeekStart: string,
+  limitWeeks = 2
+) {
+  const { data, error } = await supabase
+    .from("meal_plans")
+    .select("week_start, created_at, plan, plan_generated")
+    .eq("user_id", userId)
+    .lt("week_start", currentWeekStart)
+    .order("week_start", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(limitWeeks);
+
+  if (error || !data) {
+    console.warn("Recent meal history read failed", error?.message);
+    return [];
+  }
+
+  const mealTitles: string[] = [];
+
+  for (const row of data) {
+    const titlesFromPlan = collectMealTitlesFromPlan(row.plan);
+
+    if (titlesFromPlan.length > 0) {
+      mealTitles.push(...titlesFromPlan);
+      continue;
+    }
+
+    mealTitles.push(...collectMealTitlesFromPlan(row.plan_generated));
+  }
+
+  return uniqueMealTitles(mealTitles, 50);
+}
+
 export async function POST(req: Request) {
   try {
     const apiKey = process.env.OPENAI_API_KEY;
@@ -1503,6 +1603,25 @@ export async function POST(req: Request) {
 
     const variationHint = pickRandom(getPromptVariantsForStyle(style));
 
+    const recentMealNames = await getRecentMealNamesForUser(supabase, userId, weekStart, 2);
+
+    const recentMealsBlock =
+      recentMealNames.length > 0
+        ? `
+RECENTLY USED MEALS FROM PREVIOUS WEEKS — DO NOT REPEAT:
+${recentMealNames.map((name) => `- ${name}`).join("\n")}
+
+Rules for recent meals:
+- These meals come only from weeks before the currently generated week.
+- Do not use the same meal titles again.
+- Do not use very similar variants either.
+- Treat meals as similar if they use the same main protein, the same main side dish, or the same preparation style.
+- Example: "ovsená kaša s jablkom" is still too similar to "ovsená kaša s banánom".
+- Example: "kuracie s ryžou a zeleninou" is still too similar to "kuracie prsia s ryžou".
+- The first breakfast of the week must be different from the first breakfasts and common breakfast patterns from the previous weeks.
+`
+        : "";
+
     const batchCookingBlock =
       repeatDays > 1
         ? `
@@ -1585,6 +1704,15 @@ Style:
 
 Jemná variácia pre túto generáciu:
 - ${variationHint}
+
+${recentMealsBlock}
+
+VARIABILITY RULES:
+- Vyvážený jedálniček nesmie znamenať nudný alebo stále rovnaký jedálniček.
+- Striedaj sladké a slané raňajky, zdroje bielkovín, prílohy aj formu prípravy.
+- Rovnaký typ raňajok nepoužívaj viac ako 2-krát za týždeň.
+- Nezačínaj automaticky ovsenou kašou, jogurtom s ovocím ani vajíčkami, pokiaľ to používateľ výslovne nežiada.
+- Ak je vybraný štýl "vyvážené", dbaj mimoriadne na pestrosť a vyhýbaj sa stereotypu.
 
 Week:
 ${datesBlock}
@@ -1739,6 +1867,7 @@ Counts:
       body: JSON.stringify({
         model: "gpt-4.1-mini",
         input: prompt,
+        temperature: 0.8,
       }),
     });
 
