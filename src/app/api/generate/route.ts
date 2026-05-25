@@ -199,10 +199,6 @@ tuniak: "tuniak",
 tuniaka: "tuniak",
 treska: "treska",
 tresky: "treska",
-pstruh: "pstruh",
-pstruhy: "pstruh",
-pstruha: "pstruh",
-pstruhov: "pstruh",
 };
 type PriceCatalogItem = {
   match: string[];
